@@ -134,6 +134,7 @@ const CREATOR_NAME = "KshrugalJain";
 let app;
 let auth;
 let db;
+let firebaseInitError = null;
 try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
@@ -141,6 +142,7 @@ try {
   setLogLevel("silent"); 
 } catch (error) {
   console.error("Error initializing Firebase:", error);
+  firebaseInitError = error;
 }
 
 // --- Kitsu API Configuration ---
@@ -1011,7 +1013,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userId, setUserId] = useState(null);
   const [username, setUsername] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!firebaseInitError);
   const [page, setPage] = useState("home");
   const [viewTargetUser, setViewTargetUser] = useState(null);
   const [toasts, setToasts] = useState([]);
@@ -1171,9 +1173,28 @@ export default function App() {
     }
   };
 
-    if (loading || !db) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-[#050505] text-white overflow-hidden relative">
+  if (firebaseInitError) {
+      return (
+          <div className="min-h-screen bg-[#050505] flex items-center justify-center text-white font-sans text-center px-4 relative">
+              <StarField active={true} />
+              <div className="flex flex-col items-center max-w-lg z-10">
+                  <h1 className="text-4xl font-black mb-4 tracking-tight text-red-500">
+                      Configuration Error
+                  </h1>
+                  <p className="text-gray-400 mb-6">
+                      Firebase failed to initialize. Please ensure all environment variables are correctly set in your GitHub Secrets before deploying.
+                  </p>
+                  <pre className="text-xs bg-black/50 p-4 rounded-xl text-red-400 text-left overflow-auto w-full border border-red-500/30 whitespace-pre-wrap">
+                      {firebaseInitError.message}
+                  </pre>
+              </div>
+          </div>
+      );
+  }
+
+  if (loading || !db) {
+      return (
+          <div className="flex items-center justify-center min-h-screen bg-[#050505] text-white overflow-hidden relative">
                 <StarField active={true} />
                 <div className="flex flex-col items-center z-10">
                     <div className="relative w-24 h-24 mb-8">
