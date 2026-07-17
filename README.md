@@ -2,7 +2,7 @@
 
 **AniLog** is a cinematic anime discovery and tracking application designed for enthusiasts who want a beautiful, data-driven way to manage their watchlists. Built with a focus on aesthetics and performance, AniLog combines real-time data from Kitsu with AI-powered insights.
 
-![AniLog Preview](https://kitsu.io/images/default_cover-22e5f56b17aeced6dc7f69c8d422a1ab.jpg)
+https://anilog.app/
 
 ## ✨ Features
 
