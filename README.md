@@ -32,6 +32,12 @@ This repository is configured with **GitHub Actions** for Continuous Deployment 
 - Every push to the `main` branch triggers an automated build and deploy.
 - Secrets are managed via GitHub Repository Secrets.
 
+### Preview Deployment
+- Pushes to the `preview` branch deploy to the separate `anilog-preview` Cloud Run service.
+- Preview builds run the full quality gate but never deploy Firestore rules.
+- The preview currently uses the production Firebase backend, so use a dedicated test account for mutations.
+- Merge `preview` into `main` only after the preview has been reviewed and approved.
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

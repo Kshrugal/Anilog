@@ -82,6 +82,7 @@ export const appId = import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.app
 
 export const APP_NAME = "AniLog";
 const CREATOR_NAME = "KshrugalJain";
+const IS_PREVIEW = import.meta.env.VITE_DEPLOY_ENV === 'preview';
 
 const PAGE_PATHS = {
   home: '/',
@@ -1331,6 +1332,12 @@ export default function App() {
         
         <StarField active={true} />
         <MouseTrail themeId={themeId} active={showTrail} />
+
+        {IS_PREVIEW && (
+          <div className="sticky top-0 z-[70] border-b border-amber-400/30 bg-amber-400/15 px-4 py-2 text-center text-xs font-bold text-amber-100 backdrop-blur-xl">
+            AniLog Preview — test build using the current AniLog backend. Use a test account for write-heavy testing.
+          </div>
+        )}
         
         {/* Dynamic Nebula - Physics Based */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden">
