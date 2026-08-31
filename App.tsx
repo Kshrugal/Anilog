@@ -1002,6 +1002,15 @@ function PageLoadingFallback() {
   return <div className="py-24 text-center text-gray-500">Loading page…</div>;
 }
 
+function PreviewBanner() {
+  if (!IS_PREVIEW) return null;
+  return (
+    <div className="sticky top-0 z-[70] border-b border-amber-400/30 bg-amber-400/15 px-4 py-2 text-center text-xs font-bold text-amber-100 backdrop-blur-xl">
+      AniLog Preview — test build using the current AniLog backend. Use a test account for write-heavy testing.
+    </div>
+  );
+}
+
 // --- Main App Component ---
 export default function App() {
   const location = useLocation();
@@ -1287,9 +1296,12 @@ export default function App() {
 
   if (!currentUser || (currentUser.isAnonymous && !guestMode)) {
     return (
-      <Suspense fallback={<PageLoadingFallback />}>
-        <AuthPage db={db} setPage={setPage} showToast={showToast} onContinueGuest={enterGuestMode} />
-      </Suspense>
+      <>
+        <PreviewBanner />
+        <Suspense fallback={<PageLoadingFallback />}>
+          <AuthPage db={db} setPage={setPage} showToast={showToast} onContinueGuest={enterGuestMode} />
+        </Suspense>
+      </>
     );
   }
 
@@ -1333,11 +1345,7 @@ export default function App() {
         <StarField active={true} />
         <MouseTrail themeId={themeId} active={showTrail} />
 
-        {IS_PREVIEW && (
-          <div className="sticky top-0 z-[70] border-b border-amber-400/30 bg-amber-400/15 px-4 py-2 text-center text-xs font-bold text-amber-100 backdrop-blur-xl">
-            AniLog Preview — test build using the current AniLog backend. Use a test account for write-heavy testing.
-          </div>
-        )}
+        <PreviewBanner />
         
         {/* Dynamic Nebula - Physics Based */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden">
