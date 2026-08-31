@@ -56,6 +56,7 @@ import {
   AnimatedCounter, DeciderModal, JournalView, exportUserData,
   fetchMediaDetails, getGreeting, logActivity, normalizeTitle,
 } from "../App";
+import { getAniListDiscovery, getAniListSeasonal, searchAniList } from "../services/anilist";
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -473,10 +474,9 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
 
     useEffect(() => {
         let isMounted = true;
-        fetch(`${KITSU_API_URL}/trending/anime?limit=10`)
-            .then(res => res.json())
-            .then(data => { if (isMounted) setTrending(data.data); })
-            .catch(err => console.error(err));
+        getAniListDiscovery(10)
+            .then(data => { if (isMounted) setTrending(data.trending); })
+            .catch(err => console.error('AniList trending error:', err));
         return () => { isMounted = false; };
     }, []);
 
@@ -484,16 +484,17 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
         let isMounted = true;
         const delayDebounceFn = setTimeout(() => {
             if (isSeasonal) {
-                // Fetch Current Season (approximation)
                 setLoading(true);
-                const year = new Date().getFullYear();
-                fetch(`${KITSU_API_URL}/anime?filter[seasonYear]=${year}&sort=-userCount&page[limit]=20`)
-                    .then(res => res.json())
+                getAniListSeasonal(20)
                     .then(data => {
                         if (isMounted) {
-                            setResults(data.data);
+                            setResults(data);
                             setLoading(false);
                         }
+                    })
+                    .catch(err => {
+                        console.error('AniList seasonal error:', err);
+                        if (isMounted) { setResults([]); setLoading(false); }
                     });
                 return;
             }
@@ -562,11 +563,10 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
                     }
                 });
             } else {
-                fetch(`${KITSU_API_URL}/anime?filter[text]=${encodeURIComponent(query)}&page[limit]=20`)
-                    .then(res => res.json())
+                searchAniList(query, 20)
                     .then(data => {
                         if (isMounted) {
-                            setResults(data.data);
+                            setResults(data);
                             setLoading(false);
                         }
                     })
@@ -640,7 +640,7 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
             {isSeasonal && (
                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl mb-4">
                     <h3 className="text-lg font-bold text-white mb-1">Current Season Top Charts</h3>
-                    <p className="text-xs text-gray-400">Most popular anime airing this year.</p>
+                        <p className="text-xs text-gray-400">Popular anime from the current AniList season.</p>
                 </div>
             )}
 
@@ -871,7 +871,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [notes, setNotes] = useState("");
     const [loading, setLoading] = useState(false);
     const [existingData, setExistingData] = useState(null);
-    const [fetchedGenres, setFetchedGenres] = useState([]); 
+    const [fetchedGenres, setFetchedGenres] = useState(anime.genres || anime.attributes?.genres || []);
     const [cast, setCast] = useState([]);
     
     // Voice Actor Feature
@@ -893,7 +893,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const synopsis = anime.synopsis || anime.attributes?.synopsis;
     const kitsuId = anime.kitsuId || anime.id;
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel' || String(kitsuId).startsWith('v');
-    const isKitsu = (!!anime.attributes || !!anime.canonicalTitle) && !isVn;
+    const isAniList = anime.provider === 'anilist' || anime.attributes?.provider === 'anilist' || String(kitsuId).startsWith('anilist:');
+    const isKitsu = (!!anime.attributes || !!anime.canonicalTitle) && !isVn && !isAniList;
 
     const isOwner = userId === ownerId;
 
@@ -1223,18 +1224,13 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const [trendingRes, airingRes, upcomingRes, ratedRes] = await Promise.all([
-                    fetch(`${KITSU_API_URL}/trending/anime?limit=10`).then(r => r.json()),
-                    fetch(`${KITSU_API_URL}/anime?filter[status]=current&sort=-userCount&page[limit]=10`).then(r => r.json()),
-                    fetch(`${KITSU_API_URL}/anime?filter[status]=upcoming&sort=-userCount&page[limit]=10`).then(r => r.json()),
-                    fetch(`${KITSU_API_URL}/anime?sort=-averageRating&page[limit]=10`).then(r => r.json())
-                ]);
+                const discovery = await getAniListDiscovery(10);
 
                 if (isMounted) {
-                    setTrending(trendingRes.data || []);
-                    setTopAiring(airingRes.data || []);
-                    setUpcoming(upcomingRes.data || []);
-                    setTopRated(ratedRes.data || []);
+                    setTrending(discovery.trending);
+                    setTopAiring(discovery.airing);
+                    setUpcoming(discovery.upcoming);
+                    setTopRated(discovery.rated);
                     setLoading(false);
                 }
             } catch (err) {
@@ -1384,7 +1380,7 @@ export function StatsPage({ db, userId, username }) {
   // AUTO-SYNC GENRES
   useEffect(() => {
       if(myList.length > 0) {
-          const missingGenres = myList.filter(a => !a.genres && a.kitsuId).slice(0, 3);
+          const missingGenres = myList.filter(a => !a.genres && a.kitsuId && !String(a.kitsuId).startsWith('anilist:')).slice(0, 3);
           missingGenres.forEach(anime => {
                fetch(`${KITSU_API_URL}/anime/${anime.kitsuId}/genres`)
                   .then(r => r.json())
@@ -2270,11 +2266,10 @@ function HallOfFameSelector({ onClose, onSelect, myList }) {
                 }));
 
             try {
-                const r = await fetch(`${KITSU_API_URL}/anime?filter[text]=${query}&page[limit]=15`);
-                const d = await r.json();
+                const apiResults = await searchAniList(query, 15);
                 
                 const combined = [...localMatches];
-                d.data.forEach(apiItem => {
+                apiResults.forEach(apiItem => {
                     if (!combined.some(c => String(c.id) === String(apiItem.id))) {
                         combined.push(apiItem);
                     }
@@ -2407,11 +2402,8 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         let isMounted = true;
         const fetchDetails = async () => {
             try {
-                // If local data exists, prefer it partially? Nah just fetch.
-                const res = await fetch(`${KITSU_API_URL}/anime/${selectedAnimeKitsuId}`);
-                if (!res.ok) throw new Error("Failed");
-                const data = await res.json();
-                if (isMounted) setSelectedAnimeData(data.data);
+                const data = await fetchMediaDetails(selectedAnimeKitsuId);
+                if (isMounted) setSelectedAnimeData(data);
             } catch (e) {
                 console.error(e);
             }

@@ -1,6 +1,6 @@
 # 🎬 AniLog
 
-**AniLog** is a cinematic anime discovery and tracking application designed for enthusiasts who want a beautiful, data-driven way to manage their watchlists. Built with a focus on aesthetics and performance, AniLog combines real-time data from Kitsu with AI-powered insights.
+**AniLog** is a cinematic anime discovery and tracking application designed for enthusiasts who want a beautiful, data-driven way to manage their watchlists. It combines AniList-powered search and discovery with Firebase-backed personal tracking and social features.
 
 https://anilog.app/
 
@@ -8,8 +8,8 @@ https://anilog.app/
 
 - **Cinematic Discovery:** Explore trending, popular, and top-rated anime with a high-fidelity, dark-mode interface.
 - **Personalized Tracking:** Manage your "Watching", "Plan to Watch", and "Completed" lists with ease.
-- **Genre Galaxy:** Visualize your anime taste with an interactive D3.js-powered force-directed graph.
-- **AI Insights:** Leverage Gemini AI to get deep dives into anime themes, "DNA" analysis, and smart recommendations.
+- **Guest Exploration:** Browse discovery, search, activity, and public profiles without creating an account.
+- **Visual Novels:** Search VNDB and track visual novels alongside anime.
 - **Social Feed:** Stay updated with a real-time activity feed showing what the community is watching.
 - **Detailed Stats:** Track your total watch time, episode counts, and genre preferences.
 
@@ -18,8 +18,8 @@ https://anilog.app/
 - **Frontend:** React 18, TypeScript, Vite
 - **Styling:** Tailwind CSS, Framer Motion (Animations)
 - **Database & Auth:** Firebase (Firestore & Authentication)
-- **AI:** Google Gemini API (@google/genai)
-- **Data Visualization:** D3.js
+- **Anime Data:** AniList GraphQL API, with backward-compatible Kitsu lookups for existing entries
+- **Visual Novel Data:** VNDB Kana API
 - **Icons:** Lucide React
 
 ## 🔒 Security & Deployment

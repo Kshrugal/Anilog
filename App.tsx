@@ -11,6 +11,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
+import { getAniListMedia } from "./services/anilist";
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
@@ -118,7 +119,9 @@ export const AVG_EPISODE_MINUTES = 24;
 // --- Unified Media Details Loader (Supports Kitsu and VNDB) ---
 export const fetchMediaDetails = async (id) => {
   const strId = String(id);
-  if (strId.startsWith('v')) {
+  if (strId.startsWith('anilist:')) {
+    return getAniListMedia(strId);
+  } else if (strId.startsWith('v')) {
     const response = await fetch('https://api.vndb.org/kana/vn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
