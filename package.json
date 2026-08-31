@@ -6,26 +6,33 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "vite build",
+    "lint": "eslint . --max-warnings 53",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "check": "npm run lint && npm run typecheck && npm run build && npm run test:smoke",
     "start": "serve -s dist -l 3000",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.45.0",
-    "@types/d3": "^7.4.3",
-    "clsx": "^2.1.1",
-    "d3": "^7.9.0",
-    "firebase": "^10.8.0",
-    "framer-motion": "^11.0.0",
+    "firebase": "^12.18.0",
+    "framer-motion": "^13.1.1",
     "html-to-image": "^1.11.13",
-    "lucide-react": "^0.577.0",
+    "lucide-react": "^1.38.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "serve": "^14.2.1",
-    "tailwind-merge": "^3.5.0"
+    "serve": "^14.2.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.1.4"
+    "@eslint/js": "^10.0.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^10.9.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.5",
+    "globals": "^17.11.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.69.0",
+    "vite": "^8.2.2"
   }
 }

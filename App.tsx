@@ -552,7 +552,10 @@ function FooterInfo() {
 }
 
 // --- Error Boundary Component ---
-class ErrorBoundary extends React.Component {
+type ErrorBoundaryProps = React.PropsWithChildren;
+type ErrorBoundaryState = { hasError: boolean; error: Error | null };
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -894,17 +897,14 @@ function DeciderModal({ list, onClose, onSelect }) {
     useEffect(() => {
         if(list.length === 0) return;
         
-        let interval;
-        let timeout;
-
         // Shuffle Animation
-        interval = setInterval(() => {
+        const interval = setInterval(() => {
             const random = list[Math.floor(Math.random() * list.length)];
             setCurrent(random);
         }, 100);
 
         // Stop after 2.5 seconds
-        timeout = setTimeout(() => {
+        const timeout = setTimeout(() => {
             clearInterval(interval);
             const final = list[Math.floor(Math.random() * list.length)];
             setWinner(final);
@@ -1993,7 +1993,6 @@ function SocialPage({ db, userId, username, showToast, setPage, setViewTargetUse
     const [users, setUsers] = useState([]);
     const [friends, setFriends] = useState([]);
     const [searchQuery, setSearchQuery] = useState("");
-    const [selectedFriend, setSelectedFriend] = useState(null);
     const [view, setView] = useState("feed");
     const { theme } = useContext(ThemeContext);
 
@@ -2144,16 +2143,6 @@ function SocialPage({ db, userId, username, showToast, setPage, setViewTargetUse
                 </div>
             )}
 
-            {selectedFriend && (
-                <FriendListModal 
-                    friend={selectedFriend} 
-                    onClose={() => setSelectedFriend(null)} 
-                    db={db} 
-                    userId={userId} 
-                    username={username} 
-                    showToast={showToast}
-                />
-            )}
         </div>
     )
 }
@@ -3736,7 +3725,7 @@ function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showT
         let completed = 0;
         let sumScores = 0;
         let ratedCount = 0;
-        let unique = new Set();
+        const unique = new Set();
         list.forEach(a => {
             const eps = a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0);
             totalEps += eps;
@@ -3752,7 +3741,7 @@ function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showT
         });
         
         return { 
-            hours: (totalHours/60).toFixed(0), 
+            hours: Math.round(totalHours / 60),
             eps: totalEps, 
             completed: unique.size,
             meanScore: ratedCount > 0 ? (sumScores / ratedCount).toFixed(1) : 0

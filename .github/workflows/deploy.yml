@@ -46,7 +46,7 @@ jobs:
       - name: Verify production build
         run: |
           npm ci
-          npm run build
+          npm run check
 
       - name: Build and Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
