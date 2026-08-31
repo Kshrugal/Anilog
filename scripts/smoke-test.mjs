@@ -9,13 +9,15 @@ const server = await preview({
 });
 
 try {
-  const response = await fetch(`http://${host}:${port}/`);
-  const html = await response.text();
+  for (const path of ['/', '/search', '/discover', '/social', '/stats', '/profile', '/users/smoke-test-user']) {
+    const response = await fetch(`http://${host}:${port}${path}`);
+    const html = await response.text();
 
-  assert.equal(response.status, 200, 'production preview should return HTTP 200');
-  assert.match(html, /<title>AniLog - Track & Discover Anime<\/title>/);
-  assert.match(html, /<div id="root"><\/div>/);
-  assert.match(html, /<script type="module" crossorigin src="\/assets\/index-[^"]+\.js"><\/script>/);
+    assert.equal(response.status, 200, `${path} should return HTTP 200`);
+    assert.match(html, /<title>AniLog - Track & Discover Anime<\/title>/);
+    assert.match(html, /<div id="root"><\/div>/);
+    assert.match(html, /<script type="module" crossorigin src="\/assets\/index-[^"]+\.js"><\/script>/);
+  }
 
   console.log('Production smoke test passed.');
 } finally {

@@ -8,6 +8,7 @@ import React, {
   createContext,
 } from "react";
 import { createPortal } from "react-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
@@ -130,6 +131,20 @@ const appId = import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.appId;
 
 const APP_NAME = "AniLog";
 const CREATOR_NAME = "KshrugalJain";
+
+const PAGE_PATHS = {
+  home: '/',
+  search: '/search',
+  discovery: '/discover',
+  social: '/social',
+  stats: '/stats',
+  profile: '/profile',
+};
+
+const getPageFromPath = (pathname) => {
+  if (pathname.startsWith('/users/')) return 'user_profile';
+  return Object.entries(PAGE_PATHS).find(([, path]) => path === pathname)?.[0] || 'home';
+};
 
 // --- Initialize Firebase ---
 let app;
@@ -1011,14 +1026,26 @@ function JournalView({ list }) {
 
 // --- Main App Component ---
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(null);
   const [userId, setUserId] = useState(null);
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(!firebaseInitError);
-  const [page, setPage] = useState("home");
   const [viewTargetUser, setViewTargetUser] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
+  const page = getPageFromPath(location.pathname);
+
+  const setPage = useCallback((nextPage) => {
+    navigate(PAGE_PATHS[nextPage] || '/');
+  }, [navigate]);
+
+  const openUserProfile = useCallback((targetUser) => {
+    if (!targetUser?.uid) return;
+    setViewTargetUser(targetUser);
+    navigate(`/users/${encodeURIComponent(targetUser.uid)}`);
+  }, [navigate]);
   
   // Persistent State
   const [themeId, setThemeId] = useState(() => localStorage.getItem('anilog_theme') || 'neon');
@@ -1048,6 +1075,32 @@ export default function App() {
       setToasts(prev => [...prev, { id, message, type }]);
       setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
   }, []);
+
+  // Resolve shared/refreshed profile URLs without relying on in-memory state.
+  useEffect(() => {
+    if (page !== 'user_profile' || !db) return;
+    const targetUid = decodeURIComponent(location.pathname.slice('/users/'.length));
+    if (!targetUid || viewTargetUser?.uid === targetUid) return;
+
+    let active = true;
+    getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUid}`))
+      .then((snapshot) => {
+        if (!active) return;
+        if (snapshot.exists()) {
+          setViewTargetUser({ ...snapshot.data(), uid: targetUid });
+        } else {
+          showToast('User profile not found.', 'error');
+          navigate('/social', { replace: true });
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        showToast('Could not load that profile.', 'error');
+        navigate('/social', { replace: true });
+      });
+
+    return () => { active = false; };
+  }, [location.pathname, navigate, page, showToast, viewTargetUser?.uid]);
 
   const triggerConfetti = useCallback(() => {
       const colors = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#ec4899'];
@@ -1236,9 +1289,11 @@ export default function App() {
       case "search": return <SearchPage db={db} userId={userId} username={username} onConfetti={triggerConfetti} showToast={showToast} />;
       case "discovery": return <DiscoveryPage db={db} userId={userId} username={username} />;
       case "stats": return <StatsPage db={db} userId={userId} username={username} />;
-      case "social": return <SocialPage db={db} userId={userId} username={username} showToast={showToast} setPage={setPage} setViewTargetUser={setViewTargetUser} />;
-      case "profile": return <ProfilePage db={db} userId={userId} currentUser={currentUser} username={username} setUsername={setUsername} showToast={showToast} setPage={setPage} setViewTargetUser={setViewTargetUser} />;
-      case "user_profile": return <UserProfilePage db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} setViewTargetUser={setViewTargetUser} />;
+      case "social": return <SocialPage db={db} userId={userId} username={username} showToast={showToast} openUserProfile={openUserProfile} />;
+      case "profile": return <ProfilePage db={db} userId={userId} currentUser={currentUser} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
+      case "user_profile": return viewTargetUser
+        ? <UserProfilePage db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} />
+        : <div className="py-24 text-center text-gray-500">Loading profile…</div>;
       default: return <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
     }
   };
@@ -1988,7 +2043,7 @@ function SearchPage({ db, userId, username, onConfetti, showToast }) {
     );
 }
 
-function SocialPage({ db, userId, username, showToast, setPage, setViewTargetUser }) {
+function SocialPage({ db, userId, username, showToast, openUserProfile }) {
     const [feed, setFeed] = useState([]);
     const [users, setUsers] = useState([]);
     const [friends, setFriends] = useState([]);
@@ -2060,7 +2115,7 @@ function SocialPage({ db, userId, username, showToast, setPage, setViewTargetUse
                             </div>
                             <div className="flex-grow">
                                 <p className="text-gray-300 text-sm leading-relaxed">
-                                    <span className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer" onClick={() => { setViewTargetUser({uid: item.userId, username: item.username}); setPage("user_profile"); }}>{item.username}</span> 
+                                    <span className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer" onClick={() => openUserProfile({uid: item.userId, username: item.username})}>{item.username}</span>{' '}
                                     <span className="opacity-60 mx-1">{item.context}</span>
                                     <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
                                 </p>
@@ -2088,7 +2143,7 @@ function SocialPage({ db, userId, username, showToast, setPage, setViewTargetUse
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                                 key={friend.uid} 
-                                onClick={() => { setViewTargetUser(friend); setPage("user_profile"); }} 
+                                onClick={() => openUserProfile(friend)}
                                 className="p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl cursor-pointer flex items-center gap-4 transition-colors group"
                             >
                                 <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center font-bold text-white text-xl border border-white/10 group-hover:border-white/30">
@@ -2126,7 +2181,7 @@ function SocialPage({ db, userId, username, showToast, setPage, setViewTargetUse
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                                 key={user.uid} 
-                                onClick={() => { setViewTargetUser(user); setPage("user_profile"); }} 
+                                onClick={() => openUserProfile(user)}
                                 className="p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl cursor-pointer flex items-center gap-4 transition-colors group"
                             >
                                 <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center font-bold text-white text-xl border border-white/10 group-hover:border-white/30">
@@ -3140,7 +3195,7 @@ function GenreRadarChart({ counts, theme, onSelectGenre }) {
     );
 }
 
-function ProfilePage({ db, userId, currentUser, username, setUsername, showToast, setPage, setViewTargetUser }) {
+function ProfilePage({ db, userId, currentUser, username, setUsername, showToast, openUserProfile }) {
   const { theme, setThemeId, showTrail, setShowTrail } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
   const [hallOfFame, setHallOfFame] = useState([]);
@@ -3275,7 +3330,7 @@ function ProfilePage({ db, userId, currentUser, username, setUsername, showToast
                <div className="flex items-center gap-3">
                    <h2 className="text-4xl font-black text-white tracking-tighter">{username}</h2>
                    <button 
-                       onClick={() => { setViewTargetUser({uid: userId, username}); setPage("user_profile"); }}
+                       onClick={() => openUserProfile({uid: userId, username})}
                        className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold text-white transition-colors flex items-center gap-1"
                    >
                        <UserIcon size={14} /> Public View
@@ -3618,7 +3673,7 @@ function HallOfFameSelector({ onClose, onSelect, myList }) {
     );
 }
 
-function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, setViewTargetUser }) {
+function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage }) {
     const [list, setList] = useState([]);
     const [myList, setMyList] = useState([]);
     const [loading, setLoading] = useState(true);
