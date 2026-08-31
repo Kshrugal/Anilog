@@ -112,3 +112,71 @@ export async function getAniListDiscovery(perPage = 10) {
     rated: (data.rated?.media || []).map(mapAniListMedia),
   };
 }
+
+function formatFuzzyDate(date: { year?: number; month?: number; day?: number } | null) {
+  if (!date?.year) return null;
+  return [date.year, date.month || 1, date.day || 1]
+    .map((part, index) => index === 0 ? String(part) : String(part).padStart(2, '0'))
+    .join('-');
+}
+
+export async function getAniListUserAnimeList(userName: string) {
+  const data = await queryAniList(`query ($userName: String!) {
+    MediaListCollection(userName: $userName, type: ANIME) {
+      user { id name siteUrl }
+      lists {
+        name
+        status
+        entries {
+          status
+          score(format: POINT_10_DECIMAL)
+          progress
+          repeat
+          notes
+          private
+          updatedAt
+          startedAt { year month day }
+          completedAt { year month day }
+          media { ${MEDIA_FIELDS} }
+        }
+      }
+    }
+  }`, { userName });
+
+  const collection = data.MediaListCollection;
+  const entries = (collection?.lists || []).flatMap((list: any) => list.entries || []);
+  return {
+    user: collection?.user,
+    entries: entries.map((entry: any) => {
+      const mapped = mapAniListMedia(entry.media);
+      const statusMap: Record<string, string> = {
+        CURRENT: 'watching',
+        REPEATING: 'watching',
+        COMPLETED: 'completed',
+        PLANNING: 'planned',
+        PAUSED: 'paused',
+        DROPPED: 'dropped',
+      };
+      return {
+        kitsuId: mapped.id,
+        title: mapped.attributes.canonicalTitle,
+        imageUrl: mapped.attributes.posterImage.original,
+        totalEpisodes: mapped.attributes.episodeCount || 0,
+        status: statusMap[entry.status] || 'planned',
+        watchedEpisodes: entry.progress || 0,
+        score: entry.score || 0,
+        notes: entry.notes || '',
+        genres: mapped.attributes.genres || [],
+        mediaType: 'anime',
+        showType: mapped.attributes.showType || '',
+        provider: 'anilist',
+        anilistId: entry.media.id,
+        anilistUserName: collection.user.name,
+        repeatCount: entry.repeat || 0,
+        startedAt: formatFuzzyDate(entry.startedAt),
+        completedAt: formatFuzzyDate(entry.completedAt),
+        updatedAt: entry.updatedAt ? entry.updatedAt * 1000 : Date.now(),
+      };
+    }),
+  };
+}

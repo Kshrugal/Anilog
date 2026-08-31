@@ -56,7 +56,7 @@ import {
   AnimatedCounter, DeciderModal, JournalView, exportUserData,
   fetchMediaDetails, getGreeting, logActivity, normalizeTitle,
 } from "../App";
-import { getAniListDiscovery, getAniListSeasonal, searchAniList } from "../services/anilist";
+import { getAniListDiscovery, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -146,7 +146,7 @@ export function HomePage({ db, userId, username, showToast }) {
   // Decider Modal
   const [showDecider, setShowDecider] = useState(false);
 
-  const statusTabs = ["watching", "completed", "planned", "dropped"];
+  const statusTabs = ["watching", "completed", "planned", "paused", "dropped"];
   const greeting = useMemo(() => getGreeting(), []);
 
   useEffect(() => {
@@ -1017,6 +1017,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         watching: 'bg-green-500',
         completed: 'bg-blue-500',
         planned: 'bg-yellow-500',
+        paused: 'bg-orange-500',
         dropped: 'bg-red-500'
     };
 
@@ -1089,7 +1090,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Status</label>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                        {['watching', 'completed', 'planned', 'dropped'].map(s => (
+                                        {['watching', 'completed', 'planned', 'paused', 'dropped'].map(s => (
                                             <button 
                                                 key={s} 
                                                 onClick={() => setStatus(s)}
@@ -1858,6 +1859,132 @@ function GenreRadarChart({ counts, theme, onSelectGenre }) {
     );
 }
 
+function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
+  const [anilistUsername, setAniListUsername] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [updateExisting, setUpdateExisting] = useState(false);
+  const [error, setError] = useState("");
+
+  const existingIds = useMemo(() => new Set(myList.map(item => String(item.kitsuId || item.id))), [myList]);
+  const importableEntries = useMemo(() => {
+    if (!preview) return [];
+    return preview.entries.filter(entry => updateExisting || !existingIds.has(String(entry.kitsuId)));
+  }, [existingIds, preview, updateExisting]);
+
+  const statusCounts = useMemo(() => {
+    if (!preview) return {};
+    return preview.entries.reduce((counts, entry) => {
+      counts[entry.status] = (counts[entry.status] || 0) + 1;
+      return counts;
+    }, {});
+  }, [preview]);
+
+  const loadPreview = async (event) => {
+    event.preventDefault();
+    const cleanName = anilistUsername.trim();
+    if (!cleanName) return;
+    setLoadingPreview(true);
+    setError("");
+    setPreview(null);
+    try {
+      const result = await getAniListUserAnimeList(cleanName);
+      if (!result.user) throw new Error("AniList user not found or their anime list is private.");
+      setPreview(result);
+    } catch (importError) {
+      console.error("AniList preview failed", importError);
+      setError(importError.message || "Could not load that AniList account. Make sure the username and list are public.");
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const importList = async () => {
+    if (!preview || importing || importableEntries.length === 0) return;
+    setImporting(true);
+    setError("");
+    try {
+      for (let offset = 0; offset < importableEntries.length; offset += 400) {
+        const batch = writeBatch(db);
+        importableEntries.slice(offset, offset + 400).forEach(entry => {
+          const entryRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(entry.kitsuId));
+          batch.set(entryRef, entry, { merge: true });
+        });
+        await batch.commit();
+      }
+      onImported(importableEntries);
+      showToast(`Imported ${importableEntries.length} AniList ${importableEntries.length === 1 ? 'entry' : 'entries'}!`, 'success');
+      setPreview(null);
+      setAniListUsername("");
+    } catch (importError) {
+      console.error("AniList import failed", importError);
+      setError("The import stopped before completion. Entries already written are safe; you can run it again to continue.");
+      showToast("AniList import could not finish.", 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="md:col-span-2 p-8 bg-gradient-to-br from-blue-500/10 via-purple-500/5 to-transparent backdrop-blur-xl border border-blue-400/20 rounded-[2rem] shadow-2xl">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-400">Move in without starting over</p>
+          <h3 className="mt-2 text-2xl font-black text-white">Import from AniList</h3>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-400">Bring over progress, status, scores, notes, dates, rewatches, formats, and genres from any public AniList anime list.</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-gray-400">
+          Existing AniLog entries are preserved by default.
+        </div>
+      </div>
+
+      <form onSubmit={loadPreview} className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <input
+          type="text"
+          value={anilistUsername}
+          onChange={event => setAniListUsername(event.target.value)}
+          placeholder="AniList username"
+          className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/40 px-5 py-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+        />
+        <button type="submit" disabled={loadingPreview || !anilistUsername.trim()} className="rounded-2xl bg-blue-600 px-6 py-4 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
+          {loadingPreview ? "Checking…" : "Review Import"}
+        </button>
+      </form>
+
+      {error && <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">{error}</p>}
+
+      {preview && (
+        <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-black text-white">{preview.user.name} · {preview.entries.length} anime</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {Object.entries(statusCounts).map(([status, count]) => (
+                  <span key={status} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold uppercase text-gray-300">{status}: {String(count)}</span>
+                ))}
+              </div>
+            </div>
+            <a href={preview.user.siteUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-bold text-blue-400 hover:text-blue-300">View on AniList ↗</a>
+          </div>
+
+          <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-white/5 p-4">
+            <label className="flex cursor-pointer items-center gap-3 text-sm text-gray-300">
+              <input type="checkbox" checked={updateExisting} onChange={event => setUpdateExisting(event.target.checked)} className="h-4 w-4 accent-blue-500" />
+              Update matching AniLog entries with AniList values
+            </label>
+            <span className="whitespace-nowrap text-xs text-gray-500">{preview.entries.length - importableEntries.length} skipped</span>
+          </div>
+
+          <button onClick={importList} disabled={importing || importableEntries.length === 0} className="mt-4 w-full rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4 text-sm font-black text-white shadow-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
+            {importing ? "Importing…" : `Import ${importableEntries.length} ${importableEntries.length === 1 ? 'Entry' : 'Entries'}`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProfilePage({ db, userId, currentUser, username, setUsername, showToast, openUserProfile }) {
   const { theme, setThemeId, showTrail, setShowTrail } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
@@ -2090,6 +2217,16 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
 
       {activeTab === 'settings' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <AniListImportPanel
+              db={db}
+              userId={userId}
+              myList={myList}
+              onImported={(entries) => setMyList(current => {
+                const importedIds = new Set(entries.map(entry => String(entry.kitsuId)));
+                return [...current.filter(item => !importedIds.has(String(item.kitsuId || item.id))), ...entries];
+              })}
+              showToast={showToast}
+            />
             <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl space-y-6">
                 <div>
                     <h3 className="text-xl font-black text-white mb-4">Themes</h3>
