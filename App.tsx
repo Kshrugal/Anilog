@@ -37,6 +37,7 @@ import {
   addDoc,
   arrayUnion,
   arrayRemove, 
+  deleteField,
   deleteDoc
 } from "firebase/firestore";
 import { setLogLevel } from "firebase/firestore";
@@ -1124,12 +1125,17 @@ export default function App() {
 
               if (userDocSnap.exists()) {
                 const userData = userDocSnap.data();
+                // Email belongs in Firebase Authentication, not in a publicly
+                // readable profile document. Clean up legacy profiles when
+                // their owner next signs in.
+                if (userData.email) {
+                  await updateDoc(userDocRef, { email: deleteField() });
+                }
                 setUsername(userData.username || (user.email ? user.email.split("@")[0] : "Guest"));
               } else if (!user.isAnonymous) {
                 const newUsername = user.email.split("@")[0];
                 await setDoc(userDocRef, {
                   uid: user.uid,
-                  email: user.email,
                   username: newUsername,
                   createdAt: serverTimestamp(),
                   friends: [],
@@ -1371,7 +1377,7 @@ function AuthPage({ db, setPage, showToast }) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
         const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${user.uid}`);
-        await setDoc(userDocRef, { uid: user.uid, email: user.email, username: username.trim(), createdAt: serverTimestamp(), friends: [] });
+        await setDoc(userDocRef, { uid: user.uid, username: username.trim(), createdAt: serverTimestamp(), friends: [] });
         setPage("home");
         showToast("Account created!", "success");
       } catch (err) { setError(err.message); showToast(err.message, "error"); }
