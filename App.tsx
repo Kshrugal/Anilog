@@ -997,6 +997,7 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(!firebaseInitError);
   const [viewTargetUser, setViewTargetUser] = useState(null);
+  const [guestMode, setGuestMode] = useState(() => sessionStorage.getItem('anilog_guest') === 'true');
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const page = getPageFromPath(location.pathname);
@@ -1009,6 +1010,18 @@ export default function App() {
     if (!targetUser?.uid) return;
     setViewTargetUser(targetUser);
     navigate(`/users/${encodeURIComponent(targetUser.uid)}`);
+  }, [navigate]);
+
+  const enterGuestMode = useCallback(() => {
+    sessionStorage.setItem('anilog_guest', 'true');
+    setGuestMode(true);
+    navigate('/discover');
+  }, [navigate]);
+
+  const leaveGuestMode = useCallback(() => {
+    sessionStorage.removeItem('anilog_guest');
+    setGuestMode(false);
+    navigate('/');
   }, [navigate]);
   
   // Persistent State
@@ -1133,6 +1146,10 @@ export default function App() {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
           setLoading(true);
           if (user) {
+            if (!user.isAnonymous) {
+              sessionStorage.removeItem('anilog_guest');
+              setGuestMode(false);
+            }
             setCurrentUser(user);
             setUserId(user.uid);
 
@@ -1234,10 +1251,10 @@ export default function App() {
         );
     }
 
-  if (!currentUser || currentUser.isAnonymous) {
+  if (!currentUser || (currentUser.isAnonymous && !guestMode)) {
     return (
       <Suspense fallback={<PageLoadingFallback />}>
-        <AuthPage db={db} setPage={setPage} showToast={showToast} />
+        <AuthPage db={db} setPage={setPage} showToast={showToast} onContinueGuest={enterGuestMode} />
       </Suspense>
     );
   }
@@ -1253,14 +1270,20 @@ export default function App() {
   const renderPage = () => {
     console.log("Rendering page:", page);
     switch (page) {
-      case "home": return <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
-      case "search": return <SearchPage db={db} userId={userId} username={username} onConfetti={triggerConfetti} showToast={showToast} />;
-      case "discovery": return <DiscoveryPage db={db} userId={userId} username={username} />;
-      case "stats": return <StatsPage db={db} userId={userId} username={username} />;
-      case "social": return <SocialPage db={db} userId={userId} username={username} showToast={showToast} openUserProfile={openUserProfile} />;
-      case "profile": return <ProfilePage db={db} userId={userId} currentUser={currentUser} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
+      case "home": return guestMode
+        ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
+        : <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
+      case "search": return <SearchPage db={db} userId={userId} username={username} onConfetti={triggerConfetti} showToast={showToast} readOnly={guestMode} />;
+      case "discovery": return <DiscoveryPage db={db} userId={userId} username={username} readOnly={guestMode} />;
+      case "stats": return guestMode
+        ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
+        : <StatsPage db={db} userId={userId} username={username} />;
+      case "social": return <SocialPage db={db} userId={userId} username={username} showToast={showToast} openUserProfile={openUserProfile} readOnly={guestMode} />;
+      case "profile": return guestMode
+        ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
+        : <ProfilePage db={db} userId={userId} currentUser={currentUser} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
       case "user_profile": return viewTargetUser
-        ? <UserProfilePage db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} />
+        ? <UserProfilePage db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} readOnly={guestMode} />
         : <div className="py-24 text-center text-gray-500">Loading profile…</div>;
       default: return <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
     }
@@ -1302,22 +1325,28 @@ export default function App() {
         
         <header className="sticky top-0 z-30 bg-[#050505]/60 backdrop-blur-xl border-b border-white/5">
           <nav className="container mx-auto px-4 py-3 flex justify-between items-center">
-            <h1 className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage('home')}>
+            <h1 className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}>
               <ScrambleText text={APP_NAME} className="" />
             </h1>
             <div className="flex items-center space-x-2">
-              <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("stats")} title="Stats" className={`p-2 rounded-full transition-all duration-300 ${page === "stats" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
+              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("stats")} title="Stats" className={`p-2 rounded-full transition-all duration-300 ${page === "stats" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
                 <StatsIcon />
-              </motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
+              </motion.button>}
+              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
                 <ProfileIcon />
-              </motion.button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={handleLogout} title="Logout" className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
+              </motion.button>}
+              <motion.button whileTap={{ scale: 0.9 }} onClick={guestMode ? leaveGuestMode : handleLogout} title={guestMode ? "Sign in" : "Logout"} className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
                 <LogoutIcon />
               </motion.button>
             </div>
           </nav>
         </header>
+
+        {guestMode && (
+          <div className="z-20 border-b border-blue-500/20 bg-blue-500/10 px-4 py-2 text-center text-xs text-blue-200">
+            You’re exploring in read-only guest mode. <button onClick={leaveGuestMode} className="font-bold text-white underline underline-offset-2">Sign in or create an account</button> to track anime.
+          </div>
+        )}
 
         <main className="flex-grow container mx-auto p-4 pb-32 z-10">
           <AnimatePresence mode="popLayout">
@@ -1334,7 +1363,7 @@ export default function App() {
         {/* Floating Magnetic Navigation Dock */}
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
           <div className="relative flex items-center gap-2 px-3 py-2 bg-[#0a0a0a]/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl">
-            {['home', 'search', 'discovery', 'social', 'stats'].map((navItem) => {
+            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 

@@ -57,7 +57,7 @@ import {
   fetchMediaDetails, getGreeting, logActivity, normalizeTitle,
 } from "../App";
 
-export function AuthPage({ db, setPage, showToast }) {
+export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
@@ -118,6 +118,10 @@ export function AuthPage({ db, setPage, showToast }) {
         </form>
         <button onClick={() => { setIsLogin(!isLogin); setError(""); }} className="w-full text-sm text-center text-gray-400 hover:text-white transition-colors">
           {isLogin ? "New to AniLog? Create Account" : "Already have an account? Sign In"}
+        </button>
+        <div className="flex items-center gap-3 text-[10px] uppercase tracking-widest text-gray-600"><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
+        <button onClick={onContinueGuest} className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-gray-200 transition-colors hover:bg-white/10 hover:text-white">
+          Explore as Guest
         </button>
       </div>
     </div>
@@ -457,7 +461,7 @@ export function HomePage({ db, userId, username, showToast }) {
   );
 }
 
-export function SearchPage({ db, userId, username, onConfetti, showToast }) {
+export function SearchPage({ db, userId, username, onConfetti, showToast, readOnly = false }) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -692,13 +696,14 @@ export function SearchPage({ db, userId, username, onConfetti, showToast }) {
                     ownerId={userId} 
                     username={username}
                     onComplete={onConfetti}
+                    readOnly={readOnly}
                 />
             )}
         </div>
     );
 }
 
-export function SocialPage({ db, userId, username, showToast, openUserProfile }) {
+export function SocialPage({ db, userId, username, showToast, openUserProfile, readOnly = false }) {
     const [feed, setFeed] = useState([]);
     const [users, setUsers] = useState([]);
     const [friends, setFriends] = useState([]);
@@ -724,14 +729,14 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile })
     }, [db]);
 
     useEffect(() => {
-        if (!db || !userId) return;
+        if (!db || !userId || readOnly) return;
         const unsubscribe = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), (doc) => {
             if (doc.exists()) {
                 setFriends(doc.data().friends || []);
             }
         });
         return () => unsubscribe();
-    }, [db, userId]);
+    }, [db, userId, readOnly]);
 
     useEffect(() => {
         if (searchQuery.length < 3) {
@@ -748,13 +753,14 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile })
         <div className="space-y-6 max-w-4xl mx-auto">
             <div className="flex space-x-6 border-b border-white/10 pb-4">
                 <button onClick={() => setView('feed')} className={`text-2xl font-black transition-colors ${view === 'feed' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>Activity</button>
-                <button onClick={() => setView('friends')} className={`text-2xl font-black transition-colors ${view === 'friends' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>My Friends</button>
+                {!readOnly && <button onClick={() => setView('friends')} className={`text-2xl font-black transition-colors ${view === 'friends' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>My Friends</button>}
                 <button onClick={() => setView('search')} className={`text-2xl font-black transition-colors ${view === 'search' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>Find Users</button>
             </div>
 
             {view === 'feed' && (
                 <div className="space-y-4">
                     {feed.filter(item => {
+                        if (readOnly) return true;
                         const isMe = item.userId === userId;
                         const isFriend = friends.some(f => (f.uid === item.userId || f === item.userId));
                         return isMe || isFriend;
@@ -857,7 +863,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile })
     )
 }
 
-function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined }) {
+function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined, readOnly = false }) {
     const { theme } = useContext(ThemeContext);
     const [status, setStatus] = useState("watching");
     const [episodes, setEpisodes] = useState(0);
@@ -1071,7 +1077,12 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                             </div>
                         )}
 
-                        {isOwner ? (
+                        {readOnly ? (
+                            <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-6 text-center">
+                                <p className="font-bold text-white">Want to add this to your list?</p>
+                                <p className="mt-1 text-sm text-gray-400">Sign in or create a free account to track progress, ratings, and notes.</p>
+                            </div>
+                        ) : isOwner ? (
                             <div className="space-y-6 bg-white/5 p-6 rounded-2xl border border-white/5 shadow-inner">
                                 <div className="flex justify-between items-center">
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Status</label>
@@ -1198,7 +1209,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
 }
 
 // --- Discovery Page (Seasonal Hub) ---
-export function DiscoveryPage({ db, userId, username }) {
+export function DiscoveryPage({ db, userId, username, readOnly = false }) {
     const [trending, setTrending] = useState([]);
     const [topAiring, setTopAiring] = useState([]);
     const [upcoming, setUpcoming] = useState([]);
@@ -1319,6 +1330,7 @@ export function DiscoveryPage({ db, userId, username }) {
                     userId={userId} 
                     ownerId={userId} 
                     username={username} 
+                    readOnly={readOnly}
                 />
             )}
         </div>
@@ -2328,7 +2340,7 @@ function HallOfFameSelector({ onClose, onSelect, myList }) {
     );
 }
 
-export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage }) {
+export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, readOnly = false }) {
     const [list, setList] = useState([]);
     const [myList, setMyList] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -2347,10 +2359,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         let isMounted = true;
         const fetchData = async () => {
             try {
-                const myUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`));
-                if (myUserSnap.exists() && isMounted) {
-                     const myFriends = myUserSnap.data().friends || [];
-                     setIsFriend(myFriends.some(f => f.uid === targetUser.uid));
+                if (!readOnly) {
+                    const myUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`));
+                    if (myUserSnap.exists() && isMounted) {
+                        const myFriends = myUserSnap.data().friends || [];
+                        setIsFriend(myFriends.some(f => f.uid === targetUser.uid));
+                    }
                 }
 
                 const friendUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUser.uid}`));
@@ -2364,10 +2378,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     setList(friendData);
                 }
 
-                const mySnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${currentUserId}/animeList`));
-                if (isMounted) {
-                    const myData = mySnap.docs.map(d => ({...d.data(), id: d.id}));
-                    setMyList(myData);
+                if (!readOnly) {
+                    const mySnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${currentUserId}/animeList`));
+                    if (isMounted) {
+                        const myData = mySnap.docs.map(d => ({...d.data(), id: d.id}));
+                        setMyList(myData);
+                    }
                 }
 
                 const activityQ = query(collection(db, `artifacts/${appId}/public/data/activity`), where("userId", "==", targetUser.uid), orderBy("timestamp", "desc"), limit(20));
@@ -2384,7 +2400,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         };
         fetchData();
         return () => { isMounted = false; };
-    }, [db, targetUser, currentUserId]);
+    }, [db, targetUser, currentUserId, readOnly]);
 
     useEffect(() => {
         if (!selectedAnimeKitsuId) return;
@@ -2501,7 +2517,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                         </button>
                         <h2 className="text-4xl font-black text-white tracking-tighter">{targetUser.username}</h2>
-                        {targetUser.uid !== currentUserId && (
+                        {targetUser.uid !== currentUserId && !readOnly && (
                             <button 
                                 onClick={handleFriendAction}
                                 className={`ml-3 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${isFriend ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
@@ -2694,7 +2710,8 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     db={db} 
                     userId={currentUserId} 
                     ownerId={targetUser.uid}
-                    username={currentUsername} 
+                    username={currentUsername}
+                    readOnly={readOnly}
                 />
             )}
         </div>
