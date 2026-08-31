@@ -92,6 +92,16 @@ const PAGE_PATHS = {
   profile: '/profile',
 };
 
+const PAGE_META = {
+  home: ['AniLog — Your Anime & Visual Novel Tracker', 'Track your anime and visual novel progress, ratings, notes, and favorites.'],
+  search: ['Search Anime & Visual Novels — AniLog', 'Search AniList and VNDB to find your next anime or visual novel.'],
+  discovery: ['Discover Anime — AniLog', 'Explore trending, airing, upcoming, and top-rated anime powered by AniList.'],
+  social: ['Anime Activity & Friends — AniLog', 'Explore community activity and public anime profiles on AniLog.'],
+  stats: ['Your Anime Stats — AniLog', 'Explore your watch time, ratings, genres, milestones, and anime history.'],
+  profile: ['Your Profile — AniLog', 'Manage your AniLog profile, appearance, data, and hall of fame.'],
+  user_profile: ['Community Profile — AniLog', 'View an AniLog community member’s public anime profile and library.'],
+};
+
 const getPageFromPath = (pathname) => {
   if (pathname.startsWith('/users/')) return 'user_profile';
   return Object.entries(PAGE_PATHS).find(([, path]) => path === pathname)?.[0] || 'home';
@@ -1004,6 +1014,26 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const page = getPageFromPath(location.pathname);
+
+  useEffect(() => {
+    const [baseTitle, description] = PAGE_META[page] || PAGE_META.home;
+    const title = page === 'user_profile' && viewTargetUser?.username
+      ? `${viewTargetUser.username} on AniLog`
+      : baseTitle;
+    document.title = title;
+
+    const descriptionMeta = document.querySelector('meta[name="description"]');
+    descriptionMeta?.setAttribute('content', description);
+    document.querySelector('meta[property="og:title"]')?.setAttribute('content', title);
+    document.querySelector('meta[property="og:description"]')?.setAttribute('content', description);
+    document.querySelector('meta[property="twitter:title"]')?.setAttribute('content', title);
+    document.querySelector('meta[property="twitter:description"]')?.setAttribute('content', description);
+
+    const canonicalUrl = `https://anilog.app${location.pathname === '/' ? '/' : location.pathname}`;
+    document.querySelector('link[rel="canonical"]')?.setAttribute('href', canonicalUrl);
+    document.querySelector('meta[property="og:url"]')?.setAttribute('content', canonicalUrl);
+    document.querySelector('meta[property="twitter:url"]')?.setAttribute('content', canonicalUrl);
+  }, [location.pathname, page, viewTargetUser?.username]);
 
   const setPage = useCallback((nextPage) => {
     navigate(PAGE_PATHS[nextPage] || '/');

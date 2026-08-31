@@ -1,0 +1,12 @@
+{
+  "name": "AniLog — Anime & Visual Novel Tracker",
+  "short_name": "AniLog",
+  "description": "Track anime and visual novels, discover new favorites, and share your watch history.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "icons": [
+    { "src": "/anilog-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -2,28 +2,41 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/anilog-mark.svg" />
+    <link rel="mask-icon" href="/anilog-mark.svg" color="#3b82f6" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="canonical" href="https://anilog.app/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="color-scheme" content="dark" />
     
     <!-- Primary Meta Tags -->
     <title>AniLog - Track & Discover Anime</title>
     <meta name="title" content="AniLog - Track & Discover Anime" />
-    <meta name="description" content="A beautiful anime tracking application with social features, stats, and discovery. Track your progress, share with friends, and find your next favorite show." />
+    <meta name="description" content="Track anime and visual novels, discover new favorites with AniList, compare stats, and share your watch history with friends on AniLog." />
+    <meta name="application-name" content="AniLog" />
+    <meta name="robots" content="index, follow" />
 
     <!-- Open Graph / Facebook / Discord -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://anilog.app/" />
     <meta property="og:title" content="AniLog - Track & Discover Anime" />
-    <meta property="og:description" content="A beautiful anime tracking application with social features, stats, and discovery. Track your progress, share with friends, and find your next favorite show." />
-    <meta property="og:image" content="https://kitsu.io/images/default_cover-22e5f56b17aeced6dc7f69c8d422a1ab.jpg" />
+    <meta property="og:site_name" content="AniLog" />
+    <meta property="og:description" content="Track anime and visual novels, discover new favorites, compare stats, and share your watch history with friends." />
+    <meta property="og:image" content="https://anilog.app/anilog-social.svg" />
+    <meta property="og:image:alt" content="AniLog — Track. Discover. Share." />
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image" />
     <meta property="twitter:url" content="https://anilog.app/" />
     <meta property="twitter:title" content="AniLog - Track & Discover Anime" />
-    <meta property="twitter:description" content="A beautiful anime tracking application with social features, stats, and discovery. Track your progress, share with friends, and find your next favorite show." />
-    <meta property="twitter:image" content="https://kitsu.io/images/default_cover-22e5f56b17aeced6dc7f69c8d422a1ab.jpg" />
+    <meta property="twitter:description" content="Track anime and visual novels, discover new favorites, compare stats, and share your watch history with friends." />
+    <meta property="twitter:image" content="https://anilog.app/anilog-social.svg" />
+    <meta property="twitter:image:alt" content="AniLog — Track. Discover. Share." />
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://graphql.anilist.co" />
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap" rel="stylesheet">
     <style>
@@ -63,6 +76,15 @@
       /* Global Smooth Scroll */
       html {
         scroll-behavior: smooth;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
       }
     </style>
 </head>
