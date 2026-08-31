@@ -57,8 +57,5 @@ jobs:
 
       # Deploy rules after the compatible frontend is live so sign-up never
       # encounters a rules/code mismatch during rollout.
-      - name: Enable Firebase Rules API
-        run: gcloud services enable firebaserules.googleapis.com --project "${{ env.PROJECT_ID }}"
-
       - name: Deploy Firestore rules
         run: npx --yes firebase-tools@13.35.1 deploy --only firestore:rules --project "${{ env.PROJECT_ID }}" --non-interactive
