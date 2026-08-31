@@ -48,12 +48,14 @@ jobs:
           npm ci
           npm run build
 
-      - name: Deploy Firestore rules
-        run: npx --yes firebase-tools@13.35.1 deploy --only firestore:rules --project "${{ env.PROJECT_ID }}" --non-interactive --debug
-
       - name: Build and Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE }}
           region: ${{ env.REGION }}
           source: ./
+
+      # Deploy rules after the compatible frontend is live so sign-up never
+      # encounters a rules/code mismatch during rollout.
+      - name: Deploy Firestore rules
+        run: npx --yes firebase-tools@13.35.1 deploy --only firestore:rules --project "${{ env.PROJECT_ID }}" --non-interactive
