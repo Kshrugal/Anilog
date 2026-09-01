@@ -39,7 +39,6 @@ import {
     useSpring, 
     useTransform, 
     useMotionValue, 
-    useMotionTemplate, 
 } from "framer-motion";
 import { 
   Search as SearchIcon, 
@@ -612,36 +611,6 @@ export function AnimeCarouselSkeleton({ title }) {
 export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, viewMode = 'grid' }) {
     const { theme } = useContext(ThemeContext);
     
-    // --- ADVANCED 3D TILT LOGIC (Motion Values instead of State) ---
-    const mouseX = useMotionValue(0);
-    const mouseY = useMotionValue(0);
-
-    const rotateX = useTransform(mouseY, [-0.5, 0.5], ["15deg", "-15deg"]);
-    const rotateY = useTransform(mouseX, [-0.5, 0.5], ["-15deg", "15deg"]);
-    const sheenGradient = useMotionTemplate`radial-gradient(
-      circle at ${useTransform(mouseX, [-0.5, 0.5], ["0%", "100%"])} ${useTransform(mouseY, [-0.5, 0.5], ["0%", "100%"])}, 
-      rgba(255, 255, 255, 0.15), 
-      transparent 80%
-    )`;
-
-    const handleMouseMove = (e) => {
-        if (viewMode === 'list') return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
-        const mouseXPos = e.clientX - rect.left;
-        const mouseYPos = e.clientY - rect.top;
-        const xPct = mouseXPos / width - 0.5;
-        const yPct = mouseYPos / height - 0.5;
-        mouseX.set(xPct);
-        mouseY.set(yPct);
-    };
-
-    const handleMouseLeave = () => {
-        mouseX.set(0);
-        mouseY.set(0);
-    };
-
     const title = anime.title || anime.canonicalTitle || anime.attributes?.canonicalTitle || "Unknown Anime";
     const image = anime.imageUrl || 
                   anime.posterImage?.large || 
@@ -724,23 +693,14 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
             style={{
                 perspective: 1000
             }}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
             onClick={onCardClick}
             className="group relative flex flex-col cursor-pointer"
         >
             <motion.div 
-                style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
-                className="relative aspect-[2/3] rounded-xl overflow-hidden mb-3 shadow-lg border border-white/5 bg-gray-900"
+                className="relative mb-3 aspect-[2/3] overflow-hidden rounded-lg border border-[#282d35] bg-[#14171c] shadow-sm"
             >
-                <img src={image || "https://placehold.co/200x300?text=No+Image"} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" alt={title} referrerPolicy="no-referrer" />
+                <img src={image || "https://placehold.co/200x300?text=No+Image"} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" loading="lazy" alt={title} referrerPolicy="no-referrer" />
                 
-                {/* Advanced Holographic Sheen */}
-                <motion.div 
-                   style={{ background: sheenGradient }}
-                   className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-20 mix-blend-overlay"
-                />
-
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10"></div>
                 
                 {score > 0 && (
@@ -1379,9 +1339,9 @@ export default function App() {
           <nav className="space-y-1">{(guestMode ? ['search','discovery','social'] : ['home','search','discovery','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} onClick={() => setPage(navItem)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] ${page===navItem?theme.accentText:''}`} />{labels[navItem]}</button>})}</nav>
           <div className="mt-auto rounded-xl border border-[#242830] bg-[#14171c] p-4"><p className="text-xs font-bold text-white">Quick tip</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Press ⌘K anywhere to navigate or change themes.</p></div>
         </aside>
-        <main className="z-10 min-w-0 flex-1 p-4 pb-28 pt-7 sm:p-7 lg:p-10">
+        <main className="z-10 flex min-w-0 flex-1 flex-col p-4 pb-28 pt-7 sm:p-7 lg:p-10">
           <AnimatePresence mode="popLayout">
-            <motion.div key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
+            <motion.div className="flex-1" key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
                 {renderPage()}
               </Suspense>

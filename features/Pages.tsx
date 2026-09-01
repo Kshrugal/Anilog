@@ -476,6 +476,10 @@ export function HomePage({ db, userId, username, showToast }) {
             ))}
         </div>
         {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-3 py-2 text-xs font-bold text-gray-300"><option value="all">All tags</option>{availableTags.map(tag => <option key={tag} value={tag}>#{tag}</option>)}</select>}
+        <span className="ml-auto text-xs font-semibold text-gray-600">{filteredList.length} {filteredList.length === 1 ? 'title' : 'titles'}</span>
+        {(mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' || localQuery) && (
+          <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="rounded-lg px-2 py-1 text-xs font-semibold text-gray-500 transition-colors hover:bg-white/5 hover:text-white">Clear filters</button>
+        )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -537,8 +541,8 @@ export function HomePage({ db, userId, username, showToast }) {
                 {!loading && !error && filteredList.length === 0 && (
                     <motion.div initial={{opacity: 0}} animate={{opacity: 1}} className="col-span-full flex flex-col items-center justify-center py-20 text-gray-600">
                         <div className="text-7xl mb-4 opacity-50 grayscale">📺</div>
-                        <p className="text-lg font-medium">Your "{statusFilter}" list is empty.</p>
-                        {localQuery ? <p className="text-sm mt-2 text-gray-500">No matches for "{localQuery}"</p> : <p className="text-sm mt-2">Go to Search to find something to watch!</p>}
+                        <p className="text-lg font-medium">{localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' ? 'Nothing matches these filters.' : `Your "${statusFilter}" list is empty.`}</p>
+                        {localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' ? <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="mt-3 rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 transition-colors hover:bg-white/10 hover:text-white">Clear filters</button> : <p className="text-sm mt-2">Go to Search to find something to watch!</p>}
                     </motion.div>
                 )}
                 {!loading && !error && filteredList.map((anime) => (
@@ -703,8 +707,8 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
         <div className="space-y-8">
             <div className="flex justify-between items-center flex-wrap gap-4">
                 <div className="space-y-1">
-                    <h2 className="text-4xl font-black text-white tracking-tight">Discover</h2>
-                    <p className="text-sm text-gray-500">Find new stories to experience</p>
+                    <h2 className="text-4xl font-black text-white tracking-tight">Search</h2>
+                    <p className="text-sm text-gray-500">Search the complete anime and visual novel catalog</p>
                 </div>
                 
                 {searchType === 'anime' && (
@@ -898,7 +902,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
 
             {view === 'feed' && (
                 <div className="space-y-4">
-                    {!readOnly && <div className="rounded-[2rem] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
+                    {!readOnly && <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5">
                         <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
                         {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><input value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} placeholder="Anime title" className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
@@ -914,7 +918,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             key={item.id} 
-                            className="bg-white/5 border border-white/5 p-4 rounded-2xl flex gap-4 items-center hover:bg-white/10 transition-all backdrop-blur-md group"
+                            className="group flex items-center gap-4 rounded-xl border border-[#282d35] bg-[#12151a] p-4 transition-colors hover:bg-[#181c22]"
                         >
                             <div className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-white text-lg shadow-lg border border-white/10 overflow-hidden bg-gradient-to-br ${theme.gradient}`}>
                                 {item.username?.[0]?.toUpperCase() || '?'}
@@ -1210,7 +1214,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-[#0a0a0a] w-full max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden relative shadow-2xl flex flex-col md:flex-row border border-white/10" 
+                className="relative flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#0e1014] shadow-2xl md:flex-row"
                 onClick={e => e.stopPropagation()}
             >
                 <button onClick={onClose} className="absolute top-4 right-4 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-md border border-white/10 transition-colors">
@@ -1500,13 +1504,13 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
     if (loading) return <div className="space-y-12"><AnimeCarouselSkeleton title="Loading Hub..." /><AnimeCarouselSkeleton title="..." /></div>;
 
     return (
-        <div className="space-y-12 pb-20">
+        <div className="mx-auto max-w-7xl space-y-10 pb-20">
             {/* Hero Section - Editorial Style */}
             {heroAnime && (
                 <motion.div 
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="relative h-[60vh] min-h-[400px] rounded-[3rem] overflow-hidden group cursor-pointer shadow-2xl"
+                    className="group relative h-[380px] cursor-pointer overflow-hidden rounded-xl border border-[#282d35] bg-[#14171c] shadow-sm"
                     onClick={() => setSelectedAnime(heroAnime)}
                 >
                     <img 
@@ -1518,19 +1522,19 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
                     <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/40 to-transparent" />
                     <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-transparent to-transparent opacity-60" />
                     
-                    <div className="absolute bottom-0 left-0 p-8 sm:p-12 space-y-4 max-w-2xl">
+                    <div className="absolute bottom-0 left-0 max-w-2xl space-y-4 p-6 sm:p-9">
                         <div className="flex items-center gap-3">
                             <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-[10px] font-black uppercase tracking-widest text-white">#1 Trending</span>
                             <span className="px-3 py-1 bg-blue-500/20 backdrop-blur-md border border-blue-500/30 rounded-full text-[10px] font-black uppercase tracking-widest text-blue-400">Seasonal Pick</span>
                         </div>
-                        <h2 className="text-5xl sm:text-7xl font-black text-white tracking-tighter leading-none drop-shadow-2xl">
+                        <h2 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-5xl">
                             {heroAnime.attributes.canonicalTitle}
                         </h2>
                         <p className="text-gray-300 text-sm sm:text-lg line-clamp-3 max-w-xl font-medium leading-relaxed opacity-80 group-hover:opacity-100 transition-opacity">
                             {heroAnime.attributes.synopsis}
                         </p>
                         <div className="flex items-center gap-4 pt-4">
-                            <button className={`px-8 py-4 bg-white text-black rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform shadow-xl shadow-white/10`}>
+                            <button className="rounded-lg bg-white px-5 py-3 text-xs font-bold uppercase tracking-wider text-black transition-colors hover:bg-gray-200">
                                 View Details
                             </button>
                             <div className="flex items-center gap-2 text-white font-bold">
@@ -1542,7 +1546,7 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
                 </motion.div>
             )}
 
-            {personalized.length > 0 && <div className="rounded-[2rem] border border-purple-500/20 bg-gradient-to-br from-purple-500/10 to-blue-500/5 p-5 sm:p-7"><div className="mb-5"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-purple-400">Your taste, decoded</p><h3 className="mt-2 text-2xl font-black text-white">Made for {username}</h3><p className="mt-1 text-xs text-gray-500">Because you rate {tasteGenres.join(', ')} highly · titles already in your library are hidden</p></div><AnimeCarousel title="Personalized Picks" animeList={personalized} onAnimeClick={setSelectedAnime} isKitsuList={true} /></div>}
+            {personalized.length > 0 && <div className="rounded-xl border border-[#313041] bg-[#15141c] p-5 sm:p-7"><div className="mb-5"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-purple-400">Recommended for {username}</p><h3 className="mt-2 text-2xl font-bold text-white">Based on your library</h3><p className="mt-1 text-xs text-gray-500">Strongest signals: {tasteGenres.join(', ')} · tracked titles are hidden</p></div><AnimeCarousel title="Personalized Picks" animeList={personalized} onAnimeClick={setSelectedAnime} isKitsuList={true} /></div>}
             <AnimeCarousel title="Trending Now" animeList={trending} onAnimeClick={setSelectedAnime} isKitsuList={true} />
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
@@ -1802,7 +1806,7 @@ export function StatsPage({ db, userId, username }) {
                 { label: "Episodes", val: stats.totalEpisodes, color: theme.gradient },
                 { label: "Completed VNs", val: stats.completedVnsCount, color: theme.gradient }
             ].map((stat, i) => (
-                <motion.div whileHover={{ y: -5 }} key={i} className="p-6 bg-white/5 border border-white/5 rounded-2xl text-center shadow-xl backdrop-blur-sm hover:bg-white/10 transition-colors relative overflow-hidden group">
+                <motion.div key={i} className="group relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-6 text-center">
                     <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                     <span className={`text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br ${stat.color} tracking-tighter relative z-10`}>
                         <AnimatedCounter value={Number(stat.val)} />
@@ -1814,7 +1818,7 @@ export function StatsPage({ db, userId, username }) {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Radar Taste Profile */}
-              <div className="p-6 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-sm flex flex-col items-center justify-center relative overflow-hidden min-h-[400px]">
+              <div className="relative flex min-h-[400px] flex-col items-center justify-center overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-6">
                    <h3 className="text-xl font-black text-white mb-6 z-10">Taste Profile</h3>
                    <div className="w-full h-full z-10 relative flex items-center justify-center">
                        <GenreRadarChart counts={genres} theme={theme} onSelectGenre={setSelectedGenre} />
@@ -1823,7 +1827,7 @@ export function StatsPage({ db, userId, username }) {
               </div>
 
               {/* Status and Library distribution */}
-              <div className="p-6 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-sm flex flex-col justify-between relative overflow-hidden min-h-[400px]">
+              <div className="relative flex min-h-[400px] flex-col justify-between overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-6">
                    <div className="z-10">
                        <h3 className="text-xl font-black text-white mb-2">Library Distribution</h3>
                        <p className="text-xs text-gray-500">Current progress and status breakdown</p>
@@ -2185,7 +2189,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   };
 
   return (
-    <div className="md:col-span-2 p-8 bg-gradient-to-br from-blue-500/10 via-purple-500/5 to-transparent backdrop-blur-xl border border-blue-400/20 rounded-[2rem] shadow-2xl">
+    <div className="rounded-xl border border-[#293346] bg-[#121722] p-8 md:col-span-2">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-400">Move in without starting over</p>
@@ -2304,7 +2308,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
   };
 
   return (
-    <div className="p-8 bg-red-500/[0.045] backdrop-blur-xl border border-red-500/20 rounded-[2rem] shadow-2xl">
+    <div className="rounded-xl border border-red-500/20 bg-[#181214] p-8">
       <h3 className="text-xl font-black text-white mb-3 flex items-center gap-3">
         <TrashIcon className="text-red-400" size={20} />
         Reset Library
@@ -2316,7 +2320,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
 
       {isOpen && createPortal(
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/90 p-4 backdrop-blur-xl" onClick={() => !isResetting && setIsOpen(false)}>
-          <div className="w-full max-w-lg rounded-[2rem] border border-red-500/25 bg-[#0b0b0d] p-7 shadow-2xl" onClick={event => event.stopPropagation()}>
+          <div className="w-full max-w-lg rounded-xl border border-red-500/25 bg-[#0b0b0d] p-7 shadow-2xl" onClick={event => event.stopPropagation()}>
             <div className="flex items-start gap-4">
               <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-red-500/10 text-red-400"><AlertTriangleIcon /></div>
               <div>
@@ -2348,7 +2352,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
 }
 
 export function ProfilePage({ db, userId, currentUser, username, setUsername, showToast, openUserProfile }) {
-  const { theme, setThemeId, showTrail, setShowTrail } = useContext(ThemeContext);
+  const { theme, setThemeId } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
   const [hallOfFame, setHallOfFame] = useState([]);
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
@@ -2475,7 +2479,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
   }, [myList]);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pt-6">
+    <div className="mx-auto max-w-6xl space-y-8 pt-2">
       {/* Profile Header & Tabs */}
       <div className="flex flex-col sm:flex-row justify-between items-end pb-4 border-b border-white/10 gap-4">
            <div>
@@ -2533,7 +2537,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
             </div>
 
             {/* Hall of Fame */}
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+            <div className="relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-8">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
                 <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
@@ -2566,7 +2570,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
             </div>
 
             {/* Activity Heatmap */}
-            <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
+            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-6">
                 <h3 className="text-xl font-black text-white mb-4">Activity Heatmap</h3>
                 <ActivityHeatmap data={activityData} theme={theme} />
             </div>
@@ -2589,7 +2593,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
               })}
               showToast={showToast}
             />
-            <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl space-y-6">
+            <div className="space-y-6 rounded-xl border border-[#282d35] bg-[#12151a] p-6">
                 <div>
                     <h3 className="text-xl font-black text-white mb-4">Themes</h3>
                     <div className="grid grid-cols-2 gap-3">
@@ -2609,19 +2613,10 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                         ))}
                     </div>
                 </div>
-                <div className="flex justify-between items-center p-4 bg-black/20 rounded-xl">
-                    <span className="font-bold text-sm text-gray-300">Mouse Trail</span>
-                    <button 
-                        onClick={() => setShowTrail(!showTrail)}
-                        className={`w-10 h-5 rounded-full p-0.5 transition-colors ${showTrail ? theme.accentBg : 'bg-gray-700'}`}
-                    >
-                        <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform ${showTrail ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                </div>
             </div>
 
             <div className="space-y-8">
-                <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] shadow-2xl">
+                <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-8">
                     <h3 className="text-xl font-black text-white mb-6 flex items-center gap-3">
                         <UserIcon className="text-blue-400" size={20} />
                         Identity
@@ -2649,7 +2644,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                     </form>
                 </div>
 
-                <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] shadow-2xl">
+                <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-8">
                     <h3 className="text-xl font-black text-white mb-6 flex items-center gap-3">
                         <ShieldIcon className="text-emerald-400" size={20} />
                         Security & Privacy
@@ -2679,7 +2674,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                     </div>
                 </div>
 
-                <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] shadow-2xl">
+                <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-8">
                     <h3 className="text-xl font-black text-white mb-6 flex items-center gap-3">
                         <DownloadIcon className="text-orange-400" size={20} />
                         Data Portability
