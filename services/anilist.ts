@@ -67,13 +67,47 @@ export function mapAniListMedia(media: any) {
       siteUrl: media.siteUrl,
       provider: 'anilist',
       anilistId: media.id,
+      studios: media.studios?.nodes || [],
+      rankings: media.rankings || [],
+      nextAiringEpisode: media.nextAiringEpisode || null,
+      trailer: media.trailer || null,
+      externalLinks: media.externalLinks || [],
+      streamingEpisodes: media.streamingEpisodes || [],
+      relations: (media.relations?.edges || []).map((edge: any) => ({
+        relationType: edge.relationType,
+        media: mapAniListMedia(edge.node),
+      })),
+      characters: (media.characters?.edges || []).map((edge: any) => ({
+        role: edge.role,
+        character: edge.node,
+        voiceActor: edge.voiceActors?.[0] || null,
+      })),
+      recommendations: (media.recommendations?.nodes || [])
+        .map((node: any) => node.mediaRecommendation)
+        .filter(Boolean)
+        .map(mapAniListMedia),
     },
   };
 }
 
 export async function getAniListMedia(id: string | number) {
   const numericId = Number(String(id).replace(/^anilist:/, ''));
-  const data = await queryAniList(`query ($id: Int!) { Media(id: $id, type: ANIME, isAdult: false) { ${MEDIA_FIELDS} } }`, { id: numericId });
+  const data = await queryAniList(`query ($id: Int!) {
+    Media(id: $id, type: ANIME, isAdult: false) {
+      ${MEDIA_FIELDS}
+      studios(isMain: true) { nodes { id name siteUrl } }
+      rankings { rank type format year season allTime context }
+      nextAiringEpisode { airingAt timeUntilAiring episode }
+      trailer { id site thumbnail }
+      externalLinks { id site url type icon color }
+      streamingEpisodes { title thumbnail url site }
+      relations { edges { relationType node { ${MEDIA_FIELDS} } } }
+      characters(sort: [ROLE, FAVOURITES_DESC], perPage: 12) {
+        edges { role node { id name { full native } image { large medium } siteUrl } voiceActors(language: JAPANESE) { id name { full native } image { large medium } siteUrl } }
+      }
+      recommendations(sort: RATING_DESC, perPage: 8) { nodes { mediaRecommendation { ${MEDIA_FIELDS} } } }
+    }
+  }`, { id: numericId });
   return mapAniListMedia(data.Media);
 }
 
@@ -111,6 +145,16 @@ export async function getAniListDiscovery(perPage = 10) {
     upcoming: (data.upcoming?.media || []).map(mapAniListMedia),
     rated: (data.rated?.media || []).map(mapAniListMedia),
   };
+}
+
+export async function getAniListPersonalized(genres: string[], perPage = 18) {
+  if (!genres.length) return [];
+  const data = await queryAniList(`query ($genres: [String], $perPage: Int!) {
+    Page(page: 1, perPage: $perPage) {
+      media(type: ANIME, genre_in: $genres, isAdult: false, sort: [SCORE_DESC, POPULARITY_DESC]) { ${MEDIA_FIELDS} }
+    }
+  }`, { genres, perPage });
+  return (data.Page?.media || []).map(mapAniListMedia);
 }
 
 function formatFuzzyDate(date: { year?: number; month?: number; day?: number } | null) {

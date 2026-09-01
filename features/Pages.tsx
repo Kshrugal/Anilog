@@ -25,6 +25,7 @@ import {
   orderBy,
   arrayUnion,
   arrayRemove, 
+  addDoc,
 } from "firebase/firestore";
 import { 
     motion, 
@@ -63,7 +64,7 @@ import {
   AnimatedCounter, DeciderModal, JournalView, exportUserData,
   fetchMediaDetails, getGreeting, logActivity, normalizeTitle,
 } from "../App";
-import { getAniListDiscovery, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
+import { getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -148,6 +149,7 @@ export function HomePage({ db, userId, username, showToast }) {
   const [selectedAnimeKitsuId, setSelectedAnimeKitsuId] = useState(null);
   const [selectedAnimeData, setSelectedAnimeData] = useState(null);
   const [heroAnime, setHeroAnime] = useState(null);
+  const [annualGoal, setAnnualGoal] = useState(24);
   
   const [sortBy, setSortBy] = useState("updated");
   const [localQuery, setLocalQuery] = useState("");
@@ -190,6 +192,13 @@ export function HomePage({ db, userId, username, showToast }) {
       }
     );
     return () => { isMounted = false; unsubscribe(); };
+  }, [db, userId]);
+
+  useEffect(() => {
+    if (!db || !userId) return;
+    getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(snapshot => {
+      if (snapshot.exists() && Number(snapshot.data().annualAnimeGoal) > 0) setAnnualGoal(Number(snapshot.data().annualAnimeGoal));
+    }).catch(console.error);
   }, [db, userId]);
 
   useEffect(() => {
@@ -308,7 +317,9 @@ export function HomePage({ db, userId, username, showToast }) {
       return sum + (total > 0 ? Math.max(0, total - Number(item.watchedEpisodes || 0)) : 0);
     }, 0);
     const activeThisWeek = myList.filter(item => Number(item.updatedAt || 0) > Date.now() - 7 * 24 * 60 * 60 * 1000).length;
-    return { completed, episodes, remainingHours: Math.round((remainingEpisodes * AVG_EPISODE_MINUTES) / 60), activeThisWeek };
+    const currentYear = String(new Date().getFullYear());
+    const completedThisYear = myList.filter(item => item.status === 'completed' && String(item.completedAt || '').startsWith(currentYear)).length;
+    return { completed, completedThisYear, episodes, remainingHours: Math.round((remainingEpisodes * AVG_EPISODE_MINUTES) / 60), activeThisWeek };
   }, [myList, watchingList]);
 
   return (
@@ -341,6 +352,11 @@ export function HomePage({ db, userId, username, showToast }) {
             <p className="mt-1 text-xs text-gray-600">{detail}</p>
           </motion.div>
         ))}
+      </div>
+
+      <div className="flex flex-col gap-4 rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.06] p-5 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1"><div className="flex items-end justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">{new Date().getFullYear()} completion quest</p><p className="mt-1 text-xl font-black text-white">{dashboardStats.completedThisYear} of {annualGoal} anime</p></div><span className="text-sm font-black text-emerald-300">{Math.min(100, Math.round((dashboardStats.completedThisYear / annualGoal) * 100))}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${Math.min(100, (dashboardStats.completedThisYear / annualGoal) * 100)}%` }} /></div></div>
+        <label className="flex shrink-0 items-center gap-2 text-xs text-gray-500">Goal <input type="number" min="1" max="999" value={annualGoal} onChange={async event => { const next = Math.max(1, Number(event.target.value)); setAnnualGoal(next); await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { annualAnimeGoal: next }); }} className="w-20 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-center font-black text-white" /></label>
       </div>
 
       {heroAnime && !loading && (
@@ -811,6 +827,11 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     const [friends, setFriends] = useState([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [view, setView] = useState("feed");
+    const [composerType, setComposerType] = useState("post");
+    const [postText, setPostText] = useState("");
+    const [reviewTitle, setReviewTitle] = useState("");
+    const [reviewScore, setReviewScore] = useState(0);
+    const [posting, setPosting] = useState(false);
     const { theme } = useContext(ThemeContext);
 
     useEffect(() => {
@@ -851,6 +872,23 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
         });
     }, [searchQuery, db, userId]);
 
+    const publishPost = async () => {
+        if (!db || !userId || !postText.trim() || posting) return;
+        if (composerType === 'review' && !reviewTitle.trim()) { showToast('Add the anime title for your review.', 'error'); return; }
+        setPosting(true);
+        try {
+            await addDoc(collection(db, `artifacts/${appId}/public/data/activity`), {
+                userId, username, type: composerType === 'review' ? 'micro_review' : 'text_post',
+                context: composerType === 'review' ? `reviewed ${reviewScore ? `${reviewScore}/10` : ''}` : 'posted',
+                animeTitle: composerType === 'review' ? reviewTitle.trim() : '',
+                noteContent: postText.trim(), timestamp: serverTimestamp(),
+            });
+            setPostText(''); setReviewTitle(''); setReviewScore(0);
+            showToast(composerType === 'review' ? 'Review published!' : 'Post published!', 'success');
+        } catch (error) { console.error(error); showToast('Could not publish.', 'error'); }
+        setPosting(false);
+    };
+
     return (
         <div className="space-y-6 max-w-4xl mx-auto">
             <div className="flex space-x-6 border-b border-white/10 pb-4">
@@ -861,6 +899,12 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
 
             {view === 'feed' && (
                 <div className="space-y-4">
+                    {!readOnly && <div className="rounded-[2rem] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
+                        <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
+                        {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><input value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} placeholder="Anime title" className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
+                        <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
+                        <div className="mt-3 flex items-center justify-between"><span className="text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
+                    </div>}
                     {feed.filter(item => {
                         if (readOnly) return true;
                         const isMe = item.userId === userId;
@@ -1001,6 +1045,11 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         `https://placehold.co/300x450?text=${encodeURIComponent(title || '?')}`;
     const totalEps = anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
     const synopsis = anime.synopsis || anime.attributes?.synopsis;
+    const details = anime.attributes || anime;
+    const relatedMedia = details.relations || [];
+    const recommendations = details.recommendations || [];
+    const anilistCharacters = details.characters || [];
+    const streamingLinks = [...(details.streamingEpisodes || []), ...(details.externalLinks || []).filter(link => link.type === 'STREAMING')];
     const kitsuId = anime.kitsuId || anime.id;
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel' || String(kitsuId).startsWith('v');
     const isAniList = anime.provider === 'anilist' || anime.attributes?.provider === 'anilist' || String(kitsuId).startsWith('anilist:');
@@ -1193,7 +1242,15 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     <span key={g} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase text-gray-300">{g}</span>
                                 ))}
                             </div>
+                            {(details.studios?.length > 0 || details.seasonYear || details.averageRating) && <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
+                                {details.studios?.[0] && <span><strong className="text-gray-300">Studio</strong> {details.studios[0].name}</span>}
+                                {details.seasonYear && <span><strong className="text-gray-300">Season</strong> {details.season} {details.seasonYear}</span>}
+                                {details.averageRating && <span><strong className="text-gray-300">Community</strong> {details.averageRating}%</span>}
+                                {details.nextAiringEpisode && <span className="text-blue-400"><strong>Episode {details.nextAiringEpisode.episode}</strong> airs in {Math.max(1, Math.ceil(details.nextAiringEpisode.timeUntilAiring / 86400))}d</span>}
+                            </div>}
                         </div>
+
+                        {streamingLinks.length > 0 && <div><h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">Watch legally</h4><div className="flex flex-wrap gap-2">{streamingLinks.slice(0, 6).map((link, index) => <a key={`${link.url}-${index}`} href={link.url} target="_blank" rel="noopener noreferrer" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-blue-300 hover:bg-white/10">{link.site || link.title || 'Watch'} ↗</a>)}</div></div>}
 
                         {/* Cast Section */}
                         {cast.length > 0 && (
@@ -1211,6 +1268,26 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     ))}
                                 </div>
                             </div>
+                        )}
+
+                        {anilistCharacters.length > 0 && (
+                            <div>
+                                <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">Characters & cast</h4>
+                                <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+                                    {anilistCharacters.map(({ character, voiceActor, role }) => <a key={character.id} href={character.siteUrl} target="_blank" rel="noopener noreferrer" className="w-24 shrink-0 text-center"><img src={character.image?.large} alt="" className="mx-auto h-20 w-20 rounded-2xl object-cover" referrerPolicy="no-referrer" /><p className="mt-2 line-clamp-1 text-[10px] font-bold text-white">{character.name?.full}</p><p className="line-clamp-1 text-[9px] uppercase text-gray-600">{role}{voiceActor ? ` · ${voiceActor.name?.full}` : ''}</p></a>)}
+                                </div>
+                            </div>
+                        )}
+
+                        {relatedMedia.length > 0 && (
+                            <div>
+                                <h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">Franchise & related</h4>
+                                <div className="grid gap-2 sm:grid-cols-2">{relatedMedia.slice(0, 8).map(({ relationType, media }) => <a key={`${relationType}-${media.id}`} href={media.attributes.siteUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-2 text-left hover:bg-white/10"><img src={media.attributes.posterImage.medium} alt="" className="h-14 w-10 rounded-lg object-cover" /><span className="min-w-0"><span className="block text-[9px] font-black uppercase text-blue-400">{String(relationType).replaceAll('_', ' ')}</span><span className="block truncate text-xs font-bold text-white">{media.attributes.canonicalTitle}</span></span></a>)}</div>
+                            </div>
+                        )}
+
+                        {recommendations.length > 0 && (
+                            <div><h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">You may also like</h4><div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">{recommendations.map(media => <div key={media.id} className="w-24 shrink-0"><img src={media.attributes.posterImage.medium} alt="" className="aspect-[2/3] w-full rounded-xl object-cover" referrerPolicy="no-referrer" /><p className="mt-2 line-clamp-2 text-[10px] font-bold text-white">{media.attributes.canonicalTitle}</p></div>)}</div></div>
                         )}
 
                         {readOnly ? (
@@ -1375,6 +1452,8 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
     const [topAiring, setTopAiring] = useState([]);
     const [upcoming, setUpcoming] = useState([]);
     const [topRated, setTopRated] = useState([]);
+    const [personalized, setPersonalized] = useState([]);
+    const [tasteGenres, setTasteGenres] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedAnime, setSelectedAnime] = useState(null);
     const { theme } = useContext(ThemeContext);
@@ -1385,12 +1464,27 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
             setLoading(true);
             try {
                 const discovery = await getAniListDiscovery(10);
+                let personalResults = [];
+                let topTasteGenres = [];
+                if (db && userId && !readOnly) {
+                    const listSnapshot = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
+                    const entries: any[] = listSnapshot.docs.map(entryDoc => ({ ...entryDoc.data(), id: entryDoc.id }));
+                    const watchedIds = new Set(entries.map(entry => String(entry.kitsuId || entry.id)));
+                    const genreScores: Record<string, number> = {};
+                    entries.forEach(entry => (entry.genres || []).forEach(genre => {
+                        genreScores[genre] = (genreScores[genre] || 0) + Math.max(1, Number(entry.score || 5));
+                    }));
+                    topTasteGenres = Object.entries(genreScores).sort((a, b) => Number(b[1]) - Number(a[1])).slice(0, 3).map(([genre]) => genre);
+                    personalResults = (await getAniListPersonalized(topTasteGenres, 18)).filter(media => !watchedIds.has(String(media.id)));
+                }
 
                 if (isMounted) {
                     setTrending(discovery.trending);
                     setTopAiring(discovery.airing);
                     setUpcoming(discovery.upcoming);
                     setTopRated(discovery.rated);
+                    setPersonalized(personalResults);
+                    setTasteGenres(topTasteGenres);
                     setLoading(false);
                 }
             } catch (err) {
@@ -1400,7 +1494,7 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
         };
         fetchData();
         return () => { isMounted = false; };
-    }, []);
+    }, [db, userId, readOnly]);
 
     const heroAnime = trending[0];
 
@@ -1449,6 +1543,7 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
                 </motion.div>
             )}
 
+            {personalized.length > 0 && <div className="rounded-[2rem] border border-purple-500/20 bg-gradient-to-br from-purple-500/10 to-blue-500/5 p-5 sm:p-7"><div className="mb-5"><p className="text-[10px] font-black uppercase tracking-[0.25em] text-purple-400">Your taste, decoded</p><h3 className="mt-2 text-2xl font-black text-white">Made for {username}</h3><p className="mt-1 text-xs text-gray-500">Because you rate {tasteGenres.join(', ')} highly · titles already in your library are hidden</p></div><AnimeCarousel title="Personalized Picks" animeList={personalized} onAnimeClick={setSelectedAnime} isKitsuList={true} /></div>}
             <AnimeCarousel title="Trending Now" animeList={trending} onAnimeClick={setSelectedAnime} isKitsuList={true} />
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
