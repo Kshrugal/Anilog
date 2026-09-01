@@ -48,6 +48,10 @@ import {
   EyeOff as EyeOffIcon,
   Globe as GlobeIcon,
   User as UserIcon,
+  Clock3 as ClockIcon,
+  Flame as FlameIcon,
+  ListChecks as ListChecksIcon,
+  ChevronRight as ChevronRightIcon,
 } from 'lucide-react';
 import {
   APP_NAME, AVG_EPISODE_MINUTES, KITSU_API_URL, MAJOR_GENRES,
@@ -130,7 +134,7 @@ export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
 }
 
 export function HomePage({ db, userId, username, showToast }) {
-  const { theme, viewMode, setViewMode } = useContext(ThemeContext);
+  const { theme, viewMode, setViewMode, setPage } = useContext(ThemeContext);
   const [myList, setMyList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -161,9 +165,13 @@ export function HomePage({ db, userId, username, showToast }) {
         const list = snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as any));
         setMyList(list);
         
-        const watching = list.filter(a => a.status === 'watching');
+        const watching = list
+          .filter(a => a.status === 'watching')
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
         if (watching.length > 0) {
-            setHeroAnime(watching[Math.floor(Math.random() * watching.length)]);
+            setHeroAnime(watching[0]);
+        } else {
+            setHeroAnime(null);
         }
 
         setLoading(false);
@@ -235,10 +243,15 @@ export function HomePage({ db, userId, username, showToast }) {
     if(isVn && currentEp >= 100) return;
 
     const newEp = isVn ? Math.min(100, currentEp + 5) : currentEp + 1;
+    const isNowComplete = isVn ? newEp >= 100 : totalEp > 0 && newEp >= totalEp;
     const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, anime.id);
     
     try {
-        await updateDoc(docRef, { watchedEpisodes: newEp, updatedAt: Date.now() });
+        await updateDoc(docRef, {
+          watchedEpisodes: newEp,
+          updatedAt: Date.now(),
+          ...(isNowComplete ? { status: 'completed', completedAt: new Date().toISOString().slice(0, 10) } : {}),
+        });
         logActivity({
             userId, 
             username, 
@@ -248,7 +261,12 @@ export function HomePage({ db, userId, username, showToast }) {
             animeImageUrl: anime.imageUrl, 
             context: isVn ? `read ${newEp}% of` : `watched episode ${newEp} of`
         });
-        showToast(isVn ? `Marked ${newEp}% of ${anime.title}` : `Marked ep ${newEp} of ${anime.title}`, 'success');
+        showToast(
+          isNowComplete
+            ? `${anime.title} completed!`
+            : isVn ? `Marked ${newEp}% of ${anime.title}` : `Marked ep ${newEp} of ${anime.title}`,
+          'success'
+        );
     } catch(e) {
         console.error("Quick update failed", e);
         showToast("Failed to update", 'error');
@@ -266,36 +284,73 @@ export function HomePage({ db, userId, username, showToast }) {
   };
 
   const plannedList = myList.filter(a => a.status === 'planned');
+  const watchingList = useMemo(() => myList
+    .filter(item => item.status === 'watching')
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)), [myList]);
+  const dashboardStats = useMemo(() => {
+    const completed = myList.filter(item => item.status === 'completed').length;
+    const episodes = myList.reduce((sum, item) => {
+      const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel';
+      return sum + (isVn ? 0 : Number(item.watchedEpisodes || 0));
+    }, 0);
+    const remainingEpisodes = watchingList.reduce((sum, item) => {
+      const total = Number(item.totalEpisodes || 0);
+      return sum + (total > 0 ? Math.max(0, total - Number(item.watchedEpisodes || 0)) : 0);
+    }, 0);
+    const activeThisWeek = myList.filter(item => Number(item.updatedAt || 0) > Date.now() - 7 * 24 * 60 * 60 * 1000).length;
+    return { completed, episodes, remainingHours: Math.round((remainingEpisodes * AVG_EPISODE_MINUTES) / 60), activeThisWeek };
+  }, [myList, watchingList]);
 
   return (
-    <div className="flex flex-col space-y-8">
-      <div className="flex justify-between items-end pb-4 border-b border-white/5">
+    <div className="flex flex-col space-y-8 py-2">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-4xl font-black text-white tracking-tighter mb-1 flex items-center gap-2">
-              {greeting}
-          </h2>
-          <p className="text-gray-500 text-sm">Welcome back, {username}.</p>
+          <p className={`mb-2 text-[10px] font-black uppercase tracking-[0.28em] ${theme.accentText}`}>Your watchspace</p>
+          <h2 className="text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl">{greeting}, {username}</h2>
+          <p className="mt-2 text-sm text-gray-500">Pick up where you left off or shape what comes next.</p>
         </div>
+        <button onClick={() => setPage('search')} className="group flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white px-5 py-3 text-sm font-black text-black shadow-xl transition-transform hover:-translate-y-0.5">
+          Add something new <ChevronRightIcon className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { label: 'In progress', value: watchingList.length, detail: 'current titles', icon: PlayIcon },
+          { label: 'Completed', value: dashboardStats.completed, detail: 'all time', icon: ListChecksIcon },
+          { label: 'Episodes logged', value: dashboardStats.episodes, detail: 'across your library', icon: FlameIcon },
+          { label: 'Queue remaining', value: `${dashboardStats.remainingHours}h`, detail: `${dashboardStats.activeThisWeek} active this week`, icon: ClockIcon },
+        ].map(({ label, value, detail, icon: Icon }) => (
+          <motion.div whileHover={{ y: -3 }} key={label} className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur-xl sm:p-5">
+            <div className={`absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-0 blur-3xl transition-opacity group-hover:opacity-30 ${theme.accentBg}`} />
+            <div className="mb-5 flex items-center justify-between">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">{label}</p>
+              <Icon className={`h-4 w-4 ${theme.accentText}`} />
+            </div>
+            <p className="text-3xl font-black tracking-tight text-white sm:text-4xl">{value}</p>
+            <p className="mt-1 text-xs text-gray-600">{detail}</p>
+          </motion.div>
+        ))}
       </div>
 
       {heroAnime && !loading && (
           <motion.div 
               initial={{ opacity: 0, y: 20 }} 
               animate={{ opacity: 1, y: 0 }} 
-              className="relative w-full h-72 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10"
+              className="group relative min-h-[360px] w-full cursor-pointer overflow-hidden rounded-[2rem] border border-white/10 bg-[#0a0a0a] shadow-2xl lg:min-h-[420px]"
               onClick={() => setSelectedAnimeKitsuId(heroAnime.kitsuId)}
           >
-              <img src={heroAnime.imageUrl} className="w-full h-full object-cover opacity-60 transition-transform duration-[2s] group-hover:scale-105" alt="hero" referrerPolicy="no-referrer" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-              <div className="absolute bottom-0 left-0 p-8 w-full">
+              <img src={heroAnime.imageUrl} className="absolute inset-0 h-full w-full object-cover opacity-50 blur-[1px] transition-transform duration-[2s] group-hover:scale-105" alt="" referrerPolicy="no-referrer" />
+              <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20"></div>
+              <div className="relative flex min-h-[360px] max-w-3xl flex-col justify-end p-6 sm:p-10 lg:min-h-[420px]">
                   <p className={`text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2 ${theme.accentText}`}>
                       <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span> Continue Watching
                   </p>
-                  <h3 className="text-4xl font-black text-white mb-4 line-clamp-1">{heroAnime.title}</h3>
-                  <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
+                  <h3 className="mb-6 line-clamp-2 text-4xl font-black tracking-[-0.04em] text-white sm:text-6xl">{heroAnime.title}</h3>
+                  <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-3">
                           <span className="text-gray-300 text-sm font-bold">Ep {heroAnime.watchedEpisodes} / {heroAnime.totalEpisodes || "?"}</span>
-                          <div className="w-48 h-1.5 bg-gray-700/50 rounded-full overflow-hidden backdrop-blur-sm">
+                          <div className="h-1.5 w-36 overflow-hidden rounded-full bg-gray-700/50 backdrop-blur-sm sm:w-56">
                               <motion.div 
                                 initial={{ width: 0 }} 
                                 animate={{ width: `${(heroAnime.watchedEpisodes / (heroAnime.totalEpisodes || 100)) * 100}%` }}
@@ -308,7 +363,7 @@ export function HomePage({ db, userId, username, showToast }) {
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
                           onClick={(e) => { e.stopPropagation(); handleQuickIncrement(heroAnime); }}
-                          className="bg-white text-black px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-white/10 hover:shadow-white/20 transition-shadow"
+                          className="flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-black text-black shadow-lg shadow-white/10 transition-shadow hover:shadow-white/20"
                       >
                           <PlayIcon /> Watch Next
                       </motion.button>
@@ -317,12 +372,41 @@ export function HomePage({ db, userId, username, showToast }) {
           </motion.div>
       )}
 
+      {!loading && watchingList.length > 1 && (
+        <section>
+          <div className="mb-4 flex items-end justify-between">
+            <div>
+              <h3 className="text-xl font-black text-white">Up next</h3>
+              <p className="mt-1 text-xs text-gray-500">Your recently active queue</p>
+            </div>
+            <button onClick={() => setStatusFilter('watching')} className={`text-xs font-bold ${theme.accentText}`}>View all</button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {watchingList.slice(1, 5).map(anime => {
+              const progress = Number(anime.watchedEpisodes || 0);
+              const total = Number(anime.totalEpisodes || 0);
+              return (
+                <button key={anime.id} onClick={() => setSelectedAnimeKitsuId(anime.kitsuId)} className="group flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-3 text-left transition-colors hover:bg-white/[0.075]">
+                  <img src={anime.imageUrl} alt="" className="h-20 w-14 shrink-0 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-black text-white">{anime.title}</span>
+                    <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Episode {progress} {total > 0 ? `/ ${total}` : ''}</span>
+                    <span className="mt-2 block h-1 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${theme.progressbar}`} style={{ width: `${total > 0 ? Math.min(100, (progress / total) * 100) : 0}%` }} /></span>
+                  </span>
+                  <span onClick={(event) => { event.stopPropagation(); handleQuickIncrement(anime); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-lg font-black text-black transition-transform hover:scale-105">+</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between border-t border-white/5 pt-8">
             <div className="flex overflow-x-auto no-scrollbar gap-2 p-2 -mx-2">
                 {statusTabs.map((status) => (
-                <motion.button whileTap={{ scale: 0.95 }} key={status} onClick={() => setStatusFilter(status)} className={`px-6 py-2.5 capitalize font-bold rounded-full text-sm transition-all whitespace-nowrap ${statusFilter === status ? "bg-white text-black shadow-lg scale-105" : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"}`}>
-                    {status}
+                <motion.button whileTap={{ scale: 0.95 }} key={status} onClick={() => setStatusFilter(status)} className={`px-5 py-2.5 capitalize font-bold rounded-full text-sm transition-all whitespace-nowrap ${statusFilter === status ? "bg-white text-black shadow-lg" : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"}`}>
+                    {status} <span className={`ml-1 text-[10px] ${statusFilter === status ? 'text-black/50' : 'text-gray-600'}`}>{myList.filter(item => item.status === status).length}</span>
                 </motion.button>
                 ))}
             </div>
@@ -1426,11 +1510,11 @@ export function StatsPage({ db, userId, username }) {
         else watchingAnime++;
       } else if (anime.status === 'completed') {
         completedCount++;
-      } else if (anime.status === 'on_hold') {
+      } else if (anime.status === 'paused' || anime.status === 'on_hold') {
         onHoldCount++;
       } else if (anime.status === 'dropped') {
         droppedCount++;
-      } else if (anime.status === 'planning') {
+      } else if (anime.status === 'planned' || anime.status === 'planning') {
         planningCount++;
       }
 

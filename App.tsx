@@ -1371,15 +1371,22 @@ export default function App() {
           />
         </div>
         
-        <header className="sticky top-0 z-30 bg-[#050505]/60 backdrop-blur-xl border-b border-white/5">
-          <nav className="container mx-auto px-4 py-3 flex justify-between items-center">
+        <header className="sticky top-0 z-30 border-b border-white/5 bg-[#050505]/75 backdrop-blur-2xl">
+          <nav className="container mx-auto flex items-center justify-between px-4 py-3">
             <h1 className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}>
               <ScrambleText text={APP_NAME} className="" />
             </h1>
+            <div className="hidden items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.035] p-1 md:flex">
+              {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats']).map(navItem => {
+                const labels = { home: 'Home', search: 'Search', discovery: 'Discover', social: 'Community', stats: 'Insights' };
+                return (
+                  <button key={navItem} onClick={() => setPage(navItem)} className={`rounded-xl px-4 py-2 text-xs font-black transition-all ${page === navItem ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:bg-white/5 hover:text-white'}`}>
+                    {labels[navItem]}
+                  </button>
+                );
+              })}
+            </div>
             <div className="flex items-center space-x-2">
-              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("stats")} title="Stats" className={`p-2 rounded-full transition-all duration-300 ${page === "stats" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
-                <StatsIcon />
-              </motion.button>}
               {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
                 <ProfileIcon />
               </motion.button>}
@@ -1396,7 +1403,7 @@ export default function App() {
           </div>
         )}
 
-        <main className="flex-grow container mx-auto p-4 pb-32 z-10">
+        <main className="container z-10 mx-auto flex-grow p-4 pb-32 pt-7 sm:px-6 lg:px-8">
           <AnimatePresence mode="popLayout">
             <motion.div key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
@@ -1409,9 +1416,9 @@ export default function App() {
         </main>
 
         {/* Floating Magnetic Navigation Dock */}
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+        <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2 md:hidden">
           <div className="relative flex items-center gap-2 px-3 py-2 bg-[#0a0a0a]/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl">
-            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats']).map((navItem) => {
+            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats', 'profile']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 
@@ -1437,6 +1444,7 @@ export default function App() {
                           {navItem === 'discovery' && <CompassIcon />}
                           {navItem === 'social' && <SocialIcon />}
                           {navItem === 'stats' && <StatsIcon />}
+                          {navItem === 'profile' && <ProfileIcon />}
                       </div>
                   </motion.button>
               )
