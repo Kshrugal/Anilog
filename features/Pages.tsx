@@ -49,10 +49,6 @@ import {
   EyeOff as EyeOffIcon,
   Globe as GlobeIcon,
   User as UserIcon,
-  Clock3 as ClockIcon,
-  Flame as FlameIcon,
-  ListChecks as ListChecksIcon,
-  ChevronRight as ChevronRightIcon,
   Trash2 as TrashIcon,
   AlertTriangle as AlertTriangleIcon,
   RotateCcw as ResetIcon,
@@ -61,8 +57,8 @@ import {
   APP_NAME, AVG_EPISODE_MINUTES, KITSU_API_URL, MAJOR_GENRES,
   StarField, THEMES, ThemeContext, appId, auth,
   AnimeCard, AnimeCardSkeleton, AnimeCarousel, AnimeCarouselSkeleton,
-  AnimatedCounter, DeciderModal, JournalView, exportUserData,
-  fetchMediaDetails, getGreeting, logActivity, normalizeTitle,
+  DeciderModal, JournalView, exportUserData,
+  fetchMediaDetails, logActivity, normalizeTitle,
 } from "../App";
 import { getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 
@@ -149,7 +145,6 @@ export function HomePage({ db, userId, username, showToast }) {
   const [selectedAnimeKitsuId, setSelectedAnimeKitsuId] = useState(null);
   const [selectedAnimeData, setSelectedAnimeData] = useState(null);
   const [heroAnime, setHeroAnime] = useState(null);
-  const [annualGoal, setAnnualGoal] = useState(24);
   
   const [sortBy, setSortBy] = useState("updated");
   const [localQuery, setLocalQuery] = useState("");
@@ -158,7 +153,6 @@ export function HomePage({ db, userId, username, showToast }) {
   const [showDecider, setShowDecider] = useState(false);
 
   const statusTabs = ["watching", "completed", "planned", "paused", "dropped"];
-  const greeting = useMemo(() => getGreeting(), []);
 
   useEffect(() => {
     if (!db || !userId) return;
@@ -192,13 +186,6 @@ export function HomePage({ db, userId, username, showToast }) {
       }
     );
     return () => { isMounted = false; unsubscribe(); };
-  }, [db, userId]);
-
-  useEffect(() => {
-    if (!db || !userId) return;
-    getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(snapshot => {
-      if (snapshot.exists() && Number(snapshot.data().annualAnimeGoal) > 0) setAnnualGoal(Number(snapshot.data().annualAnimeGoal));
-    }).catch(console.error);
   }, [db, userId]);
 
   useEffect(() => {
@@ -306,74 +293,8 @@ export function HomePage({ db, userId, username, showToast }) {
   const watchingList = useMemo(() => myList
     .filter(item => item.status === 'watching')
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)), [myList]);
-  const dashboardStats = useMemo(() => {
-    const completed = myList.filter(item => item.status === 'completed').length;
-    const episodes = myList.reduce((sum, item) => {
-      const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel';
-      return sum + (isVn ? 0 : Number(item.watchedEpisodes || 0));
-    }, 0);
-    const remainingEpisodes = watchingList.reduce((sum, item) => {
-      const total = Number(item.totalEpisodes || 0);
-      return sum + (total > 0 ? Math.max(0, total - Number(item.watchedEpisodes || 0)) : 0);
-    }, 0);
-    const activeThisWeek = myList.filter(item => Number(item.updatedAt || 0) > Date.now() - 7 * 24 * 60 * 60 * 1000).length;
-    const currentYear = String(new Date().getFullYear());
-    const completedThisYear = myList.filter(item => item.status === 'completed' && String(item.completedAt || '').startsWith(currentYear)).length;
-    const favorites = myList.filter(item => item.favorite).length;
-    const completionRate = myList.length ? Math.round((completed / myList.length) * 100) : 0;
-    return { completed, completedThisYear, episodes, remainingHours: Math.round((remainingEpisodes * AVG_EPISODE_MINUTES) / 60), activeThisWeek, favorites, completionRate };
-  }, [myList, watchingList]);
-
   return (
     <div className="mx-auto flex max-w-7xl flex-col space-y-7">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className={`mb-2 text-[10px] font-bold uppercase tracking-[0.22em] ${theme.accentText}`}>Overview</p>
-          <h2 className="text-3xl font-bold tracking-[-0.03em] text-white sm:text-4xl">{greeting}, {username}</h2>
-          <p className="mt-2 text-sm text-gray-500">Pick up where you left off or shape what comes next.</p>
-        </div>
-        <button onClick={() => setPage('search')} className="group flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500">
-          Add something new <ChevronRightIcon className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          { label: 'In progress', value: watchingList.length, detail: 'current titles', icon: PlayIcon },
-          { label: 'Completed', value: dashboardStats.completed, detail: 'all time', icon: ListChecksIcon },
-          { label: 'Episodes logged', value: dashboardStats.episodes, detail: 'across your library', icon: FlameIcon },
-          { label: 'Queue remaining', value: `${dashboardStats.remainingHours}h`, detail: `${dashboardStats.activeThisWeek} active this week`, icon: ClockIcon },
-        ].map(({ label, value, detail, icon: Icon }) => (
-          <motion.div key={label} className="group relative overflow-hidden rounded-xl border border-[#262b33] bg-[#12151a] p-4 sm:p-5">
-            <div className="mb-5 flex items-center justify-between">
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">{label}</p>
-              <Icon className={`h-4 w-4 ${theme.accentText}`} />
-            </div>
-            <p className="text-2xl font-bold tracking-tight text-white sm:text-3xl">{value}</p>
-            <p className="mt-1 text-xs text-gray-600">{detail}</p>
-          </motion.div>
-        ))}
-      </div>
-
-      <div className="flex flex-col gap-4 rounded-xl border border-[#26332e] bg-[#111916] p-5 sm:flex-row sm:items-center">
-        <div className="min-w-0 flex-1"><div className="flex items-end justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">{new Date().getFullYear()} completion quest</p><p className="mt-1 text-xl font-black text-white">{dashboardStats.completedThisYear} of {annualGoal} anime</p></div><span className="text-sm font-black text-emerald-300">{Math.min(100, Math.round((dashboardStats.completedThisYear / annualGoal) * 100))}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${Math.min(100, (dashboardStats.completedThisYear / annualGoal) * 100)}%` }} /></div></div>
-        <label className="flex shrink-0 items-center gap-2 text-xs text-gray-500">Goal <input type="number" min="1" max="999" value={annualGoal} onChange={async event => { const next = Math.max(1, Number(event.target.value)); setAnnualGoal(next); await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { annualAnimeGoal: next }); }} className="w-20 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-center font-black text-white" /></label>
-      </div>
-
-      <section className="grid gap-3 md:grid-cols-[1.35fr_1fr]">
-        <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5">
-          <div className="flex items-start justify-between gap-4"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Command deck</p><h3 className="mt-1 text-lg font-bold text-white">What do you want to do?</h3></div><DiceIcon className="h-5 w-5 text-gray-600" /></div>
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <button onClick={() => setPage('search')} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-3 text-left transition-colors hover:bg-white/[0.07]"><SearchIcon className="mb-2 h-4 w-4 text-blue-400" /><span className="block text-xs font-bold text-white">Find a title</span><span className="mt-0.5 hidden text-[10px] text-gray-600 sm:block">Search everything</span></button>
-            <button onClick={() => setStatusFilter('planned')} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-3 text-left transition-colors hover:bg-white/[0.07]"><ListChecksIcon className="mb-2 h-4 w-4 text-purple-400" /><span className="block text-xs font-bold text-white">Open backlog</span><span className="mt-0.5 hidden text-[10px] text-gray-600 sm:block">{plannedList.length} planned</span></button>
-            <button onClick={() => plannedList.length >= 2 ? setShowDecider(true) : showToast("Add at least two planned titles first.", "error")} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-3 text-left transition-colors hover:bg-white/[0.07]"><DiceIcon className="mb-2 h-4 w-4 text-pink-400" /><span className="block text-xs font-bold text-white">Pick for me</span><span className="mt-0.5 hidden text-[10px] text-gray-600 sm:block">Beat decision fatigue</span></button>
-          </div>
-        </div>
-        <button onClick={() => setPage('stats')} className="group rounded-xl border border-[#2d3040] bg-gradient-to-br from-[#171925] to-[#111319] p-5 text-left transition-colors hover:border-[#3b4054]">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Library pulse</p><div className="mt-3 flex items-end justify-between"><div><p className="text-3xl font-black text-white">{dashboardStats.completionRate}%</p><p className="mt-1 text-xs text-gray-500">completion rate · {dashboardStats.favorites} favorites</p></div><ChevronRightIcon className="h-5 w-5 text-gray-600 transition-transform group-hover:translate-x-1 group-hover:text-white" /></div>
-        </button>
-      </section>
-
       {heroAnime && !loading && (
           <motion.div 
               initial={{ opacity: 0, y: 20 }} 
@@ -412,6 +333,10 @@ export function HomePage({ db, userId, username, showToast }) {
               </div>
           </motion.div>
       )}
+
+      {!loading && !heroAnime && <div className="rounded-xl border border-dashed border-[#303640] bg-[#111419] px-6 py-16 text-center"><PlayIcon className={`mx-auto h-8 w-8 ${theme.accentText}`} /><h2 className="mt-4 text-2xl font-bold text-white">Start your next story</h2><p className="mt-2 text-sm text-gray-500">Add something to Watching and it will become your launchpad here.</p><button onClick={() => setPage('search')} className="mt-5 rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-black">Find a title</button></div>}
+
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#242830] pb-5"><button onClick={() => setPage('search')} className="rounded-lg border border-[#2a2f38] bg-[#14171c] px-3 py-2 text-xs font-bold text-gray-300 hover:text-white">+ Add title</button><button onClick={() => plannedList.length >= 2 ? setShowDecider(true) : showToast("Add at least two planned titles first.", "error")} className="rounded-lg border border-[#2a2f38] bg-[#14171c] px-3 py-2 text-xs font-bold text-gray-300 hover:text-white">Surprise me</button><span className="ml-auto text-xs text-gray-600">{watchingList.length} active · {plannedList.length} planned</span></div>
 
       {!loading && watchingList.length > 1 && (
         <section>
@@ -1827,36 +1752,19 @@ export function StatsPage({ db, userId, username }) {
 
       {loading ? <AnimeCarouselSkeleton title="Loading..." /> : error ? <p className="text-red-400">{error}</p> : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-                { label: "Hours Watched", val: stats.totalHours, color: theme.gradient },
-                { label: "Completed Anime", val: stats.totalCompletedUnique, color: theme.gradient },
-                { label: "Episodes", val: stats.totalEpisodes, color: theme.gradient },
-                { label: "Completed VNs", val: stats.completedVnsCount, color: theme.gradient }
-            ].map((stat, i) => (
-                <motion.div key={i} className="group relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-6 text-center">
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <span className={`text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br ${stat.color} tracking-tighter relative z-10`}>
-                        <AnimatedCounter value={Number(stat.val)} />
-                    </span>
-                    <p className="text-xs sm:text-sm font-bold text-gray-400 mt-2 uppercase tracking-wider relative z-10">{stat.label}</p>
-                </motion.div>
-            ))}
-          </div>
-
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { label: 'Completion rate', value: `${stats.completionRate}%`, detail: `${sd.completed} finished of ${myList.length}`, tone: 'text-emerald-400' },
-              { label: 'Rating coverage', value: `${stats.ratingCoverage}%`, detail: `${sc.ratedCount} titles scored`, tone: 'text-blue-400' },
-              { label: 'Taste anchors', value: stats.favorites, detail: 'titles marked favorite', tone: 'text-pink-400' },
-              { label: 'Replay energy', value: stats.rewatches, detail: stats.dropRate > 20 ? `${stats.dropRate}% drop rate · curate harder` : `${stats.dropRate}% drop rate · committed`, tone: 'text-purple-400' },
+              { label: 'Finished', value: `${stats.completionRate}%`, detail: `${sd.completed} of ${myList.length} titles`, tone: 'text-emerald-400' },
+              { label: 'Backlog', value: sd.planning, detail: sd.planning > sd.completed ? 'larger than completed' : 'under control', tone: 'text-purple-400' },
+              { label: 'Average score', value: sc.meanScore, detail: `${sc.ratedCount} ratings recorded`, tone: 'text-blue-400' },
+              { label: 'Unrated', value: Math.max(0, myList.length - sc.ratedCount), detail: `${stats.ratingCoverage}% coverage`, tone: 'text-amber-400' },
             ].map(signal => <div key={signal.label} className="rounded-xl border border-[#282d35] bg-[#101318] p-4"><p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-600">{signal.label}</p><p className={`mt-2 text-2xl font-black ${signal.tone}`}>{signal.value}</p><p className="mt-1 text-xs text-gray-500">{signal.detail}</p></div>)}
           </div>
 
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Taste headline</p><p className="mt-3 text-lg font-bold text-white">{Object.entries(genres).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Start tagging genres'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Your strongest genre signal based on tracked titles.</p></div>
-            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Backlog pressure</p><p className="mt-3 text-lg font-bold text-white">{sd.planning > sd.completed ? 'Queue is winning' : 'You are in control'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">{sd.planning} planned versus {sd.completed} completed titles.</p></div>
-            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Scoring style</p><p className="mt-3 text-lg font-bold text-white">{Number(sc.meanScore) >= 8 ? 'Generous curator' : Number(sc.meanScore) >= 6 ? 'Balanced critic' : sc.ratedCount ? 'Tough critic' : 'Uncharted'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Mean {sc.meanScore}, median {sc.medianScore}, across {sc.ratedCount} ratings.</p></div>
+            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Next cleanup</p><p className="mt-3 text-lg font-bold text-white">{myList.length - sc.ratedCount > 0 ? `Rate ${Math.min(5, myList.length - sc.ratedCount)} titles` : 'Ratings complete'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">A smaller concrete task to improve recommendations and insights.</p></div>
+            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Watch behavior</p><p className="mt-3 text-lg font-bold text-white">{stats.dropRate > 20 ? 'Try shorter commitments' : stats.rewatches > 2 ? 'Comfort rewatcher' : 'Exploration mode'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">{stats.dropRate}% dropped · {stats.rewatches} rewatches logged.</p></div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1970,27 +1878,13 @@ export function StatsPage({ db, userId, username }) {
           </div>
 
           {/* Full-width Score Distribution Section */}
-          <div className="p-8 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-xl relative overflow-hidden">
-               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/5 pb-6 mb-6">
+          <div className="relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-5 sm:p-6">
+               <div className="flex flex-col justify-between gap-3 border-b border-white/5 pb-5 sm:flex-row sm:items-end">
                     <div>
-                        <h3 className="text-xl font-black text-white">Score Distribution</h3>
-                        <p className="text-xs text-gray-500 mt-1">Distribution frequency of your ratings (1 to 10 scale)</p>
+                        <h3 className="text-lg font-black text-white">How you score</h3>
+                        <p className="text-xs text-gray-500 mt-1">Your rating spread from 1 to 10</p>
                     </div>
-                    
-                    <div className="flex flex-wrap gap-4">
-                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Mean Score</p>
-                            <p className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight mt-1`}>{sc.meanScore}</p>
-                        </div>
-                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Median Score</p>
-                            <p className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight mt-1`}>{sc.medianScore}</p>
-                        </div>
-                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Total Rated</p>
-                            <p className="text-2xl font-black text-white mt-1">{sc.ratedCount}</p>
-                        </div>
-                    </div>
+                    <p className="text-xs font-bold text-gray-400">Mean <span className="text-white">{sc.meanScore}</span> · Median <span className="text-white">{sc.medianScore}</span></p>
                </div>
 
                {sc.ratedCount === 0 ? (
@@ -1998,9 +1892,9 @@ export function StatsPage({ db, userId, username }) {
                        <p className="text-sm">No scores rated yet. Click on any anime or visual novel to edit your entry and rate it!</p>
                    </div>
                ) : (
-                   <div className="pt-6 relative">
+                   <div className="relative pt-5">
                        {/* SVG/HTML Bar Columns */}
-                       <div className="flex justify-between items-end h-48 w-full gap-2 sm:gap-4 px-2">
+                       <div className="flex h-40 w-full items-end justify-between gap-2 px-1 sm:gap-4">
                            {sc.counts.map((count, index) => {
                                const scoreLabel = index + 1;
                                const heightPercent = count > 0 ? (count / sc.maxCount) * 100 : 0;
@@ -2014,11 +1908,11 @@ export function StatsPage({ db, userId, username }) {
                                        </AnimatePresence>
                                        
                                        {/* Column Bar */}
-                                       <motion.div 
+                                       <motion.div
                                            initial={{ height: 0 }}
                                            animate={{ height: `${heightPercent}%` }}
                                            transition={{ duration: 1, ease: "easeOut", delay: index * 0.05 }}
-                                           className={`w-full max-w-[40px] bg-gradient-to-t ${theme.gradient} rounded-t-lg transition-all group-hover:brightness-125`}
+                                           className={`w-full max-w-[42px] ${theme.progressbar} rounded-t-md opacity-80 transition-all group-hover:opacity-100`}
                                            style={{ minHeight: count > 0 ? '6px' : '2px' }}
                                        />
 
@@ -2410,7 +2304,8 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
       if(!db || !userId) return;
       const unsub = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), (doc) => {
           if(doc.exists()) {
-              setHallOfFame(doc.data().hallOfFame || Array(10).fill(null));
+              const stored = Array.isArray(doc.data().hallOfFame) ? doc.data().hallOfFame.slice(0, 10) : [];
+              setHallOfFame([...stored, ...Array(Math.max(0, 10 - stored.length)).fill(null)]);
           } else {
               setHallOfFame(Array(10).fill(null));
           }
@@ -2448,49 +2343,42 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
   };
 
   const updateHallOfFame = async (anime, overrideTitle = null) => {
+      if (activeSlotIndex === null) return;
       const newHall = [...hallOfFame];
       if(anime === null) {
           newHall[activeSlotIndex] = null;
       } else {
-          const img = anime.attributes.posterImage;
-          const imageSrc = img?.original || img?.large || img?.medium || img?.small || img?.tiny || "https://placehold.co/200x300?text=No+Image";
-          
+          const imageSrc = anime.imageUrl || anime.posterImage?.original || anime.posterImage?.large || anime.posterImage?.medium || anime.posterImage?.small || "https://placehold.co/200x300?text=No+Image";
+          const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || String(anime.kitsuId || anime.id).startsWith('v');
           newHall[activeSlotIndex] = {
-              id: anime.id,
-              title: overrideTitle || anime.attributes.canonicalTitle,
-              image: imageSrc
+              id: anime.kitsuId || anime.id,
+              title: overrideTitle?.trim() || anime.title || anime.canonicalTitle || 'Untitled',
+              image: imageSrc,
+              mediaType: isVn ? 'vn' : 'anime',
           };
       }
+      setHallOfFame(newHall);
       await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: newHall });
       setIsSelectorOpen(false);
+      setActiveSlotIndex(null);
+      showToast(anime === null ? 'Hall of Fame slot cleared.' : 'Hall of Fame updated.');
   };
 
-  const [draggedIdx, setDraggedIdx] = useState(null);
-
-  const handleDragStart = (e, idx) => {
-      setDraggedIdx(idx);
-      e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e, idx) => {
-      e.preventDefault();
-  };
-
-  const handleDrop = async (e, dropIndex) => {
-      e.preventDefault();
-      if (draggedIdx === null || draggedIdx === dropIndex) return;
-
+  const moveHallItem = async (index, direction) => {
+      const target = index + direction;
+      if (target < 0 || target >= hallOfFame.length) return;
       const newHof = [...hallOfFame];
-      const draggedItem = newHof[draggedIdx];
-      newHof.splice(draggedIdx, 1);
-      newHof.splice(dropIndex, 0, draggedItem);
-      
-      while(newHof.length < 10) newHof.push(null);
-      newHof.length = 10;
-
+      [newHof[index], newHof[target]] = [newHof[target], newHof[index]];
       setHallOfFame(newHof);
-      setDraggedIdx(null);
       await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: newHof });
+  };
+
+  const removeHallItem = async (index) => {
+      const newHof = [...hallOfFame];
+      newHof[index] = null;
+      setHallOfFame(newHof);
+      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: newHof });
+      showToast('Hall of Fame slot cleared.');
   };
 
   const stats = useMemo(() => {
@@ -2582,30 +2470,25 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
             {/* Hall of Fame */}
             <div className="relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-8">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
-                <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
+                <div className="relative z-10 mb-6 flex items-end justify-between gap-4"><div><h3 className="flex items-center gap-2 text-2xl font-black text-white"><TrophyIcon /> Hall of Fame</h3><p className="mt-1 text-xs text-gray-500">Your ten defining anime and visual novels. Use arrows to reorder.</p></div><span className="text-xs font-bold text-gray-600">{hallOfFame.filter(Boolean).length}/10</span></div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
                     {hallOfFame.map((item, i) => (
-                        <motion.div 
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, i)}
-                            onDragOver={(e) => handleDragOver(e, i)}
-                            onDrop={(e) => handleDrop(e, i)}
-                            whileHover={{ scale: 1.05, y: -5 }}
+                        <motion.div
                             key={i} 
                             onClick={() => handleSlotClick(i)}
-                            className={`aspect-[2/3] rounded-xl border-2 border-dashed ${item ? 'border-transparent shadow-lg' : 'border-white/10 hover:border-white/30'} flex items-center justify-center cursor-pointer relative overflow-hidden bg-black/20 group transition-all`}
+                            className={`group relative flex aspect-[2/3] cursor-pointer items-center justify-center overflow-hidden rounded-xl border ${item ? 'border-white/10 shadow-lg' : 'border-dashed border-white/10 hover:border-white/30'} bg-black/20 transition-all`}
                         >
                             {item ? (
                                 <>
                                     <img src={item.image || "https://placehold.co/200x300?text=?"} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
-                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-2 text-center z-10">
-                                        <p className="text-xs font-bold text-white mb-2">{item.title}</p>
-                                        <p className="text-[10px] text-gray-400">Click to Edit</p>
+                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/75 p-2 text-center opacity-0 transition-opacity group-hover:opacity-100">
+                                        <span className="mb-2 rounded bg-white/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-gray-300">{item.mediaType === 'vn' ? 'Visual novel' : 'Anime'}</span><p className="mb-3 line-clamp-3 text-xs font-bold text-white">{item.title}</p>
+                                        <div className="flex gap-1"><button title="Move left" disabled={i === 0} onClick={event => { event.stopPropagation(); moveHallItem(i, -1); }} className="rounded bg-white/10 px-2 py-1 text-xs text-white disabled:opacity-25">←</button><button title="Replace" onClick={event => { event.stopPropagation(); handleSlotClick(i); }} className="rounded bg-white px-2 py-1 text-[10px] font-bold text-black">Edit</button><button title="Remove" onClick={event => { event.stopPropagation(); removeHallItem(i); }} className="rounded bg-red-500/20 px-2 py-1 text-xs text-red-300">×</button><button title="Move right" disabled={i === 9} onClick={event => { event.stopPropagation(); moveHallItem(i, 1); }} className="rounded bg-white/10 px-2 py-1 text-xs text-white disabled:opacity-25">→</button></div>
                                     </div>
                                     <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30" />
                                 </>
                             ) : (
-                                <span className="text-xs font-black text-white/30 uppercase tracking-widest">Slot {i + 1}</span>
+                                <span className="text-center text-[10px] font-black uppercase tracking-widest text-white/30"><span className="mb-1 block text-xl font-light">+</span>Slot {i + 1}</span>
                             )}
                         </motion.div>
                     ))}
@@ -2761,20 +2644,27 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
         </div>
       )}
       
-      {isSelectorOpen && <HallOfFameSelector onClose={() => setIsSelectorOpen(false)} onSelect={updateHallOfFame} myList={myList} />}
+      {isSelectorOpen && <HallOfFameSelector onClose={() => { setIsSelectorOpen(false); setActiveSlotIndex(null); }} onSelect={updateHallOfFame} myList={myList} currentItem={activeSlotIndex === null ? null : hallOfFame[activeSlotIndex]} slotNumber={activeSlotIndex === null ? null : activeSlotIndex + 1} />}
     </div>
   );
 }
 
 function ActivityHeatmap({ data, theme }) {
     const days = useMemo(() => {
-        const d = [];
-        for(let i=0; i<60; i++) { 
-             d.push({ count: 0 });
-        }
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const d = Array.from({ length: 60 }, (_, index) => {
+            const date = new Date(today);
+            date.setDate(today.getDate() - (59 - index));
+            return { count: 0, key: date.toISOString().slice(0, 10), label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) };
+        });
+        const dayMap = new Map(d.map(day => [day.key, day]));
         data.forEach(item => {
-             const idx = Math.floor(Math.random() * 60);
-             d[idx].count++;
+             const raw = item.timestamp?.toDate?.() || (item.timestamp ? new Date(item.timestamp) : null);
+             if (!raw || Number.isNaN(raw.getTime())) return;
+             const key = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate()).toISOString().slice(0, 10);
+             const day = dayMap.get(key);
+             if (day) day.count++;
         });
         return d;
     }, [data]);
@@ -2794,7 +2684,7 @@ function ActivityHeatmap({ data, theme }) {
                         transition={{ delay: i * 0.01 }}
                         key={i} 
                         className={`w-3 h-3 rounded-sm ${color}`} 
-                        title={`${day.count} activities`} 
+                        title={`${day.label}: ${day.count} ${day.count === 1 ? 'activity' : 'activities'}`}
                     />
                 )
             })}
@@ -2802,95 +2692,36 @@ function ActivityHeatmap({ data, theme }) {
     )
 }
 
-function HallOfFameSelector({ onClose, onSelect, myList }) {
+function HallOfFameSelector({ onClose, onSelect, myList, currentItem, slotNumber }) {
     const [query, setQuery] = useState("");
-    const [results, setResults] = useState([]);
-    const [override, setOverride] = useState("");
+    const [mediaFilter, setMediaFilter] = useState("all");
+    const [override, setOverride] = useState(currentItem?.title || "");
     const [selected, setSelected] = useState(null);
+    const results = useMemo(() => (myList || []).filter(item => {
+        const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel' || String(item.kitsuId || item.id).startsWith('v');
+        const matchesType = mediaFilter === 'all' || (mediaFilter === 'vn' ? isVn : !isVn);
+        const matchesQuery = !query.trim() || String(item.title || item.canonicalTitle || '').toLowerCase().includes(query.trim().toLowerCase());
+        return matchesType && matchesQuery;
+    }).sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || String(a.title || '').localeCompare(String(b.title || ''))), [mediaFilter, myList, query]);
 
-    useEffect(() => {
-        const delay = setTimeout(async () => {
-            if(query.length < 3) return;
-            
-            const localMatches = (myList || [])
-                .filter(a => a.title.toLowerCase().includes(query.toLowerCase()))
-                .slice(0, 15)
-                .map(a => ({
-                    id: a.kitsuId,
-                    isLocal: true,
-                    attributes: {
-                        canonicalTitle: a.title,
-                        posterImage: { tiny: a.imageUrl || a.posterImage?.tiny }
-                    }
-                }));
+    const choose = (item) => {
+        setSelected(item);
+        setOverride(item.title || item.canonicalTitle || '');
+    };
+    const selectedIsVn = selected && (selected.mediaType === 'vn' || selected.showType === 'Visual Novel' || String(selected.kitsuId || selected.id).startsWith('v'));
+    const selectedImage = selected && (selected.imageUrl || selected.posterImage?.original || selected.posterImage?.large || selected.posterImage?.medium || selected.posterImage?.small);
 
-            try {
-                const apiResults = await searchAniList(query, 15);
-                
-                const combined = [...localMatches];
-                apiResults.forEach(apiItem => {
-                    if (!combined.some(c => String(c.id) === String(apiItem.id))) {
-                        combined.push(apiItem);
-                    }
-                });
-                
-                setResults(combined.slice(0, 20));
-            } catch (e) {
-                setResults(localMatches);
-            }
-        }, 300);
-        return () => clearTimeout(delay);
-    }, [query, myList]);
-
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-            <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="bg-gray-900 w-full max-w-lg rounded-2xl border border-white/10 p-6 shadow-2xl" 
-                onClick={e => e.stopPropagation()}
-            >
-                <h3 className="text-xl font-bold text-white mb-4">Select Anime</h3>
-                
-                {!selected ? (
-                    <>
-                        <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search..." className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white mb-4 focus:outline-none focus:border-blue-500" />
-                        <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-2">
-                            <button onClick={() => onSelect(null)} className="w-full p-3 text-left text-red-400 hover:bg-white/5 rounded-lg">Remove from slot</button>
-                            {results.map(anime => (
-                                <div key={anime.id} onClick={() => setSelected(anime)} className="flex items-center justify-between p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
-                                    <div className="flex items-center gap-3">
-                                        <img src={anime.attributes.posterImage?.tiny || "https://placehold.co/40x56?text=?"} className="w-10 h-14 object-cover rounded border border-white/5" referrerPolicy="no-referrer" />
-                                        <div>
-                                            <span className="text-white font-medium block">{anime.attributes.canonicalTitle}</span>
-                                            {anime.isLocal && <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">In Library</span>}
-                                        </div>
-                                    </div>
-                                    <span className="text-white/20 group-hover:text-white/50 transition-colors">
-                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </>
-                ) : (
-                    <div className="space-y-4">
-                        <div className="flex items-center gap-4 bg-white/5 p-4 rounded-xl">
-                             <img src={selected.attributes.posterImage?.tiny} className="w-12 h-16 object-cover rounded" referrerPolicy="no-referrer" />
-                             <span className="text-white font-bold">{selected.attributes.canonicalTitle}</span>
-                        </div>
-                        <div>
-                            <label className="text-xs text-gray-400 uppercase font-bold block mb-2">Override Title (Optional)</label>
-                            <input type="text" value={override} onChange={e => setOverride(e.target.value)} placeholder="e.g. 'The GOAT'" className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-white" />
-                        </div>
-                        <div className="flex gap-2">
-                             <button onClick={() => setSelected(null)} className="flex-1 py-2 bg-white/5 rounded-lg text-white">Back</button>
-                             <button onClick={() => onSelect(selected, override)} className="flex-1 py-2 bg-blue-600 rounded-lg text-white font-bold">Confirm</button>
-                        </div>
-                    </div>
-                )}
+    return createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#0e1014] shadow-2xl" onClick={event => event.stopPropagation()}>
+                <div className="flex items-start justify-between border-b border-white/10 p-5"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-yellow-400">Hall of Fame · Slot {slotNumber}</p><h3 className="mt-1 text-xl font-bold text-white">{selected ? 'Confirm your pick' : 'Choose from your library'}</h3><p className="mt-1 text-xs text-gray-500">Anime and visual novels are both supported.</p></div><button onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white"><CloseIcon /></button></div>
+                {!selected ? <>
+                    <div className="space-y-3 border-b border-white/5 p-4"><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your library…" className="w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-500" /><div className="flex gap-2">{[{ id: 'all', label: 'All' }, { id: 'anime', label: 'Anime' }, { id: 'vn', label: 'Visual novels' }].map(option => <button key={option.id} onClick={() => setMediaFilter(option.id)} className={`rounded-lg px-3 py-2 text-xs font-bold ${mediaFilter === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{option.label}</button>)}<span className="ml-auto self-center text-xs text-gray-600">{results.length} matches</span></div></div>
+                    <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto p-4 sm:grid-cols-3 md:grid-cols-4">{results.map(item => { const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel' || String(item.kitsuId || item.id).startsWith('v'); const image = item.imageUrl || item.posterImage?.large || item.posterImage?.medium || item.posterImage?.small; return <button key={String(item.kitsuId || item.id)} onClick={() => choose(item)} className="group overflow-hidden rounded-lg border border-white/5 bg-[#15181d] text-left transition-colors hover:border-white/20"><img src={image || 'https://placehold.co/200x300?text=No+Image'} className="aspect-[2/3] w-full object-cover" referrerPolicy="no-referrer" /><span className="block p-2"><span className="line-clamp-2 text-xs font-bold text-white">{item.title || item.canonicalTitle}</span><span className={`mt-1 block text-[9px] font-black uppercase tracking-wider ${isVn ? 'text-purple-400' : 'text-blue-400'}`}>{isVn ? 'Visual novel' : 'Anime'}{item.favorite ? ' · Favorite' : ''}</span></span></button>})}{results.length === 0 && <div className="col-span-full py-16 text-center text-sm text-gray-500">No matching titles in your library.</div>}</div>
+                    {currentItem && <div className="border-t border-white/5 p-4"><button onClick={() => onSelect(null)} className="text-xs font-bold text-red-400 hover:text-red-300">Remove current selection</button></div>}
+                </> : <div className="space-y-5 overflow-y-auto p-5"><div className="flex gap-4 rounded-xl border border-white/5 bg-white/[0.03] p-4"><img src={selectedImage || 'https://placehold.co/100x150?text=No+Image'} className="h-28 w-20 rounded-lg object-cover" referrerPolicy="no-referrer" /><div><span className={`text-[10px] font-black uppercase tracking-wider ${selectedIsVn ? 'text-purple-400' : 'text-blue-400'}`}>{selectedIsVn ? 'Visual novel' : 'Anime'}</span><p className="mt-1 text-lg font-bold text-white">{selected.title || selected.canonicalTitle}</p><p className="mt-2 text-xs text-gray-500">This will replace the current contents of slot {slotNumber}.</p></div></div><label className="block"><span className="mb-2 block text-[10px] font-black uppercase tracking-wider text-gray-500">Display title</span><input value={override} onChange={event => setOverride(event.target.value)} maxLength={100} className="w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-500" /></label><div className="flex gap-3"><button onClick={() => setSelected(null)} className="flex-1 rounded-lg border border-white/10 py-3 text-sm font-bold text-gray-300 hover:bg-white/5">Back</button><button onClick={() => onSelect(selected, override)} className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-500">Save selection</button></div></div>}
             </motion.div>
-        </div>
+        </div>, document.body
     );
 }
 
