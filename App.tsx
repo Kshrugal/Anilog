@@ -653,6 +653,9 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
     const total = anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
     const score = anime.score || 0;
     const status = anime.status;
+    const favorite = Boolean(anime.favorite);
+    const priority = anime.priority || 'normal';
+    const personalTags = Array.isArray(anime.personalTags) ? anime.personalTags : [];
 
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel';
     const percentWidth = isVn ? progress : Math.min(100, (progress / (total || 12)) * 100);
@@ -680,7 +683,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
 
                 <img src={image || "https://placehold.co/100x150?text=?"} className="w-12 h-16 object-cover rounded-md shadow-md z-10" loading="lazy" alt={title} referrerPolicy="no-referrer" />
                 <div className="flex-grow min-w-0 z-10">
-                    <h4 className="font-bold text-white truncate group-hover:text-blue-400 transition-colors">{title}</h4>
+                    <h4 className="flex items-center gap-2 font-bold text-white truncate group-hover:text-blue-400 transition-colors">{favorite && <HeartIcon className="h-3.5 w-3.5 shrink-0 fill-pink-500 text-pink-500" />}{title}</h4>
                     <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
                         {status && <span className="capitalize text-gray-500">{status === 'watching' && isVn ? 'reading' : status}</span>}
                         {isVn ? (
@@ -689,7 +692,9 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                             total > 0 && <span>• {progress}/{total} EP</span>
                         )}
                         {score > 0 && <span className="text-yellow-500 flex items-center gap-1">★ {score}</span>}
+                        {priority === 'high' && <span className="font-bold text-red-400">• HIGH PRIORITY</span>}
                     </div>
+                    {personalTags.length > 0 && <div className="mt-2 flex gap-1 overflow-hidden">{personalTags.slice(0, 3).map(tag => <span key={tag} className="rounded bg-white/5 px-2 py-0.5 text-[9px] text-gray-500">#{tag}</span>)}</div>}
                 </div>
                 {isAiring && (
                     <div className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-[10px] font-bold border border-blue-500/30 whitespace-nowrap z-10">
@@ -742,8 +747,14 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                     </div>
                 )}
 
+                {favorite && (
+                    <div className="absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-full border border-pink-400/30 bg-black/60 text-pink-400 backdrop-blur-md">
+                        <HeartIcon className="h-3.5 w-3.5 fill-current" />
+                    </div>
+                )}
+
                 {isAiring && (
-                    <div className="absolute top-2 left-2 bg-blue-600/90 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-bold text-white shadow-lg animate-pulse z-30">
+                    <div className={`absolute top-2 ${favorite ? 'left-11' : 'left-2'} bg-blue-600/90 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-bold text-white shadow-lg animate-pulse z-30`}>
                         ON AIR: {nextEpDay}
                     </div>
                 )}

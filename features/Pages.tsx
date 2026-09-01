@@ -143,6 +143,8 @@ export function HomePage({ db, userId, username, showToast }) {
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("watching");
   const [mediaFilter, setMediaFilter] = useState("all"); // 'all' | 'anime' | 'vn'
+  const [collectionFilter, setCollectionFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
   const [selectedAnimeKitsuId, setSelectedAnimeKitsuId] = useState(null);
   const [selectedAnimeData, setSelectedAnimeData] = useState(null);
   const [heroAnime, setHeroAnime] = useState(null);
@@ -225,6 +227,10 @@ export function HomePage({ db, userId, username, showToast }) {
         );
     }
 
+    if (collectionFilter === 'favorites') filtered = filtered.filter(item => item.favorite);
+    if (collectionFilter === 'priority') filtered = filtered.filter(item => item.priority === 'high');
+    if (tagFilter !== 'all') filtered = filtered.filter(item => Array.isArray(item.personalTags) && item.personalTags.includes(tagFilter));
+
     return filtered.sort((a, b) => {
         if (sortBy === 'score') {
             return (b.score || 0) - (a.score || 0);
@@ -234,7 +240,7 @@ export function HomePage({ db, userId, username, showToast }) {
             return (b.updatedAt || 0) - (a.updatedAt || 0);
         }
     });
-  }, [myList, statusFilter, sortBy, localQuery, mediaFilter]);
+  }, [myList, statusFilter, sortBy, localQuery, mediaFilter, collectionFilter, tagFilter]);
 
   const handleQuickIncrement = async (anime) => {
     if(!db || !userId) return;
@@ -287,6 +293,7 @@ export function HomePage({ db, userId, username, showToast }) {
   };
 
   const plannedList = myList.filter(a => a.status === 'planned');
+  const availableTags = useMemo(() => [...new Set(myList.flatMap(item => Array.isArray(item.personalTags) ? item.personalTags : []))].sort(), [myList]);
   const watchingList = useMemo(() => myList
     .filter(item => item.status === 'watching')
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)), [myList]);
@@ -432,6 +439,7 @@ export function HomePage({ db, userId, username, showToast }) {
         </div>
 
         {/* Media Filter Segmented Control */}
+        <div className="flex flex-wrap items-center gap-2">
         <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl w-fit">
             {[
                 { id: 'all', label: 'All' },
@@ -446,6 +454,13 @@ export function HomePage({ db, userId, username, showToast }) {
                     {tab.label}
                 </button>
             ))}
+        </div>
+        <div className="flex gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
+            {[{ id: 'all', label: 'Everything' }, { id: 'favorites', label: 'Favorites' }, { id: 'priority', label: 'High priority' }].map(tab => (
+                <button key={tab.id} onClick={() => setCollectionFilter(tab.id)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${collectionFilter === tab.id ? 'bg-pink-500/20 text-pink-300' : 'text-gray-500 hover:text-white'}`}>{tab.label}</button>
+            ))}
+        </div>
+        {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-3 py-2 text-xs font-bold text-gray-300"><option value="all">All tags</option>{availableTags.map(tag => <option key={tag} value={tag}>#{tag}</option>)}</select>}
         </div>
 
         <div className="flex items-center gap-2">
@@ -956,6 +971,14 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [episodes, setEpisodes] = useState(0);
     const [score, setScore] = useState(0);
     const [notes, setNotes] = useState("");
+    const [favorite, setFavorite] = useState(false);
+    const [priority, setPriority] = useState("normal");
+    const [repeatCount, setRepeatCount] = useState(0);
+    const [startedAt, setStartedAt] = useState("");
+    const [completedAt, setCompletedAt] = useState("");
+    const [personalTags, setPersonalTags] = useState([]);
+    const [tagDraft, setTagDraft] = useState("");
+    const [shareNoteActivity, setShareNoteActivity] = useState(true);
     const [loading, setLoading] = useState(false);
     const [existingData, setExistingData] = useState(null);
     const [fetchedGenres, setFetchedGenres] = useState(anime.genres || anime.attributes?.genres || []);
@@ -1031,6 +1054,13 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     setEpisodes(data.watchedEpisodes);
                     setScore(data.score);
                     setNotes(data.notes || "");
+                    setFavorite(Boolean(data.favorite));
+                    setPriority(data.priority || "normal");
+                    setRepeatCount(Number(data.repeatCount || 0));
+                    setStartedAt(data.startedAt || "");
+                    setCompletedAt(data.completedAt || "");
+                    setPersonalTags(Array.isArray(data.personalTags) ? data.personalTags : []);
+                    setShareNoteActivity(data.shareNoteActivity !== false);
                     if(data.genres) setFetchedGenres(data.genres); 
                 } else if (isOwner) {
                     setStatus("watching");
@@ -1047,6 +1077,9 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         setLoading(true);
         try {
             const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(kitsuId));
+            const today = new Date().toISOString().slice(0, 10);
+            const resolvedStartedAt = startedAt || (status === 'watching' || status === 'completed' ? today : '');
+            const resolvedCompletedAt = completedAt || (status === 'completed' ? today : '');
             const data = {
                 kitsuId: String(kitsuId),
                 title,
@@ -1056,6 +1089,13 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 watchedEpisodes: Number(episodes),
                 score: Number(score),
                 notes,
+                favorite,
+                priority,
+                repeatCount: Number(repeatCount),
+                startedAt: resolvedStartedAt || null,
+                completedAt: resolvedCompletedAt || null,
+                personalTags,
+                shareNoteActivity,
                 genres: fetchedGenres, 
                 mediaType: isVn ? 'vn' : 'anime',
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
@@ -1075,7 +1115,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 if (existingData.score !== score && score > 0) {
                      await logActivity({ userId, username, type: 'rate', animeTitle: title, animeKitsuId: kitsuId, animeImageUrl: poster, context: `rated ${score}/10` });
                 }
-                if (existingData.notes !== notes && notes) {
+                if (existingData.notes !== notes && notes && shareNoteActivity) {
                      await logActivity({ userId, username, type: 'note', animeTitle: title, animeKitsuId: kitsuId, animeImageUrl: poster, context: `added a note to`, noteContent: notes });
                 }
                 if (existingData.watchedEpisodes !== episodes && episodes > 0) {
@@ -1106,6 +1146,13 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         planned: 'bg-yellow-500',
         paused: 'bg-orange-500',
         dropped: 'bg-red-500'
+    };
+
+    const addTag = () => {
+        const cleaned = tagDraft.trim().replace(/^#/, '').slice(0, 24);
+        if (!cleaned || personalTags.some(tag => tag.toLowerCase() === cleaned.toLowerCase()) || personalTags.length >= 8) return;
+        setPersonalTags(current => [...current, cleaned]);
+        setTagDraft('');
     };
 
     return createPortal(
@@ -1251,8 +1298,33 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     </div>
                                 </div>
 
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <button onClick={() => setFavorite(current => !current)} className={`flex items-center justify-between rounded-xl border p-4 text-left transition-colors ${favorite ? 'border-pink-500/30 bg-pink-500/10 text-pink-300' : 'border-white/10 bg-black/20 text-gray-400 hover:bg-white/5'}`}>
+                                        <span><span className="block text-sm font-black">Favorite</span><span className="mt-1 block text-[10px] uppercase tracking-wider opacity-60">Pin to your taste profile</span></span>
+                                        <HeartIcon className={`h-5 w-5 ${favorite ? 'fill-current' : ''}`} />
+                                    </button>
+                                    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                                        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Priority</label>
+                                        <div className="mt-2 grid grid-cols-3 gap-1">
+                                            {['low', 'normal', 'high'].map(level => <button key={level} onClick={() => setPriority(level)} className={`rounded-lg px-2 py-2 text-[10px] font-black uppercase ${priority === level ? 'bg-white text-black' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{level}</button>)}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-4 sm:grid-cols-3">
+                                    <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Started</span><input type="date" value={startedAt} onChange={event => setStartedAt(event.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
+                                    <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Finished</span><input type="date" value={completedAt} onChange={event => setCompletedAt(event.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
+                                    <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Rewatches</span><input type="number" min="0" max="999" value={repeatCount} onChange={event => setRepeatCount(Math.max(0, Number(event.target.value)))} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
+                                </div>
+
                                 <div className="space-y-3">
-                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label>
+                                    <div className="flex items-center justify-between"><label className="text-xs font-bold uppercase tracking-widest text-gray-500">Personal tags</label><span className="text-[10px] text-gray-600">{personalTags.length}/8</span></div>
+                                    <div className="flex gap-2"><input value={tagDraft} onChange={event => setTagDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} placeholder="e.g. comfort watch" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600" /><button onClick={addTag} className="rounded-xl bg-white/10 px-4 text-xs font-black text-white hover:bg-white/20">Add</button></div>
+                                    {personalTags.length > 0 && <div className="flex flex-wrap gap-2">{personalTags.map(tag => <button key={tag} onClick={() => setPersonalTags(current => current.filter(item => item !== tag))} className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-bold text-blue-300">#{tag} ×</button>)}</div>}
+                                </div>
+
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Journal note</label><label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-500"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500" /> Share update to activity</label></div>
                                     <textarea 
                                         value={notes} 
                                         onChange={(e) => setNotes(e.target.value)}
