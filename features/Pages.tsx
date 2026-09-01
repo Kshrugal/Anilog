@@ -319,7 +319,9 @@ export function HomePage({ db, userId, username, showToast }) {
     const activeThisWeek = myList.filter(item => Number(item.updatedAt || 0) > Date.now() - 7 * 24 * 60 * 60 * 1000).length;
     const currentYear = String(new Date().getFullYear());
     const completedThisYear = myList.filter(item => item.status === 'completed' && String(item.completedAt || '').startsWith(currentYear)).length;
-    return { completed, completedThisYear, episodes, remainingHours: Math.round((remainingEpisodes * AVG_EPISODE_MINUTES) / 60), activeThisWeek };
+    const favorites = myList.filter(item => item.favorite).length;
+    const completionRate = myList.length ? Math.round((completed / myList.length) * 100) : 0;
+    return { completed, completedThisYear, episodes, remainingHours: Math.round((remainingEpisodes * AVG_EPISODE_MINUTES) / 60), activeThisWeek, favorites, completionRate };
   }, [myList, watchingList]);
 
   return (
@@ -357,6 +359,20 @@ export function HomePage({ db, userId, username, showToast }) {
         <div className="min-w-0 flex-1"><div className="flex items-end justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">{new Date().getFullYear()} completion quest</p><p className="mt-1 text-xl font-black text-white">{dashboardStats.completedThisYear} of {annualGoal} anime</p></div><span className="text-sm font-black text-emerald-300">{Math.min(100, Math.round((dashboardStats.completedThisYear / annualGoal) * 100))}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${Math.min(100, (dashboardStats.completedThisYear / annualGoal) * 100)}%` }} /></div></div>
         <label className="flex shrink-0 items-center gap-2 text-xs text-gray-500">Goal <input type="number" min="1" max="999" value={annualGoal} onChange={async event => { const next = Math.max(1, Number(event.target.value)); setAnnualGoal(next); await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { annualAnimeGoal: next }); }} className="w-20 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-center font-black text-white" /></label>
       </div>
+
+      <section className="grid gap-3 md:grid-cols-[1.35fr_1fr]">
+        <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5">
+          <div className="flex items-start justify-between gap-4"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Command deck</p><h3 className="mt-1 text-lg font-bold text-white">What do you want to do?</h3></div><DiceIcon className="h-5 w-5 text-gray-600" /></div>
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <button onClick={() => setPage('search')} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-3 text-left transition-colors hover:bg-white/[0.07]"><SearchIcon className="mb-2 h-4 w-4 text-blue-400" /><span className="block text-xs font-bold text-white">Find a title</span><span className="mt-0.5 hidden text-[10px] text-gray-600 sm:block">Search everything</span></button>
+            <button onClick={() => setStatusFilter('planned')} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-3 text-left transition-colors hover:bg-white/[0.07]"><ListChecksIcon className="mb-2 h-4 w-4 text-purple-400" /><span className="block text-xs font-bold text-white">Open backlog</span><span className="mt-0.5 hidden text-[10px] text-gray-600 sm:block">{plannedList.length} planned</span></button>
+            <button onClick={() => plannedList.length >= 2 ? setShowDecider(true) : showToast("Add at least two planned titles first.", "error")} className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-3 text-left transition-colors hover:bg-white/[0.07]"><DiceIcon className="mb-2 h-4 w-4 text-pink-400" /><span className="block text-xs font-bold text-white">Pick for me</span><span className="mt-0.5 hidden text-[10px] text-gray-600 sm:block">Beat decision fatigue</span></button>
+          </div>
+        </div>
+        <button onClick={() => setPage('stats')} className="group rounded-xl border border-[#2d3040] bg-gradient-to-br from-[#171925] to-[#111319] p-5 text-left transition-colors hover:border-[#3b4054]">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Library pulse</p><div className="mt-3 flex items-end justify-between"><div><p className="text-3xl font-black text-white">{dashboardStats.completionRate}%</p><p className="mt-1 text-xs text-gray-500">completion rate · {dashboardStats.favorites} favorites</p></div><ChevronRightIcon className="h-5 w-5 text-gray-600 transition-transform group-hover:translate-x-1 group-hover:text-white" /></div>
+        </button>
+      </section>
 
       {heroAnime && !loading && (
           <motion.div 
@@ -1736,6 +1752,12 @@ export function StatsPage({ db, userId, username }) {
 
     const animeCount = myList.filter(a => !(a.mediaType === 'vn' || a.showType === 'Visual Novel')).length;
     const vnCount = myList.filter(a => (a.mediaType === 'vn' || a.showType === 'Visual Novel')).length;
+    const librarySize = myList.length;
+    const completionRate = librarySize ? Math.round((completedCount / librarySize) * 100) : 0;
+    const ratingCoverage = librarySize ? Math.round((ratedCount / librarySize) * 100) : 0;
+    const dropRate = librarySize ? Math.round((droppedCount / librarySize) * 100) : 0;
+    const favorites = myList.filter(a => a.favorite).length;
+    const rewatches = myList.reduce((sum, a) => sum + Number(a.rewatchCount || 0), 0);
 
     return {
       totalHours: (totalMinutes / 60).toFixed(0),
@@ -1743,6 +1765,11 @@ export function StatsPage({ db, userId, username }) {
       totalEpisodes: totalEpisodesWatched,
       completedVnsCount,
       readingVnsCount,
+      completionRate,
+      ratingCoverage,
+      dropRate,
+      favorites,
+      rewatches,
       recentlyCompleted: completed.slice(-10).reverse(),
       topRated: highestRated.slice(0, 10),
       
@@ -1789,11 +1816,12 @@ export function StatsPage({ db, userId, username }) {
   const fd = stats.formatDistribution;
 
   return (
-    <div className="flex flex-col space-y-8">
+    <div className="mx-auto flex max-w-7xl flex-col space-y-8">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-4xl font-black text-white tracking-tight">Your Stats</h2>
-          <p className="text-sm text-gray-500 mt-1">Detailed metrics of your experience log</p>
+          <p className={`mb-2 text-[10px] font-black uppercase tracking-[0.22em] ${theme.accentText}`}>Library intelligence</p>
+          <h2 className="text-4xl font-black text-white tracking-tight">Insights</h2>
+          <p className="text-sm text-gray-500 mt-1">Patterns, progress, and the personality of your library.</p>
         </div>
       </div>
 
@@ -1814,6 +1842,21 @@ export function StatsPage({ db, userId, username }) {
                     <p className="text-xs sm:text-sm font-bold text-gray-400 mt-2 uppercase tracking-wider relative z-10">{stat.label}</p>
                 </motion.div>
             ))}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              { label: 'Completion rate', value: `${stats.completionRate}%`, detail: `${sd.completed} finished of ${myList.length}`, tone: 'text-emerald-400' },
+              { label: 'Rating coverage', value: `${stats.ratingCoverage}%`, detail: `${sc.ratedCount} titles scored`, tone: 'text-blue-400' },
+              { label: 'Taste anchors', value: stats.favorites, detail: 'titles marked favorite', tone: 'text-pink-400' },
+              { label: 'Replay energy', value: stats.rewatches, detail: stats.dropRate > 20 ? `${stats.dropRate}% drop rate · curate harder` : `${stats.dropRate}% drop rate · committed`, tone: 'text-purple-400' },
+            ].map(signal => <div key={signal.label} className="rounded-xl border border-[#282d35] bg-[#101318] p-4"><p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-600">{signal.label}</p><p className={`mt-2 text-2xl font-black ${signal.tone}`}>{signal.value}</p><p className="mt-1 text-xs text-gray-500">{signal.detail}</p></div>)}
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Taste headline</p><p className="mt-3 text-lg font-bold text-white">{Object.entries(genres).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Start tagging genres'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Your strongest genre signal based on tracked titles.</p></div>
+            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Backlog pressure</p><p className="mt-3 text-lg font-bold text-white">{sd.planning > sd.completed ? 'Queue is winning' : 'You are in control'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">{sd.planning} planned versus {sd.completed} completed titles.</p></div>
+            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Scoring style</p><p className="mt-3 text-lg font-bold text-white">{Number(sc.meanScore) >= 8 ? 'Generous curator' : Number(sc.meanScore) >= 6 ? 'Balanced critic' : sc.ratedCount ? 'Tough critic' : 'Uncharted'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Mean {sc.meanScore}, median {sc.medianScore}, across {sc.ratedCount} ratings.</p></div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2352,7 +2395,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
 }
 
 export function ProfilePage({ db, userId, currentUser, username, setUsername, showToast, openUserProfile }) {
-  const { theme, setThemeId } = useContext(ThemeContext);
+  const { theme, setThemeId, viewMode, setViewMode, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
   const [hallOfFame, setHallOfFame] = useState([]);
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
@@ -2611,6 +2654,14 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                                 <div className={`h-1 w-full rounded-full ${t.progressbar}`}></div>
                             </button>
                         ))}
+                    </div>
+                </div>
+                <div className="border-t border-white/5 pt-5">
+                    <h3 className="mb-4 text-sm font-black text-white">Workspace</h3>
+                    <div className="space-y-3">
+                        <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Content density</span><span className="grid grid-cols-2 gap-2 rounded-lg bg-black/25 p-1">{['comfortable', 'compact'].map(option => <button type="button" key={option} onClick={() => setDensity(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${density === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
+                        <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Default library view</span><span className="grid grid-cols-2 gap-2 rounded-lg bg-black/25 p-1">{['grid', 'list'].map(option => <button type="button" key={option} onClick={() => setViewMode(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${viewMode === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
+                        {[{ label: 'Collapse sidebar', value: sidebarCollapsed, setter: setSidebarCollapsed }, { label: 'Show sidebar tips', value: showQuickTip, setter: setShowQuickTip }].map(option => <div key={option.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-3 py-3"><span className="text-xs font-bold text-gray-300">{option.label}</span><button type="button" onClick={() => option.setter(!option.value)} className={`relative h-5 w-9 rounded-full transition-colors ${option.value ? theme.accentBg : 'bg-gray-700'}`} aria-pressed={option.value}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${option.value ? 'translate-x-[18px]' : 'translate-x-0.5'}`} /></button></div>)}
                     </div>
                 </div>
             </div>

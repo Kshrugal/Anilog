@@ -55,6 +55,8 @@ import {
   Compass as CompassIcon,
   List as LibraryIcon,
   Bell as BellIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 // Removed AI and GenreGalaxy imports as requested
 
@@ -84,6 +86,15 @@ export const appId = import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.app
 export const APP_NAME = "AniLog";
 const CREATOR_NAME = "KshrugalJain";
 const IS_PREVIEW = import.meta.env.VITE_DEPLOY_ENV === 'preview';
+
+export function AniLogMark({ className = "h-9 w-9" }) {
+  return (
+    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-[10px] bg-[#f5f7fa] text-[#0b0d10] shadow-[0_0_0_1px_rgba(255,255,255,.15)] ${className}`} aria-hidden="true">
+      <span className="text-[13px] font-black tracking-[-0.18em]">AL</span>
+      <span className="absolute bottom-1 left-1.5 flex items-end gap-[2px]"><i className="h-1 w-1 rounded-sm bg-blue-500" /><i className="h-1.5 w-1 rounded-sm bg-purple-500" /><i className="h-2 w-1 rounded-sm bg-cyan-500" /></span>
+    </span>
+  );
+}
 
 const PAGE_PATHS = {
   home: '/',
@@ -291,6 +302,12 @@ export const ThemeContext = createContext({
   showTrail: true,
   setShowTrail: (show) => {},
   setPage: (page) => {},
+  sidebarCollapsed: false,
+  setSidebarCollapsed: (collapsed) => {},
+  density: 'comfortable',
+  setDensity: (density) => {},
+  showQuickTip: true,
+  setShowQuickTip: (show) => {},
 });
 
 export const MAJOR_GENRES = [
@@ -1050,11 +1067,17 @@ export default function App() {
   const [themeId, setThemeId] = useState(() => localStorage.getItem('anilog_theme') || 'neon');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('anilog_view') || 'grid');
   const [showTrail, setShowTrail] = useState(() => localStorage.getItem('anilog_trail') !== 'false');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('anilog_sidebar_collapsed') === 'true');
+  const [density, setDensity] = useState(() => localStorage.getItem('anilog_density') || 'comfortable');
+  const [showQuickTip, setShowQuickTip] = useState(() => localStorage.getItem('anilog_quick_tip') !== 'false');
 
   // Effects to save state
   useEffect(() => localStorage.setItem('anilog_theme', themeId), [themeId]);
   useEffect(() => localStorage.setItem('anilog_view', viewMode), [viewMode]);
   useEffect(() => localStorage.setItem('anilog_trail', String(showTrail)), [showTrail]);
+  useEffect(() => localStorage.setItem('anilog_sidebar_collapsed', String(sidebarCollapsed)), [sidebarCollapsed]);
+  useEffect(() => localStorage.setItem('anilog_density', density), [density]);
+  useEffect(() => localStorage.setItem('anilog_quick_tip', String(showQuickTip)), [showQuickTip]);
 
   // Global Keybind for Command Palette
   useEffect(() => {
@@ -1316,14 +1339,14 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage }}>
+      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
       <div className="min-h-screen bg-[#0b0d10] text-gray-100 font-sans flex flex-col relative selection:bg-blue-500/30">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
         
         <PreviewBanner />
         <header className="sticky top-0 z-50 flex h-16 items-center border-b border-[#242830] bg-[#0b0d10]/95 px-4 backdrop-blur-xl lg:px-6">
-          <button className="flex w-52 items-center gap-3 text-left" onClick={() => setPage(guestMode ? 'discovery' : 'home')}><span className={`grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br ${theme.gradient} text-sm font-black text-white`}>A</span><span className="text-lg font-black tracking-tight text-white">AniLog</span></button>
+          <button className={`flex items-center gap-3 text-left transition-[width] ${sidebarCollapsed ? 'w-14' : 'w-52'}`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}><AniLogMark /><span className={`text-lg font-black tracking-tight text-white transition-opacity ${sidebarCollapsed ? 'hidden' : 'block'}`}>AniLog</span></button>
           <button onClick={() => setIsCmdOpen(true)} className="mx-auto hidden w-full max-w-xl items-center gap-3 rounded-lg border border-[#2a2f38] bg-[#14171c] px-4 py-2.5 text-left text-sm text-gray-500 transition-colors hover:border-[#3a414c] hover:text-gray-300 sm:flex"><SearchIcon className="h-4 w-4" /><span className="flex-1">Search anime, users, and commands</span><kbd className="rounded border border-[#333943] bg-[#1b1f25] px-2 py-0.5 text-[10px]">⌘K</kbd></button>
           <div className="ml-auto flex w-52 justify-end gap-1"><button className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><BellIcon className="h-5 w-5" /></button>{!guestMode && <button onClick={() => setPage('profile')} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><ProfileIcon className="h-5 w-5" /></button>}<button onClick={guestMode ? leaveGuestMode : handleLogout} className="rounded-lg p-2.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400"><LogoutIcon className="h-5 w-5" /></button></div>
         </header>
@@ -1335,11 +1358,12 @@ export default function App() {
         )}
 
         <div className="mx-auto flex w-full max-w-[1680px] flex-1">
-        <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-[#242830] bg-[#0d0f12] p-4 md:flex">
-          <nav className="space-y-1">{(guestMode ? ['search','discovery','social'] : ['home','search','discovery','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} onClick={() => setPage(navItem)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] ${page===navItem?theme.accentText:''}`} />{labels[navItem]}</button>})}</nav>
-          <div className="mt-auto rounded-xl border border-[#242830] bg-[#14171c] p-4"><p className="text-xs font-bold text-white">Quick tip</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Press ⌘K anywhere to navigate or change themes.</p></div>
+        <aside className={`sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col border-r border-[#242830] bg-[#0d0f12] p-3 transition-[width] duration-200 md:flex ${sidebarCollapsed ? 'w-[72px]' : 'w-60'}`}>
+          <button onClick={() => setSidebarCollapsed(value => !value)} className={`mb-3 flex items-center rounded-lg p-2 text-gray-500 transition-colors hover:bg-[#191d23] hover:text-white ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}><span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${sidebarCollapsed ? 'hidden' : 'block'}`}>Workspace</span>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}</button>
+          <nav className="space-y-1">{(guestMode ? ['search','discovery','social'] : ['home','search','discovery','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} title={labels[navItem]} onClick={() => setPage(navItem)} className={`flex w-full items-center rounded-lg py-2.5 text-sm font-semibold transition-colors ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] shrink-0 ${page===navItem?theme.accentText:''}`} /><span className={sidebarCollapsed ? 'hidden' : 'block'}>{labels[navItem]}</span>{page===navItem && sidebarCollapsed && <span className={`absolute left-0 h-5 w-0.5 rounded-r ${theme.accentBg}`} />}</button>})}</nav>
+          {showQuickTip && !sidebarCollapsed && <div className="mt-auto rounded-xl border border-[#242830] bg-[#14171c] p-4"><p className="text-xs font-bold text-white">Quick tip</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Press ⌘K anywhere to navigate or change themes.</p></div>}
         </aside>
-        <main className="z-10 flex min-w-0 flex-1 flex-col p-4 pb-28 pt-7 sm:p-7 lg:p-10">
+        <main className={`z-10 flex min-w-0 flex-1 flex-col p-4 pb-28 pt-7 ${density === 'compact' ? 'sm:p-5 lg:p-6' : 'sm:p-7 lg:p-10'}`}>
           <AnimatePresence mode="popLayout">
             <motion.div className="flex-1" key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
