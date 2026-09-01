@@ -339,8 +339,13 @@ export const logActivity = async ({ userId, username, type, animeTitle, animeKit
   }
 };
 
-export const exportUserData = (list, username) => {
-    const dataStr = JSON.stringify(list, null, 2);
+export const exportUserData = (list, username, activity = []) => {
+    const dataStr = JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      username,
+      animeList: list,
+      activity,
+    }, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -349,6 +354,7 @@ export const exportUserData = (list, username) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 };
 
 // --- Visual Components ---

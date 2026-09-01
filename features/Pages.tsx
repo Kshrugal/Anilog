@@ -52,6 +52,9 @@ import {
   Flame as FlameIcon,
   ListChecks as ListChecksIcon,
   ChevronRight as ChevronRightIcon,
+  Trash2 as TrashIcon,
+  AlertTriangle as AlertTriangleIcon,
+  RotateCcw as ResetIcon,
 } from 'lucide-react';
 import {
   APP_NAME, AVG_EPISODE_MINUTES, KITSU_API_URL, MAJOR_GENRES,
@@ -1950,12 +1953,16 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   const [importing, setImporting] = useState(false);
   const [updateExisting, setUpdateExisting] = useState(false);
   const [error, setError] = useState("");
+  const [lastImport, setLastImport] = useState(null);
 
   const existingIds = useMemo(() => new Set(myList.map(item => String(item.kitsuId || item.id))), [myList]);
+  const existingTitles = useMemo(() => new Set(myList.map(item => normalizeTitle(item.title || '')).filter(Boolean)), [myList]);
   const importableEntries = useMemo(() => {
     if (!preview) return [];
-    return preview.entries.filter(entry => updateExisting || !existingIds.has(String(entry.kitsuId)));
-  }, [existingIds, preview, updateExisting]);
+    return preview.entries.filter(entry => updateExisting || (
+      !existingIds.has(String(entry.kitsuId)) && !existingTitles.has(normalizeTitle(entry.title || ''))
+    ));
+  }, [existingIds, existingTitles, preview, updateExisting]);
 
   const statusCounts = useMemo(() => {
     if (!preview) return {};
@@ -1998,6 +2005,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
         await batch.commit();
       }
       onImported(importableEntries);
+      setLastImport({ username: preview.user.name, imported: importableEntries.length, skipped: preview.entries.length - importableEntries.length });
       showToast(`Imported ${importableEntries.length} AniList ${importableEntries.length === 1 ? 'entry' : 'entries'}!`, 'success');
       setPreview(null);
       setAniListUsername("");
@@ -2037,6 +2045,12 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
       </form>
 
       {error && <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">{error}</p>}
+      {lastImport && !preview && (
+        <div className="mt-4 flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200 sm:flex-row sm:items-center sm:justify-between">
+          <span><strong>{lastImport.imported}</strong> entries imported from {lastImport.username}.</span>
+          <span className="text-xs text-emerald-300/70">{lastImport.skipped} duplicates preserved</span>
+        </div>
+      )}
 
       {preview && (
         <div className="mt-6 rounded-2xl border border-white/10 bg-black/30 p-5">
@@ -2055,7 +2069,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
           <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-white/5 p-4">
             <label className="flex cursor-pointer items-center gap-3 text-sm text-gray-300">
               <input type="checkbox" checked={updateExisting} onChange={event => setUpdateExisting(event.target.checked)} className="h-4 w-4 accent-blue-500" />
-              Update matching AniLog entries with AniList values
+              Overwrite previously imported AniList entries
             </label>
             <span className="whitespace-nowrap text-xs text-gray-500">{preview.entries.length - importableEntries.length} skipped</span>
           </div>
@@ -2064,6 +2078,104 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
             {importing ? "Importing…" : `Import ${importableEntries.length} ${importableEntries.length === 1 ? 'Entry' : 'Entries'}`}
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+function LibraryResetPanel({ db, userId, username, myList, activityData, onReset, showToast }) {
+  const confirmationPhrase = 'DELETE MY LIBRARY';
+  const [isOpen, setIsOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [backupReady, setBackupReady] = useState(true);
+
+  const downloadBackup = (activities = activityData) => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      username,
+      animeList: myList,
+      activity: activities,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `anilog_${username}_before_reset_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const resetLibrary = async () => {
+    if (confirmation !== confirmationPhrase || isResetting) return;
+    setIsResetting(true);
+    try {
+      const listSnapshot = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
+      const activitySnapshot = await getDocs(query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', userId)));
+      const fullActivity = activitySnapshot.docs.map(activityDoc => activityDoc.data());
+
+      if (backupReady) downloadBackup(fullActivity);
+
+      const refs = [...listSnapshot.docs, ...activitySnapshot.docs].map(snapshotDoc => snapshotDoc.ref);
+      for (let offset = 0; offset < refs.length; offset += 400) {
+        const batch = writeBatch(db);
+        refs.slice(offset, offset + 400).forEach(ref => batch.delete(ref));
+        await batch.commit();
+      }
+      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: Array(10).fill(null) });
+      onReset();
+      setConfirmation('');
+      setIsOpen(false);
+      showToast(`Library reset complete. ${listSnapshot.size} entries removed.`, 'success');
+    } catch (resetError) {
+      console.error('Library reset failed', resetError);
+      showToast('Library reset could not finish. Please try again.', 'error');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  return (
+    <div className="p-8 bg-red-500/[0.045] backdrop-blur-xl border border-red-500/20 rounded-[2rem] shadow-2xl">
+      <h3 className="text-xl font-black text-white mb-3 flex items-center gap-3">
+        <TrashIcon className="text-red-400" size={20} />
+        Reset Library
+      </h3>
+      <p className="text-xs text-gray-400 leading-relaxed font-medium">Remove your anime list, tracking activity, and Hall of Fame while keeping your account, username, and friends. Useful before a clean AniList re-import.</p>
+      <button onClick={() => setIsOpen(true)} disabled={myList.length === 0} className="mt-6 w-full py-4 flex items-center justify-center gap-3 bg-red-500/10 border border-red-500/25 rounded-2xl text-sm font-black text-red-300 uppercase tracking-widest transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+        <ResetIcon size={18} /> Reset Tracking Data
+      </button>
+
+      {isOpen && createPortal(
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/90 p-4 backdrop-blur-xl" onClick={() => !isResetting && setIsOpen(false)}>
+          <div className="w-full max-w-lg rounded-[2rem] border border-red-500/25 bg-[#0b0b0d] p-7 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-start gap-4">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-red-500/10 text-red-400"><AlertTriangleIcon /></div>
+              <div>
+                <h4 className="text-2xl font-black text-white">Start with a clean library?</h4>
+                <p className="mt-2 text-sm leading-relaxed text-gray-400">This permanently removes <strong className="text-white">{myList.length} library entries</strong>, your tracking activity, and Hall of Fame. Your account and social connections stay intact.</p>
+              </div>
+            </div>
+
+            <label className="mt-6 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
+              <input type="checkbox" checked={backupReady} onChange={event => setBackupReady(event.target.checked)} className="h-4 w-4 accent-red-500" />
+              Download a JSON backup before deleting
+            </label>
+
+            <div className="mt-5">
+              <label className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">Type {confirmationPhrase} to confirm</label>
+              <input value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={isResetting} placeholder={confirmationPhrase} className="mt-2 w-full rounded-xl border border-red-500/20 bg-black px-4 py-3 font-mono text-sm text-white outline-none focus:ring-2 focus:ring-red-500/40" />
+            </div>
+
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button onClick={() => setIsOpen(false)} disabled={isResetting} className="rounded-xl border border-white/10 bg-white/5 py-3 text-sm font-bold text-gray-300 hover:bg-white/10">Cancel</button>
+              <button onClick={resetLibrary} disabled={confirmation !== confirmationPhrase || isResetting} className="rounded-xl bg-red-600 py-3 text-sm font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40">{isResetting ? 'Resetting…' : 'Delete tracking data'}</button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -2412,13 +2524,27 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                     <motion.button 
                         whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.1)' }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => exportUserData(myList, username)}
+                        onClick={() => exportUserData(myList, username, activityData)}
                         className="w-full py-4 flex items-center justify-center gap-3 bg-white/5 border border-white/10 rounded-2xl text-sm font-black text-white uppercase tracking-widest transition-all"
                     >
                         <DownloadIcon size={18} />
                         Export My Data
                     </motion.button>
                 </div>
+
+                <LibraryResetPanel
+                    db={db}
+                    userId={userId}
+                    username={username}
+                    myList={myList}
+                    activityData={activityData}
+                    onReset={() => {
+                        setMyList([]);
+                        setActivityData([]);
+                        setHallOfFame(Array(10).fill(null));
+                    }}
+                    showToast={showToast}
+                />
             </div>
         </div>
       )}
