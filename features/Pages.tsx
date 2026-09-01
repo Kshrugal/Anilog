@@ -323,14 +323,14 @@ export function HomePage({ db, userId, username, showToast }) {
   }, [myList, watchingList]);
 
   return (
-    <div className="flex flex-col space-y-8 py-2">
+    <div className="mx-auto flex max-w-7xl flex-col space-y-7">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className={`mb-2 text-[10px] font-black uppercase tracking-[0.28em] ${theme.accentText}`}>Your watchspace</p>
-          <h2 className="text-4xl font-black tracking-[-0.04em] text-white sm:text-5xl">{greeting}, {username}</h2>
+          <p className={`mb-2 text-[10px] font-bold uppercase tracking-[0.22em] ${theme.accentText}`}>Overview</p>
+          <h2 className="text-3xl font-bold tracking-[-0.03em] text-white sm:text-4xl">{greeting}, {username}</h2>
           <p className="mt-2 text-sm text-gray-500">Pick up where you left off or shape what comes next.</p>
         </div>
-        <button onClick={() => setPage('search')} className="group flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white px-5 py-3 text-sm font-black text-black shadow-xl transition-transform hover:-translate-y-0.5">
+        <button onClick={() => setPage('search')} className="group flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500">
           Add something new <ChevronRightIcon className="h-4 w-4 transition-transform group-hover:translate-x-1" />
         </button>
       </div>
@@ -342,19 +342,18 @@ export function HomePage({ db, userId, username, showToast }) {
           { label: 'Episodes logged', value: dashboardStats.episodes, detail: 'across your library', icon: FlameIcon },
           { label: 'Queue remaining', value: `${dashboardStats.remainingHours}h`, detail: `${dashboardStats.activeThisWeek} active this week`, icon: ClockIcon },
         ].map(({ label, value, detail, icon: Icon }) => (
-          <motion.div whileHover={{ y: -3 }} key={label} className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur-xl sm:p-5">
-            <div className={`absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-0 blur-3xl transition-opacity group-hover:opacity-30 ${theme.accentBg}`} />
+          <motion.div key={label} className="group relative overflow-hidden rounded-xl border border-[#262b33] bg-[#12151a] p-4 sm:p-5">
             <div className="mb-5 flex items-center justify-between">
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-500">{label}</p>
               <Icon className={`h-4 w-4 ${theme.accentText}`} />
             </div>
-            <p className="text-3xl font-black tracking-tight text-white sm:text-4xl">{value}</p>
+            <p className="text-2xl font-bold tracking-tight text-white sm:text-3xl">{value}</p>
             <p className="mt-1 text-xs text-gray-600">{detail}</p>
           </motion.div>
         ))}
       </div>
 
-      <div className="flex flex-col gap-4 rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.06] p-5 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-4 rounded-xl border border-[#26332e] bg-[#111916] p-5 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1"><div className="flex items-end justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">{new Date().getFullYear()} completion quest</p><p className="mt-1 text-xl font-black text-white">{dashboardStats.completedThisYear} of {annualGoal} anime</p></div><span className="text-sm font-black text-emerald-300">{Math.min(100, Math.round((dashboardStats.completedThisYear / annualGoal) * 100))}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${Math.min(100, (dashboardStats.completedThisYear / annualGoal) * 100)}%` }} /></div></div>
         <label className="flex shrink-0 items-center gap-2 text-xs text-gray-500">Goal <input type="number" min="1" max="999" value={annualGoal} onChange={async event => { const next = Math.max(1, Number(event.target.value)); setAnnualGoal(next); await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { annualAnimeGoal: next }); }} className="w-20 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-center font-black text-white" /></label>
       </div>
@@ -363,16 +362,16 @@ export function HomePage({ db, userId, username, showToast }) {
           <motion.div 
               initial={{ opacity: 0, y: 20 }} 
               animate={{ opacity: 1, y: 0 }} 
-              className="group relative min-h-[360px] w-full cursor-pointer overflow-hidden rounded-[2rem] border border-white/10 bg-[#0a0a0a] shadow-2xl lg:min-h-[420px]"
+              className="group relative min-h-[260px] w-full cursor-pointer overflow-hidden rounded-xl border border-[#262b33] bg-[#111419] lg:min-h-[300px]"
               onClick={() => setSelectedAnimeKitsuId(heroAnime.kitsuId)}
           >
               <img src={heroAnime.imageUrl} className="absolute inset-0 h-full w-full object-cover opacity-50 blur-[1px] transition-transform duration-[2s] group-hover:scale-105" alt="" referrerPolicy="no-referrer" />
               <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20"></div>
-              <div className="relative flex min-h-[360px] max-w-3xl flex-col justify-end p-6 sm:p-10 lg:min-h-[420px]">
+              <div className="relative flex min-h-[260px] max-w-3xl flex-col justify-end p-6 sm:p-8 lg:min-h-[300px]">
                   <p className={`text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2 ${theme.accentText}`}>
                       <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span> Continue Watching
                   </p>
-                  <h3 className="mb-6 line-clamp-2 text-4xl font-black tracking-[-0.04em] text-white sm:text-6xl">{heroAnime.title}</h3>
+                  <h3 className="mb-5 line-clamp-2 text-3xl font-bold tracking-[-0.03em] text-white sm:text-4xl">{heroAnime.title}</h3>
                   <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex min-w-0 items-center gap-3">
                           <span className="text-gray-300 text-sm font-bold">Ep {heroAnime.watchedEpisodes} / {heroAnime.totalEpisodes || "?"}</span>
@@ -412,7 +411,7 @@ export function HomePage({ db, userId, username, showToast }) {
               const progress = Number(anime.watchedEpisodes || 0);
               const total = Number(anime.totalEpisodes || 0);
               return (
-                <button key={anime.id} onClick={() => setSelectedAnimeKitsuId(anime.kitsuId)} className="group flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.035] p-3 text-left transition-colors hover:bg-white/[0.075]">
+                <button key={anime.id} onClick={() => setSelectedAnimeKitsuId(anime.kitsuId)} className="group flex min-w-0 items-center gap-4 rounded-xl border border-[#262b33] bg-[#12151a] p-3 text-left transition-colors hover:bg-[#191d23]">
                   <img src={anime.imageUrl} alt="" className="h-20 w-14 shrink-0 rounded-xl object-cover" referrerPolicy="no-referrer" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-black text-white">{anime.title}</span>

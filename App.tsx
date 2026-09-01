@@ -54,6 +54,8 @@ import {
   Heart as HeartIcon,
   FileText as DocumentTextIcon,
   Compass as CompassIcon,
+  List as LibraryIcon,
+  Bell as BellIcon,
 } from 'lucide-react';
 // Removed AI and GenreGalaxy imports as requested
 
@@ -1355,63 +1357,15 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage }}>
-      <div className="min-h-screen bg-[#050505] text-gray-100 font-sans flex flex-col relative overflow-hidden selection:bg-white/20">
+      <div className="min-h-screen bg-[#0b0d10] text-gray-100 font-sans flex flex-col relative selection:bg-blue-500/30">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
         
-        <StarField active={true} />
-        <MouseTrail themeId={themeId} active={showTrail} />
-
         <PreviewBanner />
-        
-        {/* Dynamic Nebula - Physics Based */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <motion.div
-            animate={{
-              x: [0, 50, -50, 0],
-              y: [0, -30, 30, 0],
-              scale: [1, 1.2, 1],
-              opacity: [0.15, 0.25, 0.15]
-            }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            className={`absolute top-[-20%] left-[-10%] w-[800px] h-[800px] rounded-full blur-[150px] mix-blend-screen ${theme.accentBg.replace('bg-', 'bg-')}`}
-          />
-          <motion.div
-            animate={{
-              x: [0, -50, 50, 0],
-              y: [0, 30, -30, 0],
-              scale: [1, 1.3, 1],
-              opacity: [0.1, 0.2, 0.1]
-            }}
-            transition={{ duration: 25, repeat: Infinity, ease: "linear", delay: 2 }}
-            className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-purple-900/30 rounded-full blur-[150px] mix-blend-screen"
-          />
-        </div>
-        
-        <header className="sticky top-0 z-30 border-b border-white/5 bg-[#050505]/75 backdrop-blur-2xl">
-          <nav className="container mx-auto flex items-center justify-between px-4 py-3">
-            <h1 className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}>
-              <ScrambleText text={APP_NAME} className="" />
-            </h1>
-            <div className="hidden items-center gap-1 rounded-2xl border border-white/10 bg-white/[0.035] p-1 md:flex">
-              {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats']).map(navItem => {
-                const labels = { home: 'Home', search: 'Search', discovery: 'Discover', social: 'Community', stats: 'Insights' };
-                return (
-                  <button key={navItem} onClick={() => setPage(navItem)} className={`rounded-xl px-4 py-2 text-xs font-black transition-all ${page === navItem ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:bg-white/5 hover:text-white'}`}>
-                    {labels[navItem]}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex items-center space-x-2">
-              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
-                <ProfileIcon />
-              </motion.button>}
-              <motion.button whileTap={{ scale: 0.9 }} onClick={guestMode ? leaveGuestMode : handleLogout} title={guestMode ? "Sign in" : "Logout"} className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
-                <LogoutIcon />
-              </motion.button>
-            </div>
-          </nav>
+        <header className="sticky top-0 z-50 flex h-16 items-center border-b border-[#242830] bg-[#0b0d10]/95 px-4 backdrop-blur-xl lg:px-6">
+          <button className="flex w-52 items-center gap-3 text-left" onClick={() => setPage(guestMode ? 'discovery' : 'home')}><span className={`grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br ${theme.gradient} text-sm font-black text-white`}>A</span><span className="text-lg font-black tracking-tight text-white">AniLog</span></button>
+          <button onClick={() => setIsCmdOpen(true)} className="mx-auto hidden w-full max-w-xl items-center gap-3 rounded-lg border border-[#2a2f38] bg-[#14171c] px-4 py-2.5 text-left text-sm text-gray-500 transition-colors hover:border-[#3a414c] hover:text-gray-300 sm:flex"><SearchIcon className="h-4 w-4" /><span className="flex-1">Search anime, users, and commands</span><kbd className="rounded border border-[#333943] bg-[#1b1f25] px-2 py-0.5 text-[10px]">⌘K</kbd></button>
+          <div className="ml-auto flex w-52 justify-end gap-1"><button className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><BellIcon className="h-5 w-5" /></button>{!guestMode && <button onClick={() => setPage('profile')} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><ProfileIcon className="h-5 w-5" /></button>}<button onClick={guestMode ? leaveGuestMode : handleLogout} className="rounded-lg p-2.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400"><LogoutIcon className="h-5 w-5" /></button></div>
         </header>
 
         {guestMode && (
@@ -1420,7 +1374,12 @@ export default function App() {
           </div>
         )}
 
-        <main className="container z-10 mx-auto flex-grow p-4 pb-32 pt-7 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-[1680px] flex-1">
+        <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-[#242830] bg-[#0d0f12] p-4 md:flex">
+          <nav className="space-y-1">{(guestMode ? ['search','discovery','social'] : ['home','search','discovery','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} onClick={() => setPage(navItem)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] ${page===navItem?theme.accentText:''}`} />{labels[navItem]}</button>})}</nav>
+          <div className="mt-auto rounded-xl border border-[#242830] bg-[#14171c] p-4"><p className="text-xs font-bold text-white">Quick tip</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Press ⌘K anywhere to navigate or change themes.</p></div>
+        </aside>
+        <main className="z-10 min-w-0 flex-1 p-4 pb-28 pt-7 sm:p-7 lg:p-10">
           <AnimatePresence mode="popLayout">
             <motion.div key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
@@ -1431,30 +1390,26 @@ export default function App() {
           
           <FooterInfo />
         </main>
+        </div>
 
-        {/* Floating Magnetic Navigation Dock */}
-        <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2 md:hidden">
-          <div className="relative flex items-center gap-2 px-3 py-2 bg-[#0a0a0a]/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#242830] bg-[#0d0f12]/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden">
+          <div className="mx-auto flex max-w-md items-center justify-around">
             {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats', 'profile']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 
                       key={navItem} 
-                      whileHover={{ scale: 1.1, y: -2 }}
                       whileTap={{ scale: 0.95 }} 
                       onClick={() => setPage(navItem)} 
-                      className={`relative p-3 rounded-xl transition-all duration-300 group overflow-hidden ${isActive ? "text-white" : "text-gray-500 hover:text-white"}`}
+                      className={`relative flex min-w-12 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors ${isActive ? "text-white" : "text-gray-600"}`}
                   >
                       {isActive && (
                           <motion.div 
                               layoutId="nav-glow"
-                              className={`absolute inset-0 rounded-xl bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]`}
+                              className="absolute inset-0 rounded-lg bg-[#20252d]"
                               transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                           />
                       )}
-                      {/* Spotlight Effect */}
-                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-white/10 to-transparent pointer-events-none" />
-                      
                       <div className="relative z-10">
                           {navItem === 'home' && <HomeIcon />}
                           {navItem === 'search' && <SearchIcon />}
@@ -1463,6 +1418,7 @@ export default function App() {
                           {navItem === 'stats' && <StatsIcon />}
                           {navItem === 'profile' && <ProfileIcon />}
                       </div>
+                      <span className="relative z-10">{{home:'Library',search:'Search',discovery:'Discover',social:'Social',stats:'Stats',profile:'Profile'}[navItem]}</span>
                   </motion.button>
               )
             })}
