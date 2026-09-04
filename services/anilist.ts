@@ -147,6 +147,36 @@ export async function getAniListDiscovery(perPage = 10) {
   };
 }
 
+export async function getAniListAiringSchedule(start: Date, days = 7) {
+  const startSeconds = Math.floor(start.getTime() / 1000);
+  const endSeconds = startSeconds + (days * 24 * 60 * 60);
+  const schedule: any[] = [];
+  let page = 1;
+  let hasNextPage = true;
+  while (hasNextPage && page <= 4) {
+    const data = await queryAniList(`query ($start: Int!, $end: Int!, $page: Int!) {
+    Page(page: $page, perPage: 50) {
+      pageInfo { hasNextPage }
+      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+        id
+        episode
+        airingAt
+        media { ${MEDIA_FIELDS} }
+      }
+    }
+  }`, { start: startSeconds, end: endSeconds, page });
+    schedule.push(...(data.Page?.airingSchedules || []));
+    hasNextPage = Boolean(data.Page?.pageInfo?.hasNextPage);
+    page += 1;
+  }
+  return schedule.map((slot: any) => ({
+    id: slot.id,
+    episode: slot.episode,
+    airingAt: slot.airingAt,
+    media: mapAniListMedia(slot.media),
+  }));
+}
+
 export async function getAniListPersonalized(genres: string[], perPage = 18) {
   if (!genres.length) return [];
   const data = await queryAniList(`query ($genres: [String], $perPage: Int!) {

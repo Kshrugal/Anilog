@@ -9,7 +9,7 @@ const server = await preview({
 });
 
 try {
-  for (const path of ['/', '/search', '/discover', '/social', '/stats', '/profile', '/users/smoke-test-user']) {
+  for (const path of ['/', '/search', '/discover', '/schedule', '/decks', '/social', '/stats', '/profile', '/users/smoke-test-user']) {
     const response = await fetch(`http://${host}:${port}${path}`);
     const html = await response.text();
 

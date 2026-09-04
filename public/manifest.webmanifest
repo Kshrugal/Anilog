@@ -8,5 +8,10 @@
   "theme_color": "#050505",
   "icons": [
     { "src": "/anilog-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "My Library", "short_name": "Library", "url": "/", "icons": [{ "src": "/anilog-mark.svg", "sizes": "any", "type": "image/svg+xml" }] },
+    { "name": "Airing Schedule", "short_name": "Schedule", "url": "/schedule", "icons": [{ "src": "/anilog-mark.svg", "sizes": "any", "type": "image/svg+xml" }] },
+    { "name": "Community Decks", "short_name": "Decks", "url": "/decks", "icons": [{ "src": "/anilog-mark.svg", "sizes": "any", "type": "image/svg+xml" }] }
   ]
 }

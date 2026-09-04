@@ -58,6 +58,9 @@ import {
   Compass as CompassIcon,
   List as LibraryIcon,
   Bell as BellIcon,
+  CalendarDays as ScheduleIcon,
+  Layers3 as DecksIcon,
+  Menu as MenuIcon,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
@@ -104,6 +107,8 @@ const PAGE_PATHS = {
   search: '/search',
   discovery: '/discover',
   social: '/social',
+  schedule: '/schedule',
+  decks: '/decks',
   stats: '/stats',
   profile: '/profile',
 };
@@ -113,6 +118,8 @@ const PAGE_META = {
   search: ['Search Anime & Visual Novels — AniLog', 'Search AniList and VNDB to find your next anime or visual novel.'],
   discovery: ['Discover Anime — AniLog', 'Explore trending, airing, upcoming, and top-rated anime powered by AniList.'],
   social: ['Anime Activity & Friends — AniLog', 'Explore community activity and public anime profiles on AniLog.'],
+  schedule: ['Anime Airing Schedule — AniLog', 'See the next seven days of anime releases in your local timezone.'],
+  decks: ['Community Anime & VN Decks — AniLog', 'Explore and publish shareable curated anime and visual novel collections.'],
   stats: ['Your Anime Stats — AniLog', 'Explore your watch time, ratings, genres, milestones, and anime history.'],
   profile: ['Your Profile — AniLog', 'Manage your AniLog profile, appearance, data, and hall of fame.'],
   user_profile: ['Community Profile — AniLog', 'View an AniLog community member’s public anime profile and library.'],
@@ -358,12 +365,13 @@ export const logActivity = async ({ userId, username, type, animeTitle, animeKit
   }
 };
 
-export const exportUserData = (list, username, activity = []) => {
+export const exportUserData = (list, username, activity = [], extras = {}) => {
     const dataStr = JSON.stringify({
       exportedAt: new Date().toISOString(),
       username,
       animeList: list,
       activity,
+      ...extras,
     }, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -747,6 +755,8 @@ function CommandPalette({ isOpen, onClose, setPage, theme, setThemeId, userId })
             { id: 'search', label: 'Go to Search', icon: <SearchIcon />, action: () => setPage('search') },
             { id: 'stats', label: 'Go to Stats', icon: <StatsIcon />, action: () => setPage('stats') },
             { id: 'social', label: 'Go to Social', icon: <SocialIcon />, action: () => setPage('social') },
+            { id: 'schedule', label: 'Open Airing Schedule', icon: <ScheduleIcon />, action: () => setPage('schedule') },
+            { id: 'decks', label: 'Explore Community Decks', icon: <DecksIcon />, action: () => setPage('decks') },
             { id: 'profile', label: 'Go to Profile', icon: <ProfileIcon />, action: () => setPage('profile') },
         ];
         
@@ -927,6 +937,8 @@ const HomePage = lazy(() => loadPages().then(module => ({ default: module.HomePa
 const SearchPage = lazy(() => loadPages().then(module => ({ default: module.SearchPage })));
 const DiscoveryPage = lazy(() => loadPages().then(module => ({ default: module.DiscoveryPage })));
 const SocialPage = lazy(() => loadPages().then(module => ({ default: module.SocialPage })));
+const SchedulePage = lazy(() => loadPages().then(module => ({ default: module.SchedulePage })));
+const DecksPage = lazy(() => loadPages().then(module => ({ default: module.DecksPage })));
 const StatsPage = lazy(() => loadPages().then(module => ({ default: module.StatsPage })));
 const ProfilePage = lazy(() => loadPages().then(module => ({ default: module.ProfilePage })));
 const UserProfilePage = lazy(() => loadPages().then(module => ({ default: module.UserProfilePage })));
@@ -985,6 +997,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const page = getPageFromPath(location.pathname);
 
   useEffect(() => {
@@ -1280,7 +1293,6 @@ export default function App() {
   const pageTransition = { type: "spring", stiffness: 100, damping: 20, duration: 0.3 } as any;
 
   const renderPage = () => {
-    console.log("Rendering page:", page);
     switch (page) {
       case "home": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
@@ -1291,9 +1303,11 @@ export default function App() {
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
         : <StatsPage db={db} userId={userId} username={username} />;
       case "social": return <SocialPage db={db} userId={userId} username={username} showToast={showToast} openUserProfile={openUserProfile} readOnly={guestMode} />;
+      case "schedule": return <SchedulePage db={db} userId={userId} username={username} readOnly={guestMode} />;
+      case "decks": return <DecksPage db={db} userId={userId} username={username} showToast={showToast} readOnly={guestMode} />;
       case "profile": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
-        : <ProfilePage db={db} userId={userId} currentUser={currentUser} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
+        : <ProfilePage db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
       case "user_profile": return viewTargetUser
         ? <UserProfilePage db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} readOnly={guestMode} />
         : <div className="py-24 text-center text-gray-500">Loading profile…</div>;
@@ -1325,7 +1339,7 @@ export default function App() {
         <div className="mx-auto flex w-full max-w-[1680px] flex-1">
         <aside className={`sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col border-r border-[#242830] bg-[#0d0f12] p-3 transition-[width] duration-200 md:flex ${sidebarCollapsed ? 'w-[72px]' : 'w-60'}`}>
           <button onClick={() => setSidebarCollapsed(value => !value)} className={`mb-3 flex items-center rounded-lg p-2 text-gray-500 transition-colors hover:bg-[#191d23] hover:text-white ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}><span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${sidebarCollapsed ? 'hidden' : 'block'}`}>Workspace</span>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}</button>
-          <nav className="space-y-1">{(guestMode ? ['search','discovery','social'] : ['home','search','discovery','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} title={labels[navItem]} onClick={() => setPage(navItem)} className={`flex w-full items-center rounded-lg py-2.5 text-sm font-semibold transition-colors ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] shrink-0 ${page===navItem?theme.accentText:''}`} /><span className={sidebarCollapsed ? 'hidden' : 'block'}>{labels[navItem]}</span>{page===navItem && sidebarCollapsed && <span className={`absolute left-0 h-5 w-0.5 rounded-r ${theme.accentBg}`} />}</button>})}</nav>
+          <nav className="space-y-1">{(guestMode ? ['search','discovery','schedule','decks','social'] : ['home','search','discovery','schedule','decks','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',schedule:'Schedule',decks:'Decks',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,schedule:ScheduleIcon,decks:DecksIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} title={labels[navItem]} onClick={() => setPage(navItem)} className={`relative flex w-full items-center rounded-lg py-2.5 text-sm font-semibold transition-colors ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] shrink-0 ${page===navItem?theme.accentText:''}`} /><span className={sidebarCollapsed ? 'hidden' : 'block'}>{labels[navItem]}</span>{page===navItem && sidebarCollapsed && <span className={`absolute left-0 h-5 w-0.5 rounded-r ${theme.accentBg}`} />}</button>})}</nav>
           {showQuickTip && !sidebarCollapsed && <div className="mt-auto rounded-xl border border-[#242830] bg-[#14171c] p-4"><p className="text-xs font-bold text-white">Quick tip</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Press ⌘K anywhere to navigate or change themes.</p></div>}
         </aside>
         <main className={`z-10 flex min-w-0 flex-1 flex-col p-4 pb-28 pt-7 ${density === 'compact' ? 'sm:p-5 lg:p-6' : 'sm:p-7 lg:p-10'}`}>
@@ -1341,9 +1355,11 @@ export default function App() {
         </main>
         </div>
 
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#242830] bg-[#0d0f12]/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden">
+        {isMobileMoreOpen && !guestMode && <div className="fixed inset-0 z-[55] bg-black/65 md:hidden" onClick={() => setIsMobileMoreOpen(false)}><div className="absolute inset-x-3 bottom-20 rounded-xl border border-white/10 bg-[#12151a] p-3 shadow-2xl" onClick={event => event.stopPropagation()}><p className="px-2 pb-2 text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">More AniLog</p>{[{item:'discovery',label:'Discover',Icon:CompassIcon},{item:'decks',label:'Decks',Icon:DecksIcon},{item:'stats',label:'Insights',Icon:StatsIcon},{item:'profile',label:'Profile',Icon:ProfileIcon}].map(({item,label,Icon}) => <button key={item} onClick={() => { setPage(item); setIsMobileMoreOpen(false); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-bold ${page === item ? 'bg-white/10 text-white' : 'text-gray-400'}`}><Icon className="h-5 w-5" />{label}</button>)}</div></div>}
+
+        <div className="fixed inset-x-0 bottom-0 z-[60] border-t border-[#242830] bg-[#0d0f12]/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden">
           <div className="mx-auto flex max-w-md items-center justify-around">
-            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats', 'profile']).map((navItem) => {
+            {(guestMode ? ['search', 'discovery', 'schedule', 'decks', 'social'] : ['home', 'search', 'schedule', 'social']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 
@@ -1363,14 +1379,17 @@ export default function App() {
                           {navItem === 'home' && <HomeIcon />}
                           {navItem === 'search' && <SearchIcon />}
                           {navItem === 'discovery' && <CompassIcon />}
+                          {navItem === 'schedule' && <ScheduleIcon />}
+                          {navItem === 'decks' && <DecksIcon />}
                           {navItem === 'social' && <SocialIcon />}
                           {navItem === 'stats' && <StatsIcon />}
                           {navItem === 'profile' && <ProfileIcon />}
                       </div>
-                      <span className="relative z-10">{{home:'Library',search:'Search',discovery:'Discover',social:'Social',stats:'Stats',profile:'Profile'}[navItem]}</span>
+                      <span className="relative z-10">{{home:'Library',search:'Search',discovery:'Discover',schedule:'Schedule',decks:'Decks',social:'Social'}[navItem]}</span>
                   </motion.button>
               )
             })}
+            {!guestMode && <motion.button whileTap={{ scale: 0.95 }} onClick={() => setIsMobileMoreOpen(value => !value)} className={`relative flex min-w-12 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-bold ${(isMobileMoreOpen || ['discovery','decks','stats','profile'].includes(page)) ? 'text-white' : 'text-gray-600'}`}><MenuIcon /><span>More</span></motion.button>}
           </div>
         </div>
       </div>

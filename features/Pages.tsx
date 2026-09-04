@@ -23,8 +23,6 @@ import {
   serverTimestamp,
   writeBatch,
   orderBy,
-  arrayUnion,
-  arrayRemove, 
   addDoc,
   deleteDoc,
 } from "firebase/firestore";
@@ -54,6 +52,10 @@ import {
   AlertTriangle as AlertTriangleIcon,
   RotateCcw as ResetIcon,
   MessageCircle as CommentIcon,
+  Clock3 as ClockIcon,
+  Layers3 as DeckIcon,
+  Copy as CopyIcon,
+  Plus as PlusIcon,
 } from 'lucide-react';
 import {
   APP_NAME, AVG_EPISODE_MINUTES, KITSU_API_URL, MAJOR_GENRES,
@@ -62,7 +64,7 @@ import {
   DeciderModal, JournalView, exportUserData,
   fetchMediaDetails, logActivity, normalizeTitle,
 } from "../App";
-import { getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
+import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -232,6 +234,8 @@ export function HomePage({ db, userId, username, showToast }) {
 
     if (collectionFilter === 'favorites') filtered = filtered.filter(item => item.favorite);
     if (collectionFilter === 'priority') filtered = filtered.filter(item => item.priority === 'high');
+    if (collectionFilter === 'unrated') filtered = filtered.filter(item => !Number(item.score || 0));
+    if (collectionFilter === 'stale') filtered = filtered.filter(item => item.status === 'watching' && (Date.now() - Number(item.updatedAt || 0)) > 14 * 24 * 60 * 60 * 1000);
     if (tagFilter !== 'all') filtered = filtered.filter(item => Array.isArray(item.personalTags) && item.personalTags.includes(tagFilter));
 
     return filtered.sort((a, b) => {
@@ -447,7 +451,7 @@ export function HomePage({ db, userId, username, showToast }) {
             ))}
         </div>
         <div className="flex gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
-            {[{ id: 'all', label: 'Everything' }, { id: 'favorites', label: 'Favorites' }, { id: 'priority', label: 'High priority' }].map(tab => (
+            {[{ id: 'all', label: 'Everything' }, { id: 'favorites', label: 'Favorites' }, { id: 'priority', label: 'Priority' }, { id: 'unrated', label: 'Unrated' }, { id: 'stale', label: 'Stale 14d' }].map(tab => (
                 <button key={tab.id} onClick={() => setCollectionFilter(tab.id)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${collectionFilter === tab.id ? 'bg-pink-500/20 text-pink-300' : 'text-gray-500 hover:text-white'}`}>{tab.label}</button>
             ))}
         </div>
@@ -563,7 +567,7 @@ export function HomePage({ db, userId, username, showToast }) {
   );
 }
 
-export function SearchPage({ db, userId, username, onConfetti, showToast, readOnly = false }) {
+export function SearchPage({ db, userId, username, onConfetti, showToast: _showToast, readOnly = false }) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -807,12 +811,19 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
 function SocialActions({ db, activityId, userId, username, readOnly }) {
     const [interactions, setInteractions] = useState([]);
     const [showComments, setShowComments] = useState(false);
+    const [loaded, setLoaded] = useState(false);
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
-    useEffect(() => {
-        if (!db || !activityId) return;
-        return onSnapshot(query(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), orderBy('timestamp', 'asc'), limit(50)), snapshot => setInteractions(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))));
-    }, [activityId, db]);
+    const loadInteractions = async () => {
+        if (!db || !activityId) return [];
+        try {
+            const snapshot = await getDocs(query(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), orderBy('timestamp', 'asc'), limit(50)));
+            const next = snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }));
+            setInteractions(next); setLoaded(true); return next;
+        } catch (error) {
+            console.error('Could not load reactions:', error); setLoaded(true); return [];
+        }
+    };
     const likes = interactions.filter(item => item.type === 'like');
     const comments = interactions.filter(item => item.type === 'comment');
     const liked = likes.some(item => item.userId === userId);
@@ -820,7 +831,9 @@ function SocialActions({ db, activityId, userId, username, readOnly }) {
         if (readOnly || !userId) return;
         try {
             const ref = doc(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions/like_${userId}`);
-            if (liked) await deleteDoc(ref); else await setDoc(ref, { type: 'like', userId, username, timestamp: serverTimestamp() });
+            const ownLike = await getDoc(ref);
+            if (ownLike.exists()) await deleteDoc(ref); else await setDoc(ref, { type: 'like', userId, username, timestamp: serverTimestamp() });
+            await loadInteractions();
         } catch (error) {
             console.error('Could not update reaction:', error);
         }
@@ -830,14 +843,15 @@ function SocialActions({ db, activityId, userId, username, readOnly }) {
         setSending(true);
         try {
             await addDoc(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), { type: 'comment', userId, username, text: draft.trim().slice(0, 500), timestamp: serverTimestamp() });
-            setDraft(''); setShowComments(true);
+            setDraft(''); setShowComments(true); await loadInteractions();
         } catch (error) {
             console.error('Could not post reply:', error);
         } finally {
             setSending(false);
         }
     };
-    return <div className="mt-3"><div className="flex gap-2"><button disabled={readOnly} onClick={toggleLike} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors ${liked ? 'bg-pink-500/15 text-pink-300' : 'bg-white/[0.03] text-gray-500 hover:text-white'} disabled:cursor-default`}><HeartIcon className={`h-3.5 w-3.5 ${liked ? 'fill-current' : ''}`} />{likes.length || 'Like'}</button><button onClick={() => setShowComments(value => !value)} className="flex items-center gap-1.5 rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-bold text-gray-500 hover:text-white"><CommentIcon className="h-3.5 w-3.5" />{comments.length || 'Reply'}</button></div>{showComments && <div className="mt-2 space-y-2 rounded-lg border border-white/5 bg-black/20 p-3">{comments.map(comment => <p key={comment.id} className="text-xs text-gray-400"><b className="text-gray-200">{comment.username}</b> {comment.text}</p>)}{!readOnly && <div className="flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitComment(); }} maxLength={500} placeholder="Write a reply…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /><button disabled={!draft.trim() || sending} onClick={submitComment} className="rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40">Send</button></div>}</div>}</div>;
+    const toggleComments = async () => { const opening = !showComments; setShowComments(opening); if (opening && !loaded) await loadInteractions(); };
+    return <div className="mt-3"><div className="flex gap-2"><button disabled={readOnly} onClick={toggleLike} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors ${liked ? 'bg-pink-500/15 text-pink-300' : 'bg-white/[0.03] text-gray-500 hover:text-white'} disabled:cursor-default`}><HeartIcon className={`h-3.5 w-3.5 ${liked ? 'fill-current' : ''}`} />{loaded && likes.length ? likes.length : 'Like'}</button><button onClick={toggleComments} className="flex items-center gap-1.5 rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-bold text-gray-500 hover:text-white"><CommentIcon className="h-3.5 w-3.5" />{loaded && comments.length ? comments.length : 'Reply'}</button></div>{showComments && <div className="mt-2 space-y-2 rounded-lg border border-white/5 bg-black/20 p-3">{loaded && comments.length === 0 && <p className="text-xs text-gray-600">No replies yet.</p>}{comments.map(comment => <p key={comment.id} className="text-xs text-gray-400"><b className="text-gray-200">{comment.username}</b> {comment.text}</p>)}{!readOnly && <div className="flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitComment(); }} maxLength={500} placeholder="Write a reply…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /><button disabled={!draft.trim() || sending} onClick={submitComment} className="rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40">Send</button></div>}</div>}</div>;
 }
 
 export function SocialPage({ db, userId, username, showToast, openUserProfile, readOnly = false }) {
@@ -918,6 +932,11 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
         setPosting(false);
     };
 
+    const visibleFeed = useMemo(() => feed.filter(item => {
+        if (readOnly) return true;
+        return item.userId === userId || friends.some(friend => (friend.uid || friend) === item.userId);
+    }), [feed, friends, readOnly, userId]);
+
     return (
         <div className="space-y-6 max-w-4xl mx-auto">
             <div className="flex space-x-6 border-b border-white/10 pb-4">
@@ -934,12 +953,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
                         <div className="mt-3 flex items-center gap-3"><label className="flex items-center gap-2 text-[10px] font-bold text-gray-500"><input type="checkbox" checked={spoiler} onChange={event => setSpoiler(event.target.checked)} className="accent-red-500" /> Contains spoilers</label><span className="ml-auto text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting || (composerType === 'review' && !reviewTitle)} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
                     </div>}
-                    {feed.filter(item => {
-                        if (readOnly) return true;
-                        const isMe = item.userId === userId;
-                        const isFriend = friends.some(f => (f.uid === item.userId || f === item.userId));
-                        return isMe || isFriend;
-                    }).map(item => (
+                    {visibleFeed.map(item => (
                         <motion.div 
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -969,7 +983,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                             )}
                         </motion.div>
                     ))}
-                    {feed.length === 0 && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or your friends.</div>}
+                    {visibleFeed.length === 0 && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or the people you follow.</div>}
                 </div>
             )}
 
@@ -1188,6 +1202,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 genres: fetchedGenres, 
                 mediaType: isVn ? 'vn' : 'anime',
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
+                provider: anime.provider || anime.attributes?.provider || (isVn ? 'vndb' : isAniList ? 'anilist' : 'kitsu'),
+                anilistId: anime.anilistId || anime.attributes?.anilistId || null,
+                durationMinutes: Number(anime.durationMinutes || anime.attributes?.episodeLength || 0),
+                nextAiringEpisode: anime.nextAiringEpisode || anime.attributes?.nextAiringEpisode || null,
                 updatedAt: Date.now(),
             };
             
@@ -1309,6 +1327,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 </div>
                             </div>
                         )}
+
+                        {selectedCharacter && <div className="flex items-center gap-4 rounded-xl border border-white/10 bg-white/[0.03] p-4"><img src={selectedCharacter.image || 'https://placehold.co/100'} alt="" className="h-16 w-16 rounded-full object-cover" referrerPolicy="no-referrer" /><div className="min-w-0 flex-1"><p className="font-bold text-white">{selectedCharacter.name}</p><p className="mt-1 text-xs text-gray-500">Japanese voice: {selectedCharacter.voiceActor || 'Not listed'}</p></div><button onClick={() => setSelectedCharacter(null)} className="rounded-lg p-2 text-gray-600 hover:bg-white/5 hover:text-white">×</button></div>}
 
                         {anilistCharacters.length > 0 && (
                             <div>
@@ -1630,7 +1650,135 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
     );
 }
 
-// --- Grids features removed as requested ---
+export function SchedulePage({ db, userId, username, readOnly = false }) {
+    const [slots, setSlots] = useState([]);
+    const [myIds, setMyIds] = useState(new Set());
+    const [mineOnly, setMineOnly] = useState(!readOnly);
+    const [selectedAnime, setSelectedAnime] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const { theme } = useContext(ThemeContext);
+
+    useEffect(() => {
+        let active = true;
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        Promise.all([
+            getAniListAiringSchedule(start, 7),
+            !readOnly && db && userId
+                ? getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`))
+                : Promise.resolve(null),
+        ]).then(([schedule, listSnapshot]) => {
+            if (!active) return;
+            setSlots(schedule);
+            if (listSnapshot) setMyIds(new Set(listSnapshot.docs.map(entry => String(entry.data().kitsuId || entry.id))));
+            setLoading(false);
+        }).catch(scheduleError => {
+            console.error('Schedule load failed:', scheduleError);
+            if (active) { setError('The airing schedule is temporarily unavailable.'); setLoading(false); }
+        });
+        return () => { active = false; };
+    }, [db, readOnly, userId]);
+
+    const visibleSlots = useMemo(() => mineOnly ? slots.filter(slot => myIds.has(String(slot.media.id))) : slots, [mineOnly, myIds, slots]);
+    const groupedDays = useMemo(() => {
+        const groups = new Map();
+        visibleSlots.forEach(slot => {
+            const date = new Date(slot.airingAt * 1000);
+            const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(slot);
+        });
+        return [...groups.entries()];
+    }, [visibleSlots]);
+
+    return <div className="mx-auto max-w-6xl space-y-7">
+        <div className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Seven-day radar</p><h1 className="mt-2 text-3xl font-black text-white sm:text-4xl">Airing schedule</h1><p className="mt-2 max-w-xl text-sm text-gray-500">Release times are shown in your local timezone. Switch to My Schedule to cut through the seasonal noise.</p></div>{!readOnly && <div className="flex rounded-lg border border-white/10 bg-black/20 p-1">{[{ id: true, label: 'My schedule' }, { id: false, label: 'All airing' }].map(option => <button key={String(option.id)} onClick={() => setMineOnly(option.id)} className={`rounded-md px-4 py-2 text-xs font-bold ${mineOnly === option.id ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option.label}</button>)}</div>}</div>
+        {loading && <div className="grid gap-3 sm:grid-cols-2"><AnimeCardSkeleton /><AnimeCardSkeleton /></div>}
+        {error && <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-sm text-red-300">{error}</div>}
+        {!loading && !error && groupedDays.length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-12 text-center"><CalendarIcon className="mx-auto h-7 w-7 text-gray-700" /><p className="mt-3 font-bold text-white">Nothing scheduled here yet</p><p className="mt-1 text-sm text-gray-500">Try All airing, or add currently-airing shows to your library.</p></div>}
+        <div className="space-y-8">{groupedDays.map(([day, daySlots]) => <section key={day}><div className="mb-3 flex items-baseline gap-3"><h2 className="text-lg font-black text-white">{new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}</h2><span className="text-xs text-gray-600">{new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></div><div className="grid gap-2 lg:grid-cols-2">{daySlots.map(slot => { const media = slot.media.attributes; const tracked = myIds.has(String(slot.media.id)); return <button key={slot.id} onClick={() => setSelectedAnime(slot.media)} className="group flex min-w-0 items-center gap-4 rounded-xl border border-[#282d35] bg-[#12151a] p-3 text-left hover:border-white/15 hover:bg-[#171b21]"><img src={media.posterImage.medium || media.posterImage.original} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" referrerPolicy="no-referrer" /><span className="min-w-0 flex-1"><span className="line-clamp-2 text-sm font-bold text-white">{media.canonicalTitle}</span><span className="mt-1 block text-xs text-gray-500">Episode {slot.episode} · {new Date(slot.airingAt * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>{tracked && <span className={`mt-2 inline-block text-[9px] font-black uppercase tracking-wider ${theme.accentText}`}>In your library</span>}</span><ClockIcon className="h-4 w-4 shrink-0 text-gray-700 group-hover:text-gray-400" /></button>})}</div></section>)}</div>
+        {selectedAnime && <AnimeDetailsModal anime={selectedAnime} onClose={() => setSelectedAnime(null)} db={db} userId={userId} ownerId={userId} username={username} readOnly={readOnly} />}
+    </div>;
+}
+
+export function DecksPage({ db, userId, username, showToast, readOnly = false }) {
+    const [decks, setDecks] = useState([]);
+    const [library, setLibrary] = useState([]);
+    const [view, setView] = useState(readOnly ? 'browse' : 'mine');
+    const [deckQuery, setDeckQuery] = useState('');
+    const [editing, setEditing] = useState(null);
+    const [selectedDeck, setSelectedDeck] = useState(null);
+    const [title, setTitle] = useState('');
+    const [description, setDescription] = useState('');
+    const [tags, setTags] = useState('');
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [saving, setSaving] = useState(false);
+    const [deleteArmed, setDeleteArmed] = useState(false);
+    const { theme } = useContext(ThemeContext);
+
+    useEffect(() => {
+        if (!db) return;
+        return onSnapshot(collection(db, `artifacts/${appId}/public/data/grids`), snapshot => {
+            const next: any[] = snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(item => item.type === 'deck').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+            setDecks(next);
+            const requestedId = new URLSearchParams(window.location.search).get('deck');
+            if (requestedId) setSelectedDeck(next.find(item => item.id === requestedId) || null);
+        }, error => console.error('Deck listener failed:', error));
+    }, [db]);
+
+    useEffect(() => {
+        if (!db || !userId || readOnly) return;
+        return onSnapshot(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`), snapshot => setLibrary(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))));
+    }, [db, readOnly, userId]);
+
+    const startEditor = (deck = null) => {
+        setEditing(deck || { id: null });
+        setDeleteArmed(false);
+        setTitle(deck?.title || ''); setDescription(deck?.description || ''); setTags((deck?.tags || []).join(', ')); setSelectedIds((deck?.items || []).map(item => String(item.id)));
+    };
+    const saveDeck = async () => {
+        if (!title.trim() || !selectedIds.length || saving) { showToast('Add a title and at least one library entry.', 'error'); return; }
+        setSaving(true);
+        try {
+            const items = selectedIds.map(id => library.find(item => String(item.id) === id)).filter(Boolean).map(item => ({ id: String(item.id), kitsuId: String(item.kitsuId || item.id), title: item.title, imageUrl: item.imageUrl || '', mediaType: item.mediaType || 'anime', score: Number(item.score || 0), totalEpisodes: Number(item.totalEpisodes || 0) }));
+            const payload = { type: 'deck', userId, username, title: title.trim().slice(0, 80), description: description.trim().slice(0, 500), tags: tags.split(',').map(tag => tag.trim().replace(/^#/, '')).filter(Boolean).slice(0, 6), items, updatedAt: Date.now() };
+            if (editing?.id) await updateDoc(doc(db, `artifacts/${appId}/public/data/grids/${editing.id}`), payload); else await addDoc(collection(db, `artifacts/${appId}/public/data/grids`), { ...payload, createdAt: Date.now() });
+            setEditing(null); showToast(editing?.id ? 'Deck updated.' : 'Deck published.');
+        } catch (error) { console.error(error); showToast('Could not save this deck.', 'error'); }
+        setSaving(false);
+    };
+    const copyDeck = async deck => {
+        const url = `${window.location.origin}/decks?deck=${encodeURIComponent(deck.id)}`;
+        try { await navigator.clipboard.writeText(url); showToast('Deck link copied.'); } catch { showToast(url); }
+    };
+    const removeDeck = async () => {
+        if (!editing?.id || !deleteArmed) { setDeleteArmed(true); return; }
+        try { await deleteDoc(doc(db, `artifacts/${appId}/public/data/grids/${editing.id}`)); setEditing(null); showToast('Deck deleted.'); }
+        catch (error) { console.error(error); showToast('Could not delete this deck.', 'error'); }
+    };
+    const addDeckToLibrary = async deck => {
+        const existing = new Set(library.map(item => String(item.kitsuId || item.id)));
+        const additions = deck.items.filter(item => !existing.has(String(item.kitsuId || item.id)));
+        if (!additions.length) { showToast('Every title in this deck is already in your library.'); return; }
+        try {
+            const batch = writeBatch(db);
+            additions.forEach(item => batch.set(doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList/${item.kitsuId || item.id}`), { ...item, status: 'planned', watchedEpisodes: 0, updatedAt: Date.now() }, { merge: true }));
+            await batch.commit(); showToast(`Added ${additions.length} ${additions.length === 1 ? 'title' : 'titles'} to Planned.`);
+        } catch (error) { console.error(error); showToast('Could not add this deck.', 'error'); }
+    };
+    const visibleDecks = (view === 'mine' ? decks.filter(deck => deck.userId === userId) : decks).filter(deck => {
+        const haystack = [deck.title, deck.description, deck.username, ...(deck.tags || [])].join(' ').toLowerCase();
+        return haystack.includes(deckQuery.trim().toLowerCase());
+    });
+
+    return <div className="mx-auto max-w-6xl space-y-7"><div className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Community collections</p><h1 className="mt-2 text-3xl font-black text-white sm:text-4xl">Decks</h1><p className="mt-2 max-w-xl text-sm text-gray-500">Publish themed anime and VN collections, share them anywhere, or add someone’s picks to Planned in one tap.</p></div>{!readOnly && <button onClick={() => startEditor()} className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-xs font-black text-white ${theme.button}`}><PlusIcon className="h-4 w-4" /> New deck</button>}</div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">{!readOnly && <div className="flex gap-2">{[{ id: 'mine', label: 'My decks' }, { id: 'browse', label: 'Explore all' }].map(option => <button key={option.id} onClick={() => setView(option.id)} className={`rounded-lg px-4 py-2 text-xs font-bold ${view === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{option.label}</button>)}</div>}<div className="relative sm:ml-auto"><SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" /><input value={deckQuery} onChange={event => setDeckQuery(event.target.value)} placeholder="Search titles, tags, creators…" className="w-full rounded-lg border border-white/10 bg-black/20 py-2.5 pl-9 pr-3 text-xs text-white sm:w-72" /></div></div>
+        {visibleDecks.length ? <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{visibleDecks.map(deck => <article key={deck.id} className="overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a]"><button onClick={() => setSelectedDeck(deck)} className="block w-full text-left"><div className="grid h-36 grid-cols-4 bg-black/30">{deck.items.slice(0, 4).map(item => <img key={item.id} src={item.imageUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />)}</div><div className="p-4"><div className="flex items-start justify-between gap-3"><h2 className="line-clamp-2 font-black text-white">{deck.title}</h2><span className="shrink-0 text-[10px] font-bold text-gray-600">{deck.items.length}</span></div><p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{deck.description || 'A curated AniLog collection.'}</p>{deck.tags?.length > 0 && <div className="mt-3 flex flex-wrap gap-1">{deck.tags.slice(0, 3).map(tag => <span key={tag} className="rounded bg-white/5 px-2 py-1 text-[9px] font-bold text-gray-500">#{tag}</span>)}</div>}<p className="mt-3 text-[10px] font-bold text-gray-600">by {deck.username || 'AniLog user'}</p></div></button><div className="flex border-t border-white/5"><button onClick={() => copyDeck(deck)} className="flex flex-1 items-center justify-center gap-2 p-3 text-[10px] font-bold text-gray-400 hover:bg-white/5 hover:text-white"><CopyIcon className="h-3.5 w-3.5" /> Share</button>{deck.userId === userId && <button onClick={() => startEditor(deck)} className="flex-1 border-l border-white/5 p-3 text-[10px] font-bold text-blue-400 hover:bg-white/5">Edit</button>}</div></article>)}</div> : <div className="rounded-xl border border-dashed border-white/10 p-12 text-center"><DeckIcon className="mx-auto h-7 w-7 text-gray-700" /><p className="mt-3 font-bold text-white">{deckQuery ? 'No decks match that search' : 'No decks here yet'}</p><p className="mt-1 text-sm text-gray-500">{deckQuery ? 'Try a broader title, tag, or creator.' : 'Create the first collection worth sharing.'}</p></div>}
+        {editing && <div className="fixed inset-0 z-[110] grid place-items-center bg-black/80 p-4 backdrop-blur-md" onClick={() => setEditing(null)}><div onClick={event => event.stopPropagation()} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-white/10 bg-[#101318] p-6"><div className="flex items-center justify-between"><h2 className="text-xl font-black text-white">{editing.id ? 'Edit deck' : 'Create a deck'}</h2><button onClick={() => setEditing(null)} className="p-2 text-gray-500">×</button></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><input value={title} onChange={event => setTitle(event.target.value)} maxLength={80} placeholder="Deck title" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><input value={tags} onChange={event => setTags(event.target.value)} placeholder="Tags, comma separated" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={500} placeholder="What makes this collection useful?" className="h-24 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-white sm:col-span-2" /></div><div className="mt-5 flex items-center justify-between"><p className="text-xs font-bold text-gray-400">Choose titles · {selectedIds.length}/40</p><button onClick={() => setSelectedIds([])} className="text-[10px] font-bold text-gray-600">Clear</button></div><div className="mt-3 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">{library.map(item => { const checked = selectedIds.includes(String(item.id)); return <button key={item.id} disabled={!checked && selectedIds.length >= 40} onClick={() => setSelectedIds(current => checked ? current.filter(id => id !== String(item.id)) : [...current, String(item.id)])} className={`flex min-w-0 items-center gap-2 rounded-lg border p-2 text-left ${checked ? 'border-blue-500/50 bg-blue-500/10' : 'border-white/5 bg-black/20 disabled:opacity-30'}`}><img src={item.imageUrl} alt="" className="h-12 w-9 rounded object-cover" /><span className="line-clamp-2 text-[10px] font-bold text-gray-300">{item.title}</span></button>})}</div><div className="mt-5 flex gap-2">{editing.id && <button onClick={removeDeck} className={`rounded-lg border px-4 py-3 text-xs font-black ${deleteArmed ? 'border-red-500 bg-red-500 text-white' : 'border-red-500/20 text-red-400'}`}>{deleteArmed ? 'Confirm delete' : 'Delete'}</button>}<button onClick={saveDeck} disabled={saving || !title.trim() || !selectedIds.length} className={`flex-1 rounded-lg py-3 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{saving ? 'Saving…' : editing.id ? 'Save changes' : 'Publish deck'}</button></div></div></div>}
+        {selectedDeck && <div className="fixed inset-0 z-[110] grid place-items-center bg-black/80 p-4 backdrop-blur-md" onClick={() => setSelectedDeck(null)}><div onClick={event => event.stopPropagation()} className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-white/10 bg-[#101318] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-wider text-blue-400">Deck by {selectedDeck.username}</p><h2 className="mt-2 text-2xl font-black text-white">{selectedDeck.title}</h2><p className="mt-2 max-w-2xl text-sm text-gray-500">{selectedDeck.description}</p></div><button onClick={() => setSelectedDeck(null)} className="p-2 text-gray-500">×</button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5">{selectedDeck.items.map(item => <div key={item.id}><img src={item.imageUrl} alt="" className="aspect-[2/3] w-full rounded-lg object-cover" referrerPolicy="no-referrer" /><p className="mt-2 line-clamp-2 text-[10px] font-bold text-white">{item.title}</p></div>)}</div><div className="mt-6 flex flex-wrap gap-2"><button onClick={() => copyDeck(selectedDeck)} className="rounded-lg border border-white/10 px-4 py-3 text-xs font-bold text-gray-300"><CopyIcon className="mr-2 inline h-4 w-4" />Copy link</button>{!readOnly && <button onClick={() => addDeckToLibrary(selectedDeck)} className={`rounded-lg px-4 py-3 text-xs font-black text-white ${theme.button}`}>Add missing titles to Planned</button>}</div></div></div>}
+    </div>;
+}
 
 export function StatsPage({ db, userId, username }) {
   const { theme } = useContext(ThemeContext);
@@ -1698,7 +1846,6 @@ export function StatsPage({ db, userId, username }) {
     let readingVnsCount = 0;
     const completed = [];
     const highestRated = [];
-    const franchiseSet = new Set();
 
     // Status metrics
     let watchingAnime = 0;
@@ -1739,13 +1886,14 @@ export function StatsPage({ db, userId, username }) {
       }
 
       if (isVn) {
+        totalMinutes += Number(anime.vnPlaytimeHours || 0) * 60;
         if (anime.status === 'completed') {
           completedVnsCount++;
           completed.push(anime);
         } else if (anime.status === 'watching') {
           readingVnsCount++;
         }
-        if (anime.score === 10) highestRated.push(anime);
+        if (Number(anime.score || 0) > 0) highestRated.push(anime);
       } else {
         const eps = anime.status === 'completed' && anime.totalEpisodes > 0 ? anime.totalEpisodes : (anime.watchedEpisodes || 0);
         totalEpisodesWatched += eps;
@@ -1753,9 +1901,8 @@ export function StatsPage({ db, userId, username }) {
 
         if (anime.status === "completed") {
           completed.push(anime);
-          franchiseSet.add(normalizeTitle(anime.title));
         }
-        if (anime.score === 10) highestRated.push(anime);
+        if (Number(anime.score || 0) > 0) highestRated.push(anime);
       }
     }
 
@@ -1780,11 +1927,11 @@ export function StatsPage({ db, userId, username }) {
     const ratingCoverage = librarySize ? Math.round((ratedCount / librarySize) * 100) : 0;
     const dropRate = librarySize ? Math.round((droppedCount / librarySize) * 100) : 0;
     const favorites = myList.filter(a => a.favorite).length;
-    const rewatches = myList.reduce((sum, a) => sum + Number(a.rewatchCount || 0), 0);
+    const rewatches = myList.reduce((sum, a) => sum + Number(a.repeatCount || 0), 0);
 
     return {
       totalHours: (totalMinutes / 60).toFixed(0),
-      totalCompletedUnique: franchiseSet.size, 
+      totalCompletedUnique: completedCount,
       totalEpisodes: totalEpisodesWatched,
       completedVnsCount,
       readingVnsCount,
@@ -1793,8 +1940,8 @@ export function StatsPage({ db, userId, username }) {
       dropRate,
       favorites,
       rewatches,
-      recentlyCompleted: completed.slice(-10).reverse(),
-      topRated: highestRated.slice(0, 10),
+      recentlyCompleted: [...completed].sort((a, b) => String(b.completedAt || b.updatedAt || '').localeCompare(String(a.completedAt || a.updatedAt || ''))).slice(0, 10),
+      topRated: [...highestRated].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)).slice(0, 10),
       
       // New distribution stats
       statusDistribution: {
@@ -2389,7 +2536,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
   );
 }
 
-export function ProfilePage({ db, userId, currentUser, username, setUsername, showToast, openUserProfile }) {
+export function ProfilePage({ db, userId, username, setUsername, showToast, openUserProfile }) {
   const { theme, setThemeId, viewMode, setViewMode, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
   const [hallOfFame, setHallOfFame] = useState([]);
@@ -2397,6 +2544,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
   const [activeSlotIndex, setActiveSlotIndex] = useState(null);
   const [activityData, setActivityData] = useState([]); 
   const [myList, setMyList] = useState([]);
+  const [myDecks, setMyDecks] = useState([]);
   const [libraryPublic, setLibraryPublic] = useState(true);
   
   // Tabs: overview, journal, settings
@@ -2427,6 +2575,9 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
       const listQ = collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`);
       getDocs(listQ).then(snap => {
           setMyList(snap.docs.map(d => d.data()));
+      });
+      getDocs(collection(db, `artifacts/${appId}/public/data/grids`)).then(snap => {
+          setMyDecks(snap.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(deck => deck.type === 'deck' && deck.userId === userId));
       });
   }, [db, userId]);
 
@@ -2486,15 +2637,14 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
 
   const stats = useMemo(() => {
       let totalHours = 0;
-      let totalEps = 0;
       let completed = 0;
       let sumScores = 0;
       let ratedCount = 0;
       
       myList.forEach(a => {
-          const eps = a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0);
-          totalEps += eps;
-          totalHours += eps * 24; // Average 24 minutes per episode
+          const isVn = a.mediaType === 'vn' || a.showType === 'Visual Novel';
+          const eps = isVn ? 0 : (a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0));
+          totalHours += isVn ? Number(a.vnPlaytimeHours || 0) * 60 : eps * AVG_EPISODE_MINUTES;
           if(a.status === 'completed') completed++;
           if(a.score > 0) {
               sumScores += a.score;
@@ -2508,7 +2658,9 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
       return { 
           total: myList.length,
           daysWatched,
-          meanScore
+          meanScore,
+          completed,
+          completionRate: myList.length ? Math.round((completed / myList.length) * 100) : 0
       };
   }, [myList]);
 
@@ -2526,7 +2678,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                        <UserIcon size={14} /> Public View
                    </button>
                </div>
-               <p className="text-gray-500 text-xs uppercase font-bold tracking-widest mt-1">Pilot Profile</p>
+               <p className="text-gray-500 text-xs uppercase font-bold tracking-widest mt-1">Personal profile</p>
            </div>
            <div className="flex bg-white/5 p-1 rounded-xl">
                {['overview', 'journal', 'settings'].map(tab => (
@@ -2548,26 +2700,18 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                 <div className="grid grid-cols-3 divide-x divide-white/5">
                     <div className="text-center">
                         <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.total}</p>
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Anime</p>
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Titles</p>
                     </div>
                     <div className="text-center">
                         <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.daysWatched}</p>
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Watched</p>
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Consumed</p>
                     </div>
                     <div className="text-center">
                         <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.meanScore}</p>
                         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Mean Score</p>
                     </div>
                 </div>
-                {/* Progress Bar Visualizer */}
-                <div className="mt-8 relative h-3 bg-white/5 rounded-full overflow-hidden">
-                     <div className="absolute top-0 left-0 h-full bg-[#3db4f2] rounded-full" style={{ width: `${Math.min(100, (stats.total / 100) * 100)}%` }} />
-                </div>
-                <div className="flex justify-between mt-2 text-[10px] text-gray-600 font-bold px-1">
-                    <span>0</span>
-                    <span>50</span>
-                    <span>100</span>
-                </div>
+                <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-[#3db4f2]" style={{ width: `${stats.completionRate}%` }} /></div><div className="mt-2 flex justify-between text-[10px] font-bold text-gray-600"><span>{stats.completed} completed</span><span>{stats.completionRate}% of library</span></div>
             </div>
 
             {/* Hall of Fame */}
@@ -2723,7 +2867,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                     <motion.button 
                         whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.1)' }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => exportUserData(myList, username, activityData)}
+                        onClick={() => exportUserData(myList, username, activityData, { decks: myDecks, hallOfFame, preferences: { libraryPublic, theme: theme.id, viewMode, density } })}
                         className="w-full py-4 flex items-center justify-center gap-3 bg-white/5 border border-white/10 rounded-2xl text-sm font-black text-white uppercase tracking-widest transition-all"
                     >
                         <DownloadIcon size={18} />
@@ -2913,26 +3057,18 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
     const handleFriendAction = async () => {
         try {
-            const batch = writeBatch(db);
             const myRef = doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`);
-            const theirRef = doc(db, `artifacts/${appId}/public/data/users/${targetUser.uid}`);
-
-            if (isFriend) {
-                batch.update(myRef, { friends: arrayRemove({ uid: targetUser.uid, username: targetUser.username }) });
-                batch.update(theirRef, { friends: arrayRemove({ uid: currentUserId, username: currentUsername }) });
-                await batch.commit();
-                setIsFriend(false);
-                showToast(`Removed ${targetUser.username} from friends.`, 'success');
-            } else {
-                batch.update(myRef, { friends: arrayUnion({ uid: targetUser.uid, username: targetUser.username }) });
-                batch.update(theirRef, { friends: arrayUnion({ uid: currentUserId, username: currentUsername }) });
-                await batch.commit();
-                setIsFriend(true);
-                showToast(`Added ${targetUser.username} as a friend!`, 'success');
-            }
+            const snapshot = await getDoc(myRef);
+            const existingFriends = snapshot.data()?.friends || [];
+            const nextFriends = isFriend
+                ? existingFriends.filter(friend => (friend.uid || friend) !== targetUser.uid)
+                : [...existingFriends.filter(friend => (friend.uid || friend) !== targetUser.uid), { uid: targetUser.uid, username: targetUser.username }];
+            await updateDoc(myRef, { friends: nextFriends });
+            setIsFriend(!isFriend);
+            showToast(isFriend ? `Unfollowed ${targetUser.username}.` : `Following ${targetUser.username}.`, 'success');
         } catch (e) {
-            console.error("Friend action failed", e);
-            showToast("Failed to update friend status", 'error');
+            console.error("Follow action failed", e);
+            showToast("Failed to update following", 'error');
         }
     };
 
@@ -2944,9 +3080,10 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         let ratedCount = 0;
         const unique = new Set();
         list.forEach(a => {
-            const eps = a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0);
+            const isVn = a.mediaType === 'vn' || a.showType === 'Visual Novel';
+            const eps = isVn ? 0 : (a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0));
             totalEps += eps;
-            totalHours += eps * AVG_EPISODE_MINUTES;
+            totalHours += isVn ? Number(a.vnPlaytimeHours || 0) * 60 : eps * AVG_EPISODE_MINUTES;
             if(a.status === 'completed') {
                 completed++;
                 unique.add(normalizeTitle(a.title));
@@ -2961,6 +3098,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
             hours: Math.round(totalHours / 60),
             eps: totalEps, 
             completed: unique.size,
+            completionRate: list.length ? Math.round((completed / list.length) * 100) : 0,
             meanScore: ratedCount > 0 ? (sumScores / ratedCount).toFixed(1) : 0
         };
     }, [list]);
@@ -3013,7 +3151,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                 onClick={handleFriendAction}
                                 className={`ml-3 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${isFriend ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
                             >
-                                {isFriend ? 'Following' : 'Follow +'}
+                                {isFriend ? 'Following' : 'Follow'}
                             </button>
                         )}
                     </div>
@@ -3042,26 +3180,18 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                         <div className="grid grid-cols-3 divide-x divide-white/5">
                             <div className="text-center">
                                 <p className="text-3xl font-black text-[#3db4f2] mb-1">{list.length}</p>
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Anime</p>
+                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Titles</p>
                             </div>
                             <div className="text-center">
                                 <p className="text-3xl font-black text-[#3db4f2] mb-1">{(stats.hours / 24).toFixed(1)}</p>
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Watched</p>
+                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Consumed</p>
                             </div>
                             <div className="text-center">
                                 <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.meanScore}</p>
                                 <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Mean Score</p>
                             </div>
                         </div>
-                        {/* Progress Bar Visualizer */}
-                        <div className="mt-8 relative h-3 bg-white/5 rounded-full overflow-hidden">
-                             <div className="absolute top-0 left-0 h-full bg-[#3db4f2] rounded-full" style={{ width: `${Math.min(100, (list.length / 100) * 100)}%` }} />
-                        </div>
-                        <div className="flex justify-between mt-2 text-[10px] text-gray-600 font-bold px-1">
-                            <span>0</span>
-                            <span>50</span>
-                            <span>100</span>
-                        </div>
+                        <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-[#3db4f2]" style={{ width: `${stats.completionRate}%` }} /></div><div className="mt-2 flex justify-between text-[10px] font-bold text-gray-600"><span>{stats.completed} completed</span><span>{stats.completionRate}% of library</span></div>
                     </div>
 
                     <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
@@ -3114,11 +3244,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                             <span className="opacity-60 mx-1">{item.context}</span>
                                             <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
                                         </p>
-                                        {item.noteContent && (
+                                        {item.noteContent && !item.spoiler && (
                                             <div className="mt-2 bg-black/40 border-l-2 border-white/20 p-2 rounded text-xs text-gray-400 italic">
                                                 "{item.noteContent}"
                                             </div>
                                         )}
+                                        {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
                                         <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
                                     </div>
                                     {item.animeImageUrl && (
