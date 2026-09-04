@@ -28,6 +28,10 @@ import {
   setDoc,
   updateDoc,
   collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
   serverTimestamp,
   addDoc,
   deleteField,
@@ -38,7 +42,6 @@ import {
     AnimatePresence, 
     useSpring, 
     useTransform, 
-    useMotionValue, 
 } from "framer-motion";
 import { 
   Search as SearchIcon, 
@@ -299,8 +302,6 @@ export const ThemeContext = createContext({
   setThemeId: (id) => {},
   viewMode: 'grid',
   setViewMode: (mode) => {},
-  showTrail: true,
-  setShowTrail: (show) => {},
   setPage: (page) => {},
   sidebarCollapsed: false,
   setSidebarCollapsed: (collapsed) => {},
@@ -430,70 +431,6 @@ export function StarField({ active }) {
 
   if(!active) return null;
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0 opacity-60" />;
-}
-
-// Scramble Text Effect
-function ScrambleText({ text, className }) {
-  const [display, setDisplay] = useState(text);
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
-
-  useEffect(() => {
-    let iter = 0;
-    const interval = setInterval(() => {
-      setDisplay(text.split("").map((char, index) => {
-        if(index < iter) return text[index];
-        return chars[Math.floor(Math.random() * chars.length)];
-      }).join(""));
-      
-      if(iter >= text.length) clearInterval(interval);
-      iter += 1/2; // speed
-    }, 30);
-    return () => clearInterval(interval);
-  }, [text]);
-
-  return <span className={className}>{display}</span>;
-}
-
-function MouseTrail({ themeId, active }) {
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-  const smoothX = useSpring(x, { stiffness: 500, damping: 20 }); // Smoother
-  const smoothY = useSpring(y, { stiffness: 500, damping: 20 });
-  
-  const colors = {
-      neon: 'rgba(59, 130, 246, 0.4)',
-      toxic: 'rgba(132, 204, 22, 0.4)',
-      sunset: 'rgba(244, 63, 94, 0.4)',
-      indigo: 'rgba(99, 102, 241, 0.4)',
-      orange: 'rgba(249, 115, 22, 0.4)',
-      monochrome: 'rgba(255, 255, 255, 0.3)',
-      emerald: 'rgba(16, 185, 129, 0.4)'
-  };
-
-  useEffect(() => {
-    if (!active) return;
-    const updateMouse = (e) => {
-      x.set(e.clientX);
-      y.set(e.clientY);
-    };
-    window.addEventListener('mousemove', updateMouse);
-    return () => window.removeEventListener('mousemove', updateMouse);
-  }, [active]);
-
-  if (!active) return null;
-
-  return (
-    <>
-        <motion.div 
-            style={{ x: smoothX, y: smoothY, backgroundColor: colors[themeId] || colors.neon }}
-            className="fixed top-0 left-0 w-32 h-32 rounded-full blur-[60px] pointer-events-none z-[0] -translate-x-1/2 -translate-y-1/2 mix-blend-screen opacity-20"
-        />
-        <motion.div 
-            style={{ x: smoothX, y: smoothY, backgroundColor: colors[themeId] || colors.neon }}
-            className="fixed top-0 left-0 w-4 h-4 rounded-full blur-sm pointer-events-none z-[9999] -translate-x-1/2 -translate-y-1/2 mix-blend-screen"
-        />
-    </>
-  )
 }
 
 export function AnimatedCounter({ value }) {
@@ -774,7 +711,7 @@ export function AnimeCarousel({ title, animeList = [], onAnimeClick, isKitsuList
             <div className="flex justify-between items-end px-2">
                 <h3 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
                     <span className="w-1 h-6 bg-blue-500 rounded-full"></span>
-                    <ScrambleText text={title} className="" />
+                    {title}
                 </h3>
             </div>
             <div className="flex overflow-x-auto gap-4 pb-4 px-2 no-scrollbar snap-x snap-mandatory">
@@ -1007,6 +944,34 @@ function PreviewBanner() {
   );
 }
 
+function NotificationCenter({ db, userId, onClose, setPage }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!db || !userId) return;
+    let unsubscribe = () => {};
+    getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(profile => {
+      const friendIds = new Set((profile.data()?.friends || []).map(friend => friend.uid || friend));
+      unsubscribe = onSnapshot(query(collection(db, `artifacts/${appId}/public/data/activity`), orderBy('timestamp', 'desc'), limit(40)), snapshot => {
+        setItems(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(item => item.userId === userId || friendIds.has(item.userId)).slice(0, 12));
+        setLoading(false);
+      }, () => setLoading(false));
+    }).catch(() => setLoading(false));
+    return () => unsubscribe();
+  }, [db, userId]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[120] bg-black/50" onClick={onClose}>
+      <motion.aside initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} className="absolute right-3 top-20 flex max-h-[calc(100vh-6rem)] w-[min(420px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#101318] shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/5 p-4"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-400">Activity inbox</p><h2 className="mt-1 text-lg font-bold text-white">Notifications</h2></div><button onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white">×</button></div>
+        <div className="overflow-y-auto p-2">{loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { setPage('social'); onClose(); }} className="flex w-full gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-500/15 text-xs font-black text-blue-300">{item.username?.[0]?.toUpperCase() || '?'}</span><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">You are all caught up</p><p className="mt-1 text-xs text-gray-600">Friend and account activity will appear here.</p></div>}</div>
+        <button onClick={() => { setPage('social'); onClose(); }} className="border-t border-white/5 p-3 text-xs font-bold text-blue-400 hover:bg-white/5">Open community</button>
+      </motion.aside>
+    </div>, document.body
+  );
+}
+
 // --- Main App Component ---
 export default function App() {
   const location = useLocation();
@@ -1019,6 +984,7 @@ export default function App() {
   const [guestMode, setGuestMode] = useState(() => sessionStorage.getItem('anilog_guest') === 'true');
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const page = getPageFromPath(location.pathname);
 
   useEffect(() => {
@@ -1066,7 +1032,6 @@ export default function App() {
   // Persistent State
   const [themeId, setThemeId] = useState(() => localStorage.getItem('anilog_theme') || 'neon');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('anilog_view') || 'grid');
-  const [showTrail, setShowTrail] = useState(() => localStorage.getItem('anilog_trail') !== 'false');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('anilog_sidebar_collapsed') === 'true');
   const [density, setDensity] = useState(() => localStorage.getItem('anilog_density') || 'comfortable');
   const [showQuickTip, setShowQuickTip] = useState(() => localStorage.getItem('anilog_quick_tip') !== 'false');
@@ -1074,7 +1039,6 @@ export default function App() {
   // Effects to save state
   useEffect(() => localStorage.setItem('anilog_theme', themeId), [themeId]);
   useEffect(() => localStorage.setItem('anilog_view', viewMode), [viewMode]);
-  useEffect(() => localStorage.setItem('anilog_trail', String(showTrail)), [showTrail]);
   useEffect(() => localStorage.setItem('anilog_sidebar_collapsed', String(sidebarCollapsed)), [sidebarCollapsed]);
   useEffect(() => localStorage.setItem('anilog_density', density), [density]);
   useEffect(() => localStorage.setItem('anilog_quick_tip', String(showQuickTip)), [showQuickTip]);
@@ -1339,16 +1303,17 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
+      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
       <div className="min-h-screen bg-[#0b0d10] text-gray-100 font-sans flex flex-col relative selection:bg-blue-500/30">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
+        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} />}
         
         <PreviewBanner />
         <header className="sticky top-0 z-50 flex h-16 items-center border-b border-[#242830] bg-[#0b0d10]/95 px-4 backdrop-blur-xl lg:px-6">
           <button className={`flex items-center gap-3 text-left transition-[width] ${sidebarCollapsed ? 'w-14' : 'w-52'}`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}><AniLogMark /><span className={`text-lg font-black tracking-tight text-white transition-opacity ${sidebarCollapsed ? 'hidden' : 'block'}`}>AniLog</span></button>
           <button onClick={() => setIsCmdOpen(true)} className="mx-auto hidden w-full max-w-xl items-center gap-3 rounded-lg border border-[#2a2f38] bg-[#14171c] px-4 py-2.5 text-left text-sm text-gray-500 transition-colors hover:border-[#3a414c] hover:text-gray-300 sm:flex"><SearchIcon className="h-4 w-4" /><span className="flex-1">Search anime, users, and commands</span><kbd className="rounded border border-[#333943] bg-[#1b1f25] px-2 py-0.5 text-[10px]">⌘K</kbd></button>
-          <div className="ml-auto flex w-52 justify-end gap-1"><button className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><BellIcon className="h-5 w-5" /></button>{!guestMode && <button onClick={() => setPage('profile')} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><ProfileIcon className="h-5 w-5" /></button>}<button onClick={guestMode ? leaveGuestMode : handleLogout} className="rounded-lg p-2.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400"><LogoutIcon className="h-5 w-5" /></button></div>
+          <div className="ml-auto flex w-52 justify-end gap-1">{!guestMode && <button onClick={() => setIsNotificationsOpen(true)} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white" title="Notifications"><BellIcon className="h-5 w-5" /></button>}{!guestMode && <button onClick={() => setPage('profile')} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><ProfileIcon className="h-5 w-5" /></button>}<button onClick={guestMode ? leaveGuestMode : handleLogout} className="rounded-lg p-2.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400"><LogoutIcon className="h-5 w-5" /></button></div>
         </header>
 
         {guestMode && (

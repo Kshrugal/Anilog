@@ -9,7 +9,8 @@
     "lint": "eslint . --max-warnings 53",
     "typecheck": "tsc --noEmit",
     "test:smoke": "node scripts/smoke-test.mjs",
-    "check": "npm run lint && npm run typecheck && npm run build && npm run test:smoke",
+    "test:features": "node scripts/feature-regression-test.mjs",
+    "check": "npm run lint && npm run typecheck && npm run test:features && npm run build && npm run test:smoke",
     "start": "serve -s dist -l 3000",
     "preview": "vite preview"
   },

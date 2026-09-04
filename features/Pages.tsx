@@ -26,6 +26,7 @@ import {
   arrayUnion,
   arrayRemove, 
   addDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { 
     motion, 
@@ -52,6 +53,7 @@ import {
   Trash2 as TrashIcon,
   AlertTriangle as AlertTriangleIcon,
   RotateCcw as ResetIcon,
+  MessageCircle as CommentIcon,
 } from 'lucide-react';
 import {
   APP_NAME, AVG_EPISODE_MINUTES, KITSU_API_URL, MAJOR_GENRES,
@@ -151,6 +153,11 @@ export function HomePage({ db, userId, username, showToast }) {
   
   // Decider Modal
   const [showDecider, setShowDecider] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [savedViews, setSavedViews] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`anilog_saved_views_${userId}`) || '[]'); } catch { return []; }
+  });
 
   const statusTabs = ["watching", "completed", "planned", "paused", "dropped"];
 
@@ -278,6 +285,33 @@ export function HomePage({ db, userId, username, showToast }) {
     }
   };
 
+  useEffect(() => {
+    localStorage.setItem(`anilog_saved_views_${userId}`, JSON.stringify(savedViews));
+  }, [savedViews, userId]);
+
+  const saveCurrentView = () => {
+    const config = { statusFilter, mediaFilter, collectionFilter, tagFilter, sortBy, viewMode };
+    if (savedViews.some(view => JSON.stringify(view.config) === JSON.stringify(config))) { showToast('This view is already saved.'); return; }
+    const parts = [statusFilter, mediaFilter !== 'all' ? mediaFilter : null, collectionFilter !== 'all' ? collectionFilter : null, tagFilter !== 'all' ? `#${tagFilter}` : null].filter(Boolean);
+    setSavedViews(current => [...current.slice(-4), { id: Date.now(), name: parts.join(' · '), config }]);
+    showToast('Library view saved.');
+  };
+
+  const applySavedView = (view) => {
+    setStatusFilter(view.config.statusFilter); setMediaFilter(view.config.mediaFilter); setCollectionFilter(view.config.collectionFilter); setTagFilter(view.config.tagFilter); setSortBy(view.config.sortBy); setViewMode(view.config.viewMode);
+  };
+
+  const runBulkUpdate = async (changes) => {
+    if (!selectedIds.length) return;
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach(id => batch.update(doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList/${id}`), { ...changes, updatedAt: Date.now() }));
+      await batch.commit();
+      showToast(`Updated ${selectedIds.length} ${selectedIds.length === 1 ? 'title' : 'titles'}.`);
+      setSelectedIds([]); setSelectionMode(false);
+    } catch (error) { console.error(error); showToast('Bulk update failed. Nothing was changed.', 'error'); }
+  };
+
   const gridVariants = {
     hidden: { opacity: 0 },
     show: {
@@ -368,6 +402,7 @@ export function HomePage({ db, userId, username, showToast }) {
       )}
 
       <div className="space-y-4">
+        {savedViews.length > 0 && <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-black uppercase tracking-wider text-gray-600">Saved views</span>{savedViews.map(view => <span key={view.id} className="inline-flex overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><button onClick={() => applySavedView(view)} className="px-3 py-2 text-xs font-bold capitalize text-gray-300 hover:bg-white/5 hover:text-white">{view.name}</button><button onClick={() => setSavedViews(current => current.filter(item => item.id !== view.id))} className="border-l border-white/10 px-2 text-gray-600 hover:text-red-400">×</button></span>)}</div>}
         <div className="flex items-center justify-between border-t border-white/5 pt-8">
             <div className="flex overflow-x-auto no-scrollbar gap-2 p-2 -mx-2">
                 {statusTabs.map((status) => (
@@ -421,7 +456,11 @@ export function HomePage({ db, userId, username, showToast }) {
         {(mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' || localQuery) && (
           <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="rounded-lg px-2 py-1 text-xs font-semibold text-gray-500 transition-colors hover:bg-white/5 hover:text-white">Clear filters</button>
         )}
+        <button onClick={saveCurrentView} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:bg-white/5 hover:text-white">Save view</button>
+        <button onClick={() => { setSelectionMode(value => !value); setSelectedIds([]); }} className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${selectionMode ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-white/10 text-gray-500 hover:bg-white/5 hover:text-white'}`}>{selectionMode ? 'Cancel select' : 'Select multiple'}</button>
         </div>
+
+        {selectionMode && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3"><span className="mr-auto text-xs font-bold text-blue-200">{selectedIds.length} selected</span><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'watching' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Watching</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'completed', completedAt: new Date().toISOString().slice(0, 10) })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Completed</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'planned' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Planned</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ favorite: true })} className="rounded-lg bg-pink-500/15 px-3 py-2 text-xs font-bold text-pink-300 disabled:opacity-30">Favorite</button></div>}
 
         <div className="flex items-center gap-2">
             <div className="relative flex-grow group">
@@ -487,13 +526,13 @@ export function HomePage({ db, userId, username, showToast }) {
                     </motion.div>
                 )}
                 {!loading && !error && filteredList.map((anime) => (
-                    <AnimeCard 
+                    <div key={anime.id} className="relative">{selectionMode && <button onClick={() => setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id])} className={`absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-md border text-xs font-black shadow-lg ${selectedIds.includes(anime.id) ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/30 bg-black/70 text-transparent'}`}>✓</button>}<AnimeCard
                         key={anime.id} 
                         anime={anime} 
-                        onCardClick={() => setSelectedAnimeKitsuId(anime.kitsuId)} 
+                        onCardClick={() => selectionMode ? setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id]) : setSelectedAnimeKitsuId(anime.kitsuId)}
                         onQuickIncrement={statusFilter === 'watching' ? () => handleQuickIncrement(anime) : undefined}
                         viewMode={viewMode}
-                    />
+                    /></div>
                 ))}
             </motion.div>
         </AnimatePresence>
@@ -765,6 +804,42 @@ export function SearchPage({ db, userId, username, onConfetti, showToast, readOn
     );
 }
 
+function SocialActions({ db, activityId, userId, username, readOnly }) {
+    const [interactions, setInteractions] = useState([]);
+    const [showComments, setShowComments] = useState(false);
+    const [draft, setDraft] = useState('');
+    const [sending, setSending] = useState(false);
+    useEffect(() => {
+        if (!db || !activityId) return;
+        return onSnapshot(query(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), orderBy('timestamp', 'asc'), limit(50)), snapshot => setInteractions(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))));
+    }, [activityId, db]);
+    const likes = interactions.filter(item => item.type === 'like');
+    const comments = interactions.filter(item => item.type === 'comment');
+    const liked = likes.some(item => item.userId === userId);
+    const toggleLike = async () => {
+        if (readOnly || !userId) return;
+        try {
+            const ref = doc(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions/like_${userId}`);
+            if (liked) await deleteDoc(ref); else await setDoc(ref, { type: 'like', userId, username, timestamp: serverTimestamp() });
+        } catch (error) {
+            console.error('Could not update reaction:', error);
+        }
+    };
+    const submitComment = async () => {
+        if (!draft.trim() || sending || readOnly) return;
+        setSending(true);
+        try {
+            await addDoc(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), { type: 'comment', userId, username, text: draft.trim().slice(0, 500), timestamp: serverTimestamp() });
+            setDraft(''); setShowComments(true);
+        } catch (error) {
+            console.error('Could not post reply:', error);
+        } finally {
+            setSending(false);
+        }
+    };
+    return <div className="mt-3"><div className="flex gap-2"><button disabled={readOnly} onClick={toggleLike} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors ${liked ? 'bg-pink-500/15 text-pink-300' : 'bg-white/[0.03] text-gray-500 hover:text-white'} disabled:cursor-default`}><HeartIcon className={`h-3.5 w-3.5 ${liked ? 'fill-current' : ''}`} />{likes.length || 'Like'}</button><button onClick={() => setShowComments(value => !value)} className="flex items-center gap-1.5 rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-bold text-gray-500 hover:text-white"><CommentIcon className="h-3.5 w-3.5" />{comments.length || 'Reply'}</button></div>{showComments && <div className="mt-2 space-y-2 rounded-lg border border-white/5 bg-black/20 p-3">{comments.map(comment => <p key={comment.id} className="text-xs text-gray-400"><b className="text-gray-200">{comment.username}</b> {comment.text}</p>)}{!readOnly && <div className="flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitComment(); }} maxLength={500} placeholder="Write a reply…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /><button disabled={!draft.trim() || sending} onClick={submitComment} className="rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40">Send</button></div>}</div>}</div>;
+}
+
 export function SocialPage({ db, userId, username, showToast, openUserProfile, readOnly = false }) {
     const [feed, setFeed] = useState([]);
     const [users, setUsers] = useState([]);
@@ -774,6 +849,8 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     const [composerType, setComposerType] = useState("post");
     const [postText, setPostText] = useState("");
     const [reviewTitle, setReviewTitle] = useState("");
+    const [reviewLibrary, setReviewLibrary] = useState([]);
+    const [spoiler, setSpoiler] = useState(false);
     const [reviewScore, setReviewScore] = useState(0);
     const [posting, setPosting] = useState(false);
     const { theme } = useContext(ThemeContext);
@@ -806,6 +883,11 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     }, [db, userId, readOnly]);
 
     useEffect(() => {
+        if (!db || !userId || readOnly) return;
+        getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`)).then(snapshot => setReviewLibrary(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))));
+    }, [db, readOnly, userId]);
+
+    useEffect(() => {
         if (searchQuery.length < 3) {
             setUsers([]);
             return;
@@ -821,13 +903,16 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
         if (composerType === 'review' && !reviewTitle.trim()) { showToast('Add the anime title for your review.', 'error'); return; }
         setPosting(true);
         try {
+            const linkedMedia = reviewLibrary.find(item => String(item.kitsuId || item.id) === reviewTitle);
             await addDoc(collection(db, `artifacts/${appId}/public/data/activity`), {
                 userId, username, type: composerType === 'review' ? 'micro_review' : 'text_post',
                 context: composerType === 'review' ? `reviewed ${reviewScore ? `${reviewScore}/10` : ''}` : 'posted',
-                animeTitle: composerType === 'review' ? reviewTitle.trim() : '',
+                animeTitle: composerType === 'review' ? linkedMedia?.title || reviewTitle.trim() : '',
+                animeKitsuId: linkedMedia?.kitsuId || '', animeImageUrl: linkedMedia?.imageUrl || '',
+                mediaType: linkedMedia?.mediaType || 'anime', spoiler,
                 noteContent: postText.trim(), timestamp: serverTimestamp(),
             });
-            setPostText(''); setReviewTitle(''); setReviewScore(0);
+            setPostText(''); setReviewTitle(''); setReviewScore(0); setSpoiler(false);
             showToast(composerType === 'review' ? 'Review published!' : 'Post published!', 'success');
         } catch (error) { console.error(error); showToast('Could not publish.', 'error'); }
         setPosting(false);
@@ -845,9 +930,9 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                 <div className="space-y-4">
                     {!readOnly && <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5">
                         <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
-                        {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><input value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} placeholder="Anime title" className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
+                        {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><select value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} className="min-w-0 rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="">Choose from your library…</option>{[...reviewLibrary].sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''))).map(item => <option key={item.id} value={String(item.kitsuId || item.id)}>{item.mediaType === 'vn' ? 'VN · ' : ''}{item.title}</option>)}</select><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
-                        <div className="mt-3 flex items-center justify-between"><span className="text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
+                        <div className="mt-3 flex items-center gap-3"><label className="flex items-center gap-2 text-[10px] font-bold text-gray-500"><input type="checkbox" checked={spoiler} onChange={event => setSpoiler(event.target.checked)} className="accent-red-500" /> Contains spoilers</label><span className="ml-auto text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting || (composerType === 'review' && !reviewTitle)} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
                     </div>}
                     {feed.filter(item => {
                         if (readOnly) return true;
@@ -870,12 +955,14 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                                     <span className="opacity-60 mx-1">{item.context}</span>
                                     <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
                                 </p>
-                                {item.noteContent && (
+                                {item.noteContent && !item.spoiler && (
                                     <div className="mt-2 bg-black/40 border-l-2 border-white/20 p-2 rounded text-xs text-gray-400 italic">
                                         "{item.noteContent}"
                                     </div>
                                 )}
+                                {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
                                 <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
+                                <SocialActions db={db} activityId={item.id} userId={userId} username={username} readOnly={readOnly} />
                             </div>
                             {item.animeImageUrl && (
                                 <img src={item.animeImageUrl} className="w-10 h-14 object-cover rounded-lg shadow-xl border border-white/10 group-hover:scale-105 transition-transform" alt="anime" referrerPolicy="no-referrer" />
@@ -967,6 +1054,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [personalTags, setPersonalTags] = useState([]);
     const [tagDraft, setTagDraft] = useState("");
     const [shareNoteActivity, setShareNoteActivity] = useState(true);
+    const [vnPlaytimeHours, setVnPlaytimeHours] = useState(0);
+    const [vnEndingsCompleted, setVnEndingsCompleted] = useState(0);
+    const [vnRoute, setVnRoute] = useState("");
+    const [platform, setPlatform] = useState("");
     const [loading, setLoading] = useState(false);
     const [existingData, setExistingData] = useState(null);
     const [fetchedGenres, setFetchedGenres] = useState(anime.genres || anime.attributes?.genres || []);
@@ -1054,6 +1145,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     setCompletedAt(data.completedAt || "");
                     setPersonalTags(Array.isArray(data.personalTags) ? data.personalTags : []);
                     setShareNoteActivity(data.shareNoteActivity !== false);
+                    setVnPlaytimeHours(Number(data.vnPlaytimeHours || 0));
+                    setVnEndingsCompleted(Number(data.vnEndingsCompleted || 0));
+                    setVnRoute(data.vnRoute || "");
+                    setPlatform(data.platform || "");
                     if(data.genres) setFetchedGenres(data.genres); 
                 } else if (isOwner) {
                     setStatus("watching");
@@ -1089,6 +1184,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 completedAt: resolvedCompletedAt || null,
                 personalTags,
                 shareNoteActivity,
+                ...(isVn ? { vnPlaytimeHours: Number(vnPlaytimeHours), vnEndingsCompleted: Number(vnEndingsCompleted), vnRoute: vnRoute.trim(), platform: platform.trim() } : {}),
                 genres: fetchedGenres, 
                 mediaType: isVn ? 'vn' : 'anime',
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
@@ -1337,6 +1433,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Finished</span><input type="date" value={completedAt} onChange={event => setCompletedAt(event.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
                                     <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Rewatches</span><input type="number" min="0" max="999" value={repeatCount} onChange={event => setRepeatCount(Math.max(0, Number(event.target.value)))} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
                                 </div>
+
+                                {isVn && <div className="rounded-xl border border-purple-500/15 bg-purple-500/[0.04] p-4"><div className="mb-4"><p className="text-xs font-black uppercase tracking-wider text-purple-300">Visual novel progress</p><p className="mt-1 text-[10px] text-gray-500">Track the details that percentage alone cannot capture.</p></div><div className="grid gap-3 sm:grid-cols-2"><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Hours played</span><input type="number" min="0" step="0.5" value={vnPlaytimeHours} onChange={event => setVnPlaytimeHours(Math.max(0, Number(event.target.value)))} className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Endings completed</span><input type="number" min="0" value={vnEndingsCompleted} onChange={event => setVnEndingsCompleted(Math.max(0, Number(event.target.value)))} className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Current route</span><input value={vnRoute} onChange={event => setVnRoute(event.target.value)} maxLength={80} placeholder="Character or route name" className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Platform</span><input value={platform} onChange={event => setPlatform(event.target.value)} maxLength={40} placeholder="PC, Switch, PS5…" className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label></div></div>}
 
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between"><label className="text-xs font-bold uppercase tracking-widest text-gray-500">Personal tags</label><span className="text-[10px] text-gray-600">{personalTags.length}/8</span></div>
@@ -2070,6 +2168,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
       !existingIds.has(String(entry.kitsuId)) && !existingTitles.has(normalizeTitle(entry.title || ''))
     ));
   }, [existingIds, existingTitles, preview, updateExisting]);
+  const conflictingEntries = useMemo(() => preview ? preview.entries.filter(entry => existingIds.has(String(entry.kitsuId)) || existingTitles.has(normalizeTitle(entry.title || ''))) : [], [existingIds, existingTitles, preview]);
 
   const statusCounts = useMemo(() => {
     if (!preview) return {};
@@ -2180,6 +2279,8 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
             </label>
             <span className="whitespace-nowrap text-xs text-gray-500">{preview.entries.length - importableEntries.length} skipped</span>
           </div>
+
+          {conflictingEntries.length > 0 && <details className="mt-3 rounded-xl border border-amber-500/15 bg-amber-500/[0.04] p-4"><summary className="cursor-pointer text-xs font-bold text-amber-300">Review {conflictingEntries.length} existing {conflictingEntries.length === 1 ? 'match' : 'matches'}</summary><div className="mt-3 grid gap-2 sm:grid-cols-2">{conflictingEntries.slice(0, 12).map(entry => <div key={entry.kitsuId} className="flex items-center justify-between gap-3 rounded-lg bg-black/20 px-3 py-2"><span className="truncate text-xs text-gray-300">{entry.title}</span><span className={`shrink-0 text-[9px] font-black uppercase ${updateExisting ? 'text-amber-300' : 'text-gray-600'}`}>{updateExisting ? 'Update' : 'Keep AniLog'}</span></div>)}</div>{conflictingEntries.length > 12 && <p className="mt-2 text-[10px] text-gray-600">And {conflictingEntries.length - 12} more matches.</p>}</details>}
 
           <button onClick={importList} disabled={importing || importableEntries.length === 0} className="mt-4 w-full rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4 text-sm font-black text-white shadow-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
             {importing ? "Importing…" : `Import ${importableEntries.length} ${importableEntries.length === 1 ? 'Entry' : 'Entries'}`}
@@ -2296,6 +2397,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
   const [activeSlotIndex, setActiveSlotIndex] = useState(null);
   const [activityData, setActivityData] = useState([]); 
   const [myList, setMyList] = useState([]);
+  const [libraryPublic, setLibraryPublic] = useState(true);
   
   // Tabs: overview, journal, settings
   const [activeTab, setActiveTab] = useState("overview");
@@ -2306,6 +2408,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
           if(doc.exists()) {
               const stored = Array.isArray(doc.data().hallOfFame) ? doc.data().hallOfFame.slice(0, 10) : [];
               setHallOfFame([...stored, ...Array(Math.max(0, 10 - stored.length)).fill(null)]);
+              setLibraryPublic(doc.data().libraryPublic !== false);
           } else {
               setHallOfFame(Array(10).fill(null));
           }
@@ -2584,6 +2687,7 @@ export function ProfilePage({ db, userId, currentUser, username, setUsername, sh
                         Security & Privacy
                     </h3>
                     <div className="space-y-4 relative z-10">
+                        <div className="flex items-center justify-between rounded-xl border border-blue-500/15 bg-blue-500/[0.05] p-5"><div className="pr-4"><p className="text-sm font-bold text-white">Public library</p><p className="mt-1 text-xs leading-relaxed text-gray-400">Let other people view your tracked titles, stats, and taste compatibility. Your profile and social posts stay public.</p></div><button type="button" onClick={async () => { const next = !libraryPublic; await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { libraryPublic: next }); setLibraryPublic(next); showToast(next ? 'Your library is public.' : 'Your library is private.'); }} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${libraryPublic ? theme.accentBg : 'bg-gray-700'}`} aria-pressed={libraryPublic}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${libraryPublic ? 'translate-x-6' : 'translate-x-1'}`} /></button></div>
                         <div className="p-5 bg-black/40 rounded-2xl border border-white/5 hover:border-emerald-500/30 transition-colors">
                             <p className="text-sm font-bold text-white mb-1 flex items-center gap-2">
                                 <LockIcon size={14} className="text-emerald-500" />
@@ -2738,6 +2842,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     const [friendHallOfFame, setFriendHallOfFame] = useState([]);
     const [isFriend, setIsFriend] = useState(false);
     const [activityData, setActivityData] = useState([]);
+    const [libraryPrivate, setLibraryPrivate] = useState(false);
 
     useEffect(() => {
         if(!targetUser) return;
@@ -2755,12 +2860,16 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 const friendUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUser.uid}`));
                 if(friendUserSnap.exists() && isMounted) {
                     setFriendHallOfFame(friendUserSnap.data().hallOfFame || Array(10).fill(null));
+                    setLibraryPrivate(friendUserSnap.data().libraryPublic === false && targetUser.uid !== currentUserId);
                 }
 
-                const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUser.uid}/animeList`));
-                if (isMounted) {
-                    const friendData = friendSnap.docs.map(d => ({...d.data(), id: d.id}));
-                    setList(friendData);
+                const targetIsPrivate = friendUserSnap.exists() && friendUserSnap.data().libraryPublic === false && targetUser.uid !== currentUserId;
+                if (!targetIsPrivate) {
+                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUser.uid}/animeList`));
+                    if (isMounted) {
+                        const friendData = friendSnap.docs.map(d => ({...d.data(), id: d.id}));
+                        setList(friendData);
+                    }
                 }
 
                 if (!readOnly) {
@@ -2924,7 +3033,9 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 </div>
             </div>
 
-            {tab === 'overview' && (
+            {libraryPrivate && <div className="rounded-xl border border-white/10 bg-white/[0.03] p-8 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-bold text-white">This library is private</p><p className="mt-1 text-sm text-gray-500">Their public profile and activity remain visible, but tracked titles and taste comparison are hidden.</p></div>}
+
+            {tab === 'overview' && !libraryPrivate && (
                 <div className="space-y-6">
                     {/* Stats Panel */}
                     <div className="bg-[#0f111a] border border-white/5 rounded-xl p-8 shadow-xl">
@@ -3023,7 +3134,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 </div>
             )}
 
-            {tab === "library" && (
+            {tab === "library" && !libraryPrivate && (
                 <div className="space-y-4">
                     <div className="flex justify-between items-center gap-4 border-b border-white/5 pb-4">
                         <div className="flex gap-2 overflow-x-auto no-scrollbar">
@@ -3053,7 +3164,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 </div>
             )}
 
-            {tab === "compare" && targetUser.uid !== currentUserId && (
+            {tab === "compare" && !libraryPrivate && targetUser.uid !== currentUserId && (
                 <div className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="bg-white/5 p-8 rounded-3xl border border-white/5 text-center">

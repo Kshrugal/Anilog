@@ -26,7 +26,9 @@ service cloud.firestore {
         
         // Anime list subcollection
         match /animeList/{animeId} {
-          allow read: if true;
+          allow read: if isOwner(userId)
+            || !('libraryPublic' in get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(userId)).data)
+            || get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(userId)).data.libraryPublic == true;
           allow write: if isOwner(userId);
         }
       }
@@ -36,6 +38,13 @@ service cloud.firestore {
         allow read: if true;
         allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
         allow update, delete: if isOwner(resource.data.userId);
+
+        match /interactions/{interactionId} {
+          allow read: if true;
+          allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid
+            && request.resource.data.type in ['like', 'comment'];
+          allow update, delete: if isOwner(resource.data.userId);
+        }
       }
 
       // Anime grids
