@@ -19,11 +19,22 @@ const MEDIA_FIELDS = `
 `;
 
 async function queryAniList(query: string, variables: Record<string, unknown> = {}) {
-  const response = await fetch(ANILIST_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ query, variables }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  let response: Response;
+  try {
+    response = await fetch(ANILIST_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw new Error('AniList took too long to respond. Please try again.', { cause: error });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const payload = await response.json();
   if (!response.ok || payload.errors?.length) {
@@ -150,25 +161,32 @@ export async function getAniListDiscovery(perPage = 10) {
 export async function getAniListAiringSchedule(start: Date, days = 7) {
   const startSeconds = Math.floor(start.getTime() / 1000);
   const endSeconds = startSeconds + (days * 24 * 60 * 60);
-  const schedule: any[] = [];
-  let page = 1;
-  let hasNextPage = true;
-  while (hasNextPage && page <= 4) {
-    const data = await queryAniList(`query ($start: Int!, $end: Int!, $page: Int!) {
-    Page(page: $page, perPage: 50) {
-      pageInfo { hasNextPage }
+  // Fetch the full week in one GraphQL round trip. The previous sequential
+  // pagination could leave mobile users staring at skeletons under rate limits.
+  const data = await queryAniList(`query ($start: Int!, $end: Int!) {
+    page1: Page(page: 1, perPage: 50) {
       airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
-        id
-        episode
-        airingAt
-        media { ${MEDIA_FIELDS} }
+        id episode airingAt media { ${MEDIA_FIELDS} }
       }
     }
-  }`, { start: startSeconds, end: endSeconds, page });
-    schedule.push(...(data.Page?.airingSchedules || []));
-    hasNextPage = Boolean(data.Page?.pageInfo?.hasNextPage);
-    page += 1;
-  }
+    page2: Page(page: 2, perPage: 50) {
+      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+        id episode airingAt media { ${MEDIA_FIELDS} }
+      }
+    }
+    page3: Page(page: 3, perPage: 50) {
+      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+        id episode airingAt media { ${MEDIA_FIELDS} }
+      }
+    }
+    page4: Page(page: 4, perPage: 50) {
+      airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME) {
+        id episode airingAt media { ${MEDIA_FIELDS} }
+      }
+    }
+  }`, { start: startSeconds, end: endSeconds });
+  const schedule = [data.page1, data.page2, data.page3, data.page4]
+    .flatMap(page => page?.airingSchedules || []);
   return schedule.map((slot: any) => ({
     id: slot.id,
     episode: slot.episode,

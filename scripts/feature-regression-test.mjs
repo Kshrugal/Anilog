@@ -30,5 +30,7 @@ assert.match(rules, /match \/interactions\//, 'social interaction ownership rule
 assert.match(rules, /request\.resource\.data\.type == 'deck'/, 'deck writes must be validated by Firestore');
 assert.match(vite, /firebase-firestore/, 'the large Firebase bundle must stay split for browser caching');
 assert.match(anilist, /String\(description \|\| ''\)/, 'AniList media with null descriptions must not crash mapping');
+assert.match(anilist, /controller\.abort\(\)/, 'AniList requests must time out instead of leaving permanent loading skeletons');
+assert.match(anilist, /page4: Page/, 'the full weekly schedule must load in one network round trip');
 
 console.log('Feature regression checks passed.');
