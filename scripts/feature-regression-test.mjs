@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, pages, rules, vite] = await Promise.all([
+const [app, pages, rules, vite, anilist] = await Promise.all([
   readFile(new URL('../App.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../features/Pages.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
   readFile(new URL('../vite.config.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../services/anilist.ts', import.meta.url), 'utf8'),
 ]);
 
 assert.doesNotMatch(app, /ScrambleText/, 'carousel headings must never use the unreliable scramble animation');
@@ -28,5 +29,6 @@ assert.match(rules, /libraryPublic.*== true/, 'private-library reads must be enf
 assert.match(rules, /match \/interactions\//, 'social interaction ownership rules must be deployed with the feature');
 assert.match(rules, /request\.resource\.data\.type == 'deck'/, 'deck writes must be validated by Firestore');
 assert.match(vite, /firebase-firestore/, 'the large Firebase bundle must stay split for browser caching');
+assert.match(anilist, /String\(description \|\| ''\)/, 'AniList media with null descriptions must not crash mapping');
 
 console.log('Feature regression checks passed.');

@@ -34,7 +34,7 @@ async function queryAniList(query: string, variables: Record<string, unknown> = 
 }
 
 function cleanDescription(description = '') {
-  return description
+  return String(description || '')
     .replace(/<br\s*\/?\s*>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&quot;/g, '"')
