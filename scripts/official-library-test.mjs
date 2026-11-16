@@ -104,28 +104,10 @@ test('Home retains all secondary filters and Journal respects the filtered libra
   assert.match(journal, /title="Journal"/);
 });
 
-test('Stats uses numeric bounded progress, exact decimal scores, and true status/format counts', () => {
-  const stats = initializer('StatsPage', 'stats', { myList: list, useMemo: callback => callback(), scoreSummary, AVG_EPISODE_MINUTES: 24 });
-  assert.equal(stats.totalEpisodes, 17);
-  assert.equal(stats.totalHours, '11');
-  assert.equal(stats.completedVnsCount, 1);
-  assert.equal(stats.statusDistribution.completed, 2);
-  assert.equal(stats.statusDistribution.onHold, 1);
-  assert.equal(stats.statusDistribution.planning, 1);
-  assert.equal(stats.formatDistribution.vnCount, 1);
-  assert.equal(stats.scoreDistribution.meanScore, '9.3');
-  assert.equal(stats.scoreDistribution.medianScore, '9.4');
-  assert.equal(stats.scoreDistribution.counts.reduce((a, b) => a + b), 3);
-  assert.deepEqual(stats.recentlyCompleted.map(item => item.id), ['b', 'c']);
-});
-
-test('Stats restores official charts before supplemental insights and keeps masterpieces truthful', () => {
-  const html = render('StatsPage', { myList: list, loading: false, genres: {} });
-  for (const text of ['Your Stats', 'Completed Anime', 'Taste Profile', 'Library Distribution', 'Anime Ratio', 'Score Distribution', 'Mean Score', 'Median Score', 'Total Rated']) assert.ok(html.includes(text), text);
-  assert.ok(html.indexOf('Score Distribution') < html.indexOf('More Insights'));
-  assert.match(html, /data-carousel="Masterpieces \(10\/10\)">Finished Anime<\/section>/);
-  assert.match(html, /<details[^>]*><summary[^>]*>More Insights/);
-  const empty = render('StatsPage', { myList: [], loading: false, genres: {} });
-  assert.ok(!empty.includes('NaN'));
-  assert.ok(!empty.includes('Infinity'));
+test('Stats isolates analytics from library writes and exposes load failures', () => {
+  const stats = component('StatsPage').getText(ast);
+  assert.match(stats, /AnalyticsDashboard/);
+  assert.match(stats, /id: item.id/);
+  assert.match(stats, /role="alert"/);
+  assert.doesNotMatch(stats, /updateDoc|setDoc|fetch\(/);
 });

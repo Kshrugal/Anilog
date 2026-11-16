@@ -12,6 +12,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getAniListMedia } from "./services/anilist";
+import { mediaDetailsCache } from "./services/media-cache";
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
@@ -151,6 +152,8 @@ export const AVG_EPISODE_MINUTES = 24;
 // --- Unified Media Details Loader (Supports Kitsu and VNDB) ---
 export const fetchMediaDetails = async (id) => {
   const strId = String(id);
+  // Clone at the boundary so detail editors cannot mutate shared public metadata.
+  return structuredClone(await mediaDetailsCache.get(strId, async () => {
   if (strId.startsWith('anilist:')) {
     return getAniListMedia(strId);
   } else if (strId.startsWith('v')) {
@@ -194,6 +197,7 @@ export const fetchMediaDetails = async (id) => {
     const resData = await response.json();
     return resData.data;
   }
+  }));
 };
 
 // --- THEME CONFIGURATION ---
@@ -626,22 +630,34 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
       rgba(255, 255, 255, 0.15),
       transparent 80%
     )`;
+    const tiltFrame = useRef(null);
     const handleMouseMove = (e) => {
-        if (viewMode === 'list') return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
-        const mouseXPos = e.clientX - rect.left;
-        const mouseYPos = e.clientY - rect.top;
-        const xPct = mouseXPos / width - 0.5;
-        const yPct = mouseYPos / height - 0.5;
-        mouseX.set(xPct);
-        mouseY.set(yPct);
+        if (viewMode === 'list' || !window.matchMedia('(hover: hover) and (pointer: fine)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const element = e.currentTarget;
+        const { clientX, clientY } = e;
+        if (tiltFrame.current !== null) cancelAnimationFrame(tiltFrame.current);
+        tiltFrame.current = requestAnimationFrame(() => {
+            tiltFrame.current = null;
+            const rect = element.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            mouseX.set((clientX - rect.left) / rect.width - 0.5);
+            mouseY.set((clientY - rect.top) / rect.height - 0.5);
+        });
     };
     const handleMouseLeave = () => {
+        if (tiltFrame.current !== null) cancelAnimationFrame(tiltFrame.current);
+        tiltFrame.current = null;
         mouseX.set(0);
         mouseY.set(0);
     };
+    useEffect(() => {
+        mouseX.set(0);
+        mouseY.set(0);
+        return () => {
+            if (tiltFrame.current !== null) cancelAnimationFrame(tiltFrame.current);
+            tiltFrame.current = null;
+        };
+    }, [viewMode, mouseX, mouseY]);
 
     const title = anime.title || anime.canonicalTitle || anime.attributes?.canonicalTitle || "Unknown Anime";
     const image = anime.imageUrl || 
@@ -661,6 +677,20 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
     const personalTags = Array.isArray(anime.personalTags) ? anime.personalTags : [];
 
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel';
+    const incrementLabel = isVn ? `Add 5% reading progress to ${title}` : `Add 1 episode to ${title}`;
+    const cardKeyboardProps = {
+        role: 'button',
+        tabIndex: 0,
+        'aria-label': `Open details for ${title}`,
+        onKeyDown: (event) => {
+            if (event.target !== event.currentTarget || event.repeat) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleMouseLeave();
+                onCardClick?.();
+            }
+        },
+    };
     const percentWidth = isVn ? progress : Math.min(100, (progress / (total || 12)) * 100);
 
     const isAiring = !isVn && [status, anime.attributes?.status].some(value => value === 'current' || value === 'RELEASING');
@@ -674,11 +704,12 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
     if (viewMode === 'list') {
         return (
             <motion.div 
-                layout
+                layout="position"
+                {...cardKeyboardProps}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 onClick={onCardClick}
-                className="flex items-center gap-4 p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer group relative overflow-hidden"
+                className="flex items-center gap-4 p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer group relative overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
             >
                 {/* Hover Glow Background */}
                 <div className={`absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity bg-gradient-to-r ${theme.gradient}`}></div>
@@ -705,11 +736,13 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                 )}
                 {onQuickIncrement && (
                     <button 
+                        type="button"
+                        aria-label={incrementLabel}
                         onClick={(e) => { e.stopPropagation(); onQuickIncrement(); }}
-                        className={`p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 ${theme.accentText} z-10`}
-                        title="Add Episode"
+                        className={`h-11 w-11 shrink-0 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 ${theme.accentText} z-10`}
+                        title={incrementLabel}
                     >
-                        <PlusIcon />
+                        <span aria-hidden="true" className="flex items-center gap-0.5"><PlusIcon className="h-4 w-4" /><span className="text-xs font-bold">{isVn ? '5%' : '1'}</span></span>
                     </button>
                 )}
             </motion.div>
@@ -718,7 +751,8 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
 
     return (
         <motion.div 
-            layout
+            layout="position"
+            {...cardKeyboardProps}
             initial={{ opacity: 0, scale: 0.9 }} 
             animate={{ opacity: 1, scale: 1 }} 
             style={{
@@ -726,8 +760,8 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
             }}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            onClick={onCardClick}
-            className="group relative flex flex-col cursor-pointer"
+            onClick={(event) => { handleMouseLeave(); onCardClick?.(event); }}
+            className="group relative flex min-w-0 flex-col cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
         >
             <motion.div 
                 style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
@@ -757,12 +791,15 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                 )}
 
                 {onQuickIncrement && (
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px] z-30">
+                    <div className="absolute inset-0 flex items-end justify-end p-2 opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:items-center [@media(hover:hover)_and_(pointer:fine)]:justify-center [@media(hover:hover)_and_(pointer:fine)]:bg-black/40 [@media(hover:hover)_and_(pointer:fine)]:backdrop-blur-[2px] z-30">
                          <button 
+                            type="button"
+                            aria-label={incrementLabel}
+                            title={incrementLabel}
                             onClick={(e) => { e.stopPropagation(); onQuickIncrement(); }}
                             className={`w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 hover:scale-110 transition-all border border-white/20 shadow-xl ${theme.accentText}`}
                          >
-                             <PlusIcon />
+                             <span aria-hidden="true" className="flex items-center gap-0.5"><PlusIcon className="h-4 w-4" /><span className="text-xs font-bold">{isVn ? '5%' : '1'}</span></span>
                          </button>
                     </div>
                 )}
@@ -774,7 +811,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                 )}
             </motion.div>
             
-            <h3 className="font-bold text-sm text-gray-200 line-clamp-2 leading-tight group-hover:text-white transition-colors">{title}</h3>
+            <h3 className="h-9 font-bold text-sm text-gray-200 line-clamp-2 leading-tight group-hover:text-white transition-colors">{title}</h3>
             {isVn ? (
                 progress > 0 && <p className="text-[10px] font-bold text-gray-500 mt-1 uppercase tracking-wider">{progress}% READ</p>
             ) : (
@@ -1034,16 +1071,21 @@ function NotificationCenter({ db, userId, onClose, setPage }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setItems([]);
+    setLoading(Boolean(db && userId));
     if (!db || !userId) return;
+    let disposed = false;
     let unsubscribe = () => {};
     getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(profile => {
+      if (disposed) return;
       const friendIds = new Set((profile.data()?.friends || []).map(friend => friend.uid || friend));
       unsubscribe = onSnapshot(query(collection(db, `artifacts/${appId}/public/data/activity`), orderBy('timestamp', 'desc'), limit(40)), snapshot => {
+        if (disposed) return;
         setItems(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(item => item.userId === userId || friendIds.has(item.userId)).slice(0, 12));
         setLoading(false);
-      }, () => setLoading(false));
-    }).catch(() => setLoading(false));
-    return () => unsubscribe();
+      }, () => { if (!disposed) setLoading(false); });
+    }).catch(() => { if (!disposed) setLoading(false); });
+    return () => { disposed = true; unsubscribe(); };
   }, [db, userId]);
 
   return createPortal(

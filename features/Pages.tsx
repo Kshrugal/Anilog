@@ -3,6 +3,7 @@ import React, {
   useEffect,
   useMemo,
   useContext,
+  useRef,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -62,14 +63,16 @@ import {
   Plus as PlusIcon,
 } from 'lucide-react';
 import {
-  APP_NAME, AVG_EPISODE_MINUTES, KITSU_API_URL, MAJOR_GENRES,
+  APP_NAME, KITSU_API_URL,
   StarField, THEMES, ThemeContext, appId, auth,
   AnimeCard, AnimeCardSkeleton, AnimeCarousel, AnimeCarouselSkeleton,
   DeciderModal, JournalView, exportUserData,
   fetchMediaDetails, logActivity, normalizeTitle,
 } from "../App";
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
-import { nextProgress, scoreSummary, planImport, importPayload, resetBackup } from "../services/tracking";
+import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
+import { AnalyticsDashboard } from './Analytics';
+import { analyze } from '../services/analytics';
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -204,21 +207,10 @@ export function HomePage({ db, userId, username, showToast }) {
 
   useEffect(() => {
     if (!selectedAnimeKitsuId) return;
-    let isMounted = true;
-    const fetchAnimeDetails = async () => {
-      try {
-        const data = await fetchMediaDetails(selectedAnimeKitsuId);
-        if (isMounted) setSelectedAnimeData(data);
-      } catch (err) { 
-        console.error(err); 
-        if (isMounted) {
-            setSelectedAnimeKitsuId(null); 
-            setSelectedAnimeData(null); 
-        }
-      }
-    };
-    fetchAnimeDetails();
-    return () => { isMounted = false; };
+    const saved = myList.find(item => String(item.kitsuId || item.id) === String(selectedAnimeKitsuId));
+    setSelectedAnimeData(saved || { kitsuId: selectedAnimeKitsuId });
+    // The dialog hydrates public metadata independently of the saved log.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAnimeKitsuId]);
 
   const filteredList = useMemo(() => {
@@ -547,6 +539,7 @@ export function HomePage({ db, userId, username, showToast }) {
 
       {selectedAnimeData && (
         <AnimeDetailsModal 
+            key={selectedAnimeData.kitsuId || selectedAnimeData.id}
             anime={selectedAnimeData} 
             onClose={() => { setSelectedAnimeKitsuId(null); setSelectedAnimeData(null); }} 
             db={db} 
@@ -1072,6 +1065,9 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
 
 function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined, readOnly = false }) {
     const { theme } = useContext(ThemeContext);
+    const dialogRef = useRef(null);
+    const closeRef = useRef(onClose);
+    const savingRef = useRef(false);
     const [status, setStatus] = useState("watching");
     const [episodes, setEpisodes] = useState(0);
     const [score, setScore] = useState(0);
@@ -1096,14 +1092,16 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [loadAttempt, setLoadAttempt] = useState(0);
     const [hydratedMedia, setHydratedMedia] = useState(null);
     const [detailsError, setDetailsError] = useState("");
+    const [extraDetailsOpen, setExtraDetailsOpen] = useState(false);
     const [fetchedGenres, setFetchedGenres] = useState(anime.genres || anime.attributes?.genres || []);
     const [cast, setCast] = useState([]);
     
     // Voice Actor Feature
     const [selectedCharacter, setSelectedCharacter] = useState(null);
 
-    const title = anime.title || anime.canonicalTitle || anime.attributes?.canonicalTitle;
-    const poster = anime.imageUrl || 
+    useEffect(() => { closeRef.current = onClose; savingRef.current = loading; }, [onClose, loading]);
+    const title = anime.title || anime.canonicalTitle || hydratedMedia?.attributes?.canonicalTitle || anime.attributes?.canonicalTitle;
+    const poster = anime.imageUrl || hydratedMedia?.attributes?.posterImage?.original || hydratedMedia?.attributes?.posterImage?.large ||
         anime.posterImage?.original || 
         anime.posterImage?.large || 
         anime.posterImage?.medium || 
@@ -1114,7 +1112,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         anime.attributes?.posterImage?.small || 
         anime.attributes?.coverImage?.original ||
         `https://placehold.co/300x450?text=${encodeURIComponent(title || '?')}`;
-    const totalEps = anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
+    const totalEps = Number(hydratedMedia?.attributes?.episodeCount) > 0 ? Number(hydratedMedia.attributes.episodeCount) : anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
     const details = hydratedMedia?.attributes || anime.attributes || anime;
     const synopsis = details.synopsis || anime.synopsis || anime.attributes?.synopsis;
     const relatedMedia = details.relations || [];
@@ -1124,54 +1122,65 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const kitsuId = anime.kitsuId || anime.id || anime.attributes?.kitsuId || anime.attributes?.id;
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel' || String(kitsuId).startsWith('v');
     const isAniList = anime.provider === 'anilist' || anime.attributes?.provider === 'anilist' || String(kitsuId).startsWith('anilist:');
-    const isKitsu = (!!anime.attributes || !!anime.canonicalTitle) && !isVn && !isAniList;
+    const isKitsu = !isVn && !isAniList;
 
     const isOwner = userId === ownerId;
 
     useEffect(() => {
+        const previousFocus = document.activeElement;
         const previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
-        const onKeyDown = event => { if (event.key === 'Escape' && !loading) onClose(); };
+        dialogRef.current?.focus({ preventScroll: true });
+        const onKeyDown = event => {
+            if (event.key === 'Escape' && !savingRef.current) { event.preventDefault(); closeRef.current(); }
+            if (event.key !== 'Tab') return;
+            const controls = Array.from(dialogRef.current?.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]') || []).filter((el: HTMLElement) => el.getClientRects().length) as HTMLElement[];
+            const first = controls[0], last = controls[controls.length - 1];
+            if (!first) { event.preventDefault(); return; }
+            if (!dialogRef.current?.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); return; }
+            if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) { event.preventDefault(); first.focus(); }
+        };
         document.addEventListener('keydown', onKeyDown);
         return () => {
             document.body.style.overflow = previousOverflow;
             document.removeEventListener('keydown', onKeyDown);
+            if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus({ preventScroll: true });
         };
-    }, [onClose, loading]);
+    }, []);
 
     useEffect(() => {
-        if (!isAniList || !kitsuId) return;
+        if (!kitsuId) return;
         let active = true;
         setHydratedMedia(null);
         setDetailsError("");
         fetchMediaDetails(kitsuId)
-            .then(media => { if (active) setHydratedMedia(media); })
+            .then(media => { if (active) { setHydratedMedia(media); if (media?.attributes?.genres?.length) setFetchedGenres(media.attributes.genres); } })
             .catch(() => { if (active) setDetailsError("Extra details could not be loaded."); });
         return () => { active = false; };
-    }, [isAniList, kitsuId]);
+    }, [kitsuId]);
 
     useEffect(() => {
         let active = true;
-        setLogLoaded(false);
-        setLogError("");
-        if (!db || !ownerId || !kitsuId) return;
+        if (!isKitsu || !kitsuId || !extraDetailsOpen) return;
+        const controller = new AbortController();
         
         // Fetch Genres & Cast if not present
-        if (isKitsu && !fetchedGenres.length) {
-            fetch(`${KITSU_API_URL}/anime/${kitsuId}/genres`)
+        {
+            fetch(`${KITSU_API_URL}/anime/${kitsuId}/genres`, { signal: controller.signal })
                 .then(r => r.json())
                 .then(data => {
-                    if(data.data) {
+                    if(active && data.data) {
                         const g = data.data.map(item => item.attributes.name);
                         setFetchedGenres(g);
                     }
-                }).catch(console.error);
+                }).catch(() => {});
                 
              // Fetch Cast
-            fetch(`https://kitsu.io/api/edge/casting?filter[media_type]=Anime&filter[media_id]=${kitsuId}&filter[is_character]=true&include=character,person&sort=-featured&page[limit]=6`)
+            fetch(`https://kitsu.io/api/edge/casting?filter[media_type]=Anime&filter[media_id]=${kitsuId}&filter[is_character]=true&include=character,person&sort=-featured&page[limit]=6`, { signal: controller.signal })
                 .then(res => res.json())
                 .then(data => {
-                    if (data.included) {
+                    if (active && data.included) {
                         const chars = data.data.map(c => {
                              const charData = data.included.find(i => i.type === 'characters' && i.id === c.relationships.character.data.id);
                              const personData = data.included.find(i => i.type === 'people' && i.id === c.relationships.person.data.id);
@@ -1185,9 +1194,16 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                         setCast(chars);
                     }
                 })
-                .catch(err => console.error("Failed cast", err));
+                .catch(() => {});
         }
+        return () => { active = false; controller.abort(); };
+    }, [isKitsu, kitsuId, extraDetailsOpen]);
 
+    useEffect(() => {
+        let active = true;
+        setLogLoaded(false);
+        setLogError("");
+        if (!db || !ownerId || !kitsuId) { setLogLoaded(true); return; }
         const fetchUserData = async () => {
             try {
                 const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/animeList`, String(kitsuId));
@@ -1226,7 +1242,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         };
         fetchUserData();
         return () => { active = false; };
-    }, [db, ownerId, kitsuId, isOwner, isKitsu, loadAttempt]);
+    }, [db, ownerId, kitsuId, isOwner, loadAttempt]);
 
     const handleSave = async () => {
         if (!isOwner || readOnly || !db || !kitsuId || !logLoaded || loading) return;
@@ -1263,7 +1279,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
                 provider: anime.provider || anime.attributes?.provider || (isVn ? 'vndb' : isAniList ? 'anilist' : 'kitsu'),
                 anilistId: anime.anilistId || anime.attributes?.anilistId || null,
-                durationMinutes: Number(anime.durationMinutes || details.episodeLength || 0),
+                durationMinutes: Number(details.episodeLength || anime.durationMinutes || 0),
                 nextAiringEpisode: details.nextAiringEpisode || anime.nextAiringEpisode || null,
                 updatedAt: Date.now(),
             };
@@ -1329,8 +1345,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-[#0a0a0a] w-full max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden relative shadow-2xl flex flex-col md:flex-row border border-white/10"
+                className="bg-[#0a0a0a] w-full max-w-4xl max-h-[90dvh] rounded-3xl overflow-hidden relative shadow-2xl flex flex-col md:flex-row border border-white/10"
                 role="dialog"
+                ref={dialogRef}
+                tabIndex={-1}
                 aria-modal="true"
                 aria-label={title || 'Media details'}
                 onClick={e => e.stopPropagation()}
@@ -1339,7 +1357,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     <CloseIcon />
                 </button>
 
-                <div className="relative w-full md:w-1/3 h-64 md:h-auto flex-shrink-0">
+                <div className="relative w-full md:w-1/3 h-64 md:h-auto max-h-[30dvh] md:max-h-none flex-shrink-0 [@media(max-height:450px)]:hidden">
                     <img src={poster || "https://placehold.co/300x450"} alt={title || ''} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent md:bg-gradient-to-r md:from-transparent md:to-[#0a0a0a]" />
                     {score > 0 && (
@@ -1349,10 +1367,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     )}
                 </div>
 
-                <div className="flex-1 p-6 md:p-8 overflow-y-auto custom-scrollbar">
+                <div className="flex-1 min-h-0 min-w-0 p-6 md:p-8 overflow-y-auto custom-scrollbar">
                     <div className="space-y-6">
                         <div>
-                            <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight mb-2">{title}</h2>
+                            <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight mb-2 pr-10 break-words">{title}</h2>
                             {detailsError && <p role="status" className="mb-3 text-xs text-amber-300">{detailsError}</p>}
                             {synopsis && (
                                 <p className="text-gray-400 text-sm leading-relaxed line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">
@@ -1373,7 +1391,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                             </div>}
                         </div>
 
-                        {(streamingLinks.length > 0 || cast.length > 0 || anilistCharacters.length > 0 || relatedMedia.length > 0 || recommendations.length > 0) && <details className="rounded-2xl border border-white/10 bg-white/5 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Cast, streaming & related</summary><div className="mt-5 space-y-6">
+                        {(isKitsu || streamingLinks.length > 0 || cast.length > 0 || anilistCharacters.length > 0 || relatedMedia.length > 0 || recommendations.length > 0) && <details onToggle={event => setExtraDetailsOpen(event.currentTarget.open)} className="rounded-2xl border border-white/10 bg-white/5 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Cast, streaming & related</summary><div className="mt-5 space-y-6">
                         {streamingLinks.length > 0 && <div><h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">Watch legally</h4><div className="flex flex-wrap gap-2">{streamingLinks.slice(0, 6).map((link, index) => <a key={`${link.url}-${index}`} href={link.url} target="_blank" rel="noopener noreferrer" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-blue-300 hover:bg-white/10">{link.site || link.title || 'Watch'} ↗</a>)}</div></div>}
 
                         {/* Cast Section */}
@@ -1511,7 +1529,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
 
                                 <details className="rounded-2xl border border-white/10 bg-black/20 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Tracking details</summary><div className="mt-5 space-y-6">
                                 <div className="grid gap-4 sm:grid-cols-2">
-                                    <button onClick={() => setFavorite(current => !current)} className={`flex items-center justify-between rounded-xl border p-4 text-left transition-colors ${favorite ? 'border-pink-500/30 bg-pink-500/10 text-pink-300' : 'border-white/10 bg-black/20 text-gray-400 hover:bg-white/5'}`}>
+                                    <button aria-pressed={favorite} onClick={() => setFavorite(current => !current)} className={`flex items-center justify-between rounded-xl border p-4 text-left transition-colors ${favorite ? 'border-pink-500/30 bg-pink-500/10 text-pink-300' : 'border-white/10 bg-black/20 text-gray-400 hover:bg-white/5'}`}>
                                         <span><span className="block text-sm font-black">Favorite</span><span className="mt-1 block text-[10px] uppercase tracking-wider opacity-60">Pin to your taste profile</span></span>
                                         <HeartIcon className={`h-5 w-5 ${favorite ? 'fill-current' : ''}`} />
                                     </button>
@@ -1557,9 +1575,13 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     {loading ? "Saving..." : "Update Log"}
                                 </motion.button>
                             </fieldset>
+                        ) : !logLoaded && ownerId ? (
+                            <p role="status" className="text-sm text-gray-400">Loading saved progress...</p>
+                        ) : logError ? (
+                            <div role="alert" className="text-sm text-amber-300">{logError}<button onClick={() => setLoadAttempt(value => value + 1)} className="ml-3 underline">Retry</button></div>
                         ) : (
                             <div className="space-y-6 bg-white/5 p-6 rounded-2xl border border-white/5">
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-3 flex-wrap">
                                     <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${statusColors[status] || 'bg-gray-500'} text-white`}>
                                         {status}
                                     </span>
@@ -1870,532 +1892,24 @@ export function DecksPage({ db, userId, username, showToast, readOnly = false })
 }
 
 export function StatsPage({ db, userId, username }) {
-  const { theme } = useContext(ThemeContext);
   const [myList, setMyList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [selectedAnimeKitsuId, setSelectedAnimeKitsuId] = useState(null);
   const [selectedAnimeData, setSelectedAnimeData] = useState(null);
-  const [genres, setGenres] = useState<Record<string, number>>({});
-  const [selectedGenre, setSelectedGenre] = useState(null);
-
   useEffect(() => {
-    if (!db || !userId) return;
-    let isMounted = true;
-    const listRef = collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`);
-    setLoading(true);
-    const unsubscribe = onSnapshot(listRef, (snapshot) => {
-      if (!isMounted) return;
-      const list = snapshot.docs.map((doc) => doc.data());
-      setMyList(list);
-      
-      const genreCounts: Record<string, number> = {};
-      list.forEach(a => {
-          if (a.genres && Array.isArray(a.genres)) {
-              a.genres.forEach(g => {
-                  if(MAJOR_GENRES.includes(g)) {
-                    genreCounts[g] = (genreCounts[g] || 0) + 1;
-                  }
-              });
-          }
-      });
-      setGenres(genreCounts);
-      setLoading(false);
-    }, (err) => { 
-      console.error(err); 
-      if (isMounted) {
-        setError("Could not load list."); 
-        setLoading(false); 
-      }
-    });
-    return () => { isMounted = false; unsubscribe(); };
+    setMyList([]); setError(""); setLoading(true);
+    if (!db || !userId) { setLoading(false); return; }
+    return onSnapshot(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`), snapshot => {
+      setMyList(snapshot.docs.map(item => ({ ...item.data(), id: item.id })));
+      setLoading(false); setError("");
+    }, () => { setError("Your statistics could not be loaded. Please reload to retry."); setLoading(false); });
   }, [db, userId]);
-
-  // AUTO-SYNC GENRES
-  useEffect(() => {
-      if(myList.length > 0) {
-          const missingGenres = myList.filter(a => !a.genres && a.kitsuId && !String(a.kitsuId).startsWith('anilist:')).slice(0, 3);
-          missingGenres.forEach(anime => {
-               fetch(`${KITSU_API_URL}/anime/${anime.kitsuId}/genres`)
-                  .then(r => r.json())
-                  .then(async (d) => {
-                      if(d.data) {
-                          const fetched = d.data.map(i => i.attributes.name);
-                          await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(anime.kitsuId)), { genres: fetched });
-                      }
-                  }).catch(console.error);
-          });
-      }
-  }, [myList, db, userId]);
-
-  const stats = useMemo(() => {
-    let totalMinutes = 0;
-    let totalEpisodesWatched = 0;
-    let completedVnsCount = 0;
-    let readingVnsCount = 0;
-    const completed = [];
-    const highestRated = [];
-
-    // Status metrics
-    let watchingAnime = 0;
-    let readingVn = 0;
-    let completedCount = 0;
-    let onHoldCount = 0;
-    let droppedCount = 0;
-    let planningCount = 0;
-
-    // Score distribution
-    const scores = scoreSummary(myList);
-
-    for (const anime of myList) {
-      const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel';
-      
-      // Status counting
-      if (anime.status === 'watching') {
-        if (isVn) readingVn++;
-        else watchingAnime++;
-      } else if (anime.status === 'completed') {
-        completedCount++;
-      } else if (anime.status === 'paused' || anime.status === 'on_hold') {
-        onHoldCount++;
-      } else if (anime.status === 'dropped') {
-        droppedCount++;
-      } else if (anime.status === 'planned' || anime.status === 'planning') {
-        planningCount++;
-      }
-
-      if (isVn) {
-        totalMinutes += Math.max(0, Number(anime.vnPlaytimeHours) || 0) * 60;
-        if (anime.status === 'completed') {
-          completedVnsCount++;
-          completed.push(anime);
-        } else if (anime.status === 'watching') {
-          readingVnsCount++;
-        }
-        if (Number(anime.score || 0) > 0) highestRated.push(anime);
-      } else {
-        const total = Math.max(0, Number(anime.totalEpisodes) || 0);
-        const progress = Math.max(0, Number(anime.watchedEpisodes) || 0);
-        const eps = anime.status === 'completed' && total > 0 ? total : total > 0 ? Math.min(progress, total) : progress;
-        totalEpisodesWatched += eps;
-        totalMinutes += eps * (Number(anime.durationMinutes) > 0 ? Number(anime.durationMinutes) : AVG_EPISODE_MINUTES);
-
-        if (anime.status === "completed") {
-          completed.push(anime);
-        }
-        if (Number(anime.score || 0) > 0) highestRated.push(anime);
-      }
-    }
-
-    const { ratedCount } = scores;
-
-    const animeCount = myList.filter(a => !(a.mediaType === 'vn' || a.showType === 'Visual Novel')).length;
-    const vnCount = myList.filter(a => (a.mediaType === 'vn' || a.showType === 'Visual Novel')).length;
-    const librarySize = myList.length;
-    const completionRate = librarySize ? Math.round((completedCount / librarySize) * 100) : 0;
-    const ratingCoverage = librarySize ? Math.round((ratedCount / librarySize) * 100) : 0;
-    const dropRate = librarySize ? Math.round((droppedCount / librarySize) * 100) : 0;
-    const favorites = myList.filter(a => a.favorite).length;
-    const rewatches = myList.reduce((sum, a) => sum + Number(a.repeatCount || 0), 0);
-
-    return {
-      totalHours: (totalMinutes / 60).toFixed(0),
-      totalCompletedUnique: completedCount,
-      totalEpisodes: totalEpisodesWatched,
-      completedVnsCount,
-      readingVnsCount,
-      completionRate,
-      ratingCoverage,
-      dropRate,
-      favorites,
-      rewatches,
-      recentlyCompleted: [...completed].sort((a, b) => {
-        const timestamp = item => {
-          const value = item.completedAt || item.updatedAt;
-          if (typeof value === 'number') return value;
-          if (typeof value?.toMillis === 'function') return value.toMillis();
-          return Date.parse(value || '') || 0;
-        };
-        return timestamp(b) - timestamp(a);
-      }).slice(0, 10),
-      topRated: [...highestRated].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)).slice(0, 10),
-      
-      // New distribution stats
-      statusDistribution: {
-        watchingAnime,
-        readingVn,
-        completed: completedCount,
-        onHold: onHoldCount,
-        dropped: droppedCount,
-        planning: planningCount,
-        total: myList.length || 1
-      },
-      scoreDistribution: {
-        ...scores,
-      },
-      formatDistribution: {
-        animeCount,
-        vnCount,
-        total: myList.length || 1
-      }
-    };
-  }, [myList]);
-
-  useEffect(() => {
-      if (!selectedAnimeKitsuId) return;
-      let isMounted = true;
-      const fetchD = async () => {
-          try {
-              const d = await fetchMediaDetails(selectedAnimeKitsuId);
-              if (isMounted) setSelectedAnimeData(d);
-          } catch(e) { console.error(e); }
-      };
-      fetchD();
-      return () => { isMounted = false; };
-  }, [selectedAnimeKitsuId]);
-
-  const sd = stats.statusDistribution;
-  const sc = stats.scoreDistribution;
-  const fd = stats.formatDistribution;
-
-  return (
-    <div className="flex flex-col space-y-8">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-4xl font-black text-white tracking-tight">Your Stats</h2>
-          <p className="text-sm text-gray-500 mt-1">Detailed metrics of your experience log</p>
-        </div>
-      </div>
-
-      {loading ? <AnimeCarouselSkeleton title="Loading..." /> : error ? <p className="text-red-400">{error}</p> : (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-                { label: "Logged Hours (est.)", val: stats.totalHours, color: theme.gradient },
-                { label: "Completed Anime", val: sd.completed - stats.completedVnsCount, color: theme.gradient },
-                { label: "Episodes", val: stats.totalEpisodes, color: theme.gradient },
-                { label: "Completed VNs", val: stats.completedVnsCount, color: theme.gradient }
-            ].map((stat, i) => (
-                <motion.div whileHover={{ y: -5 }} key={i} className="p-6 bg-white/5 border border-white/5 rounded-2xl text-center shadow-xl backdrop-blur-sm hover:bg-white/10 transition-colors relative overflow-hidden group">
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <span className={`text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br ${stat.color} tracking-tighter relative z-10`}>
-                        {stat.val}
-                    </span>
-                    <p className="text-xs sm:text-sm font-bold text-gray-400 mt-2 uppercase tracking-wider relative z-10">{stat.label}</p>
-                </motion.div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Radar Taste Profile */}
-              <div className="p-6 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-sm flex flex-col items-center justify-center relative overflow-hidden min-h-[400px]">
-                   <h3 className="text-xl font-black text-white mb-6 z-10">Taste Profile</h3>
-                   <div className="w-full h-full z-10 relative flex items-center justify-center">
-                       <GenreRadarChart counts={genres} theme={theme} onSelectGenre={setSelectedGenre} />
-                   </div>
-              </div>
-
-              {/* Status and Library distribution */}
-              <div className="p-6 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-sm flex flex-col justify-between relative overflow-hidden min-h-[400px]">
-                   <div className="z-10">
-                       <h3 className="text-xl font-black text-white mb-2">Library Distribution</h3>
-                       <p className="text-xs text-gray-500">Current progress and status breakdown</p>
-
-                       {/* Stacked Status Bar */}
-                       <div className="h-4 w-full rounded-full bg-white/5 overflow-hidden flex gap-[2px] mt-6 shadow-inner">
-                            {sd.watchingAnime > 0 && (
-                                <motion.div 
-                                    initial={{ width: 0 }} 
-                                    animate={{ width: `${(sd.watchingAnime / sd.total) * 100}%` }} 
-                                    className="bg-emerald-500 h-full hover:brightness-110 transition-all cursor-pointer"
-                                    title={`Watching: ${sd.watchingAnime} Anime`}
-                                />
-                            )}
-                            {sd.readingVn > 0 && (
-                                <motion.div 
-                                    initial={{ width: 0 }} 
-                                    animate={{ width: `${(sd.readingVn / sd.total) * 100}%` }} 
-                                    className="bg-teal-500 h-full hover:brightness-110 transition-all cursor-pointer"
-                                    title={`Reading: ${sd.readingVn} VNs`}
-                                />
-                            )}
-                            {sd.completed > 0 && (
-                                <motion.div 
-                                    initial={{ width: 0 }} 
-                                    animate={{ width: `${(sd.completed / sd.total) * 100}%` }} 
-                                    className="bg-sky-500 h-full hover:brightness-110 transition-all cursor-pointer"
-                                    title={`Completed: ${sd.completed}`}
-                                />
-                            )}
-                            {sd.onHold > 0 && (
-                                <motion.div 
-                                    initial={{ width: 0 }} 
-                                    animate={{ width: `${(sd.onHold / sd.total) * 100}%` }} 
-                                    className="bg-yellow-500 h-full hover:brightness-110 transition-all cursor-pointer"
-                                    title={`On Hold: ${sd.onHold}`}
-                                />
-                            )}
-                            {sd.dropped > 0 && (
-                                <motion.div 
-                                    initial={{ width: 0 }} 
-                                    animate={{ width: `${(sd.dropped / sd.total) * 100}%` }} 
-                                    className="bg-red-500 h-full hover:brightness-110 transition-all cursor-pointer"
-                                    title={`Dropped: ${sd.dropped}`}
-                                />
-                            )}
-                            {sd.planning > 0 && (
-                                <motion.div 
-                                    initial={{ width: 0 }} 
-                                    animate={{ width: `${(sd.planning / sd.total) * 100}%` }} 
-                                    className="bg-purple-500 h-full hover:brightness-110 transition-all cursor-pointer"
-                                    title={`Planning: ${sd.planning}`}
-                                />
-                            )}
-                       </div>
-
-                       {/* Status Legend Grid */}
-                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-6">
-                            {[
-                                { label: "Watching", count: sd.watchingAnime, color: "bg-emerald-500", text: "text-emerald-400" },
-                                { label: "Reading (VNs)", count: sd.readingVn, color: "bg-teal-500", text: "text-teal-400" },
-                                { label: "Completed", count: sd.completed, color: "bg-sky-500", text: "text-sky-400" },
-                                { label: "On Hold", count: sd.onHold, color: "bg-yellow-500", text: "text-yellow-400" },
-                                { label: "Dropped", count: sd.dropped, color: "bg-red-500", text: "text-red-400" },
-                                { label: "Planning", count: sd.planning, color: "bg-purple-500", text: "text-purple-400" }
-                            ].map((st, idx) => (
-                                <div key={idx} className="flex items-start gap-2.5 p-2 rounded-xl bg-white/[0.02] border border-white/5">
-                                    <div className={`w-2.5 h-2.5 rounded-full ${st.color} mt-1`} />
-                                    <div>
-                                        <p className="text-xs font-bold text-gray-300 leading-none">{st.label}</p>
-                                        <p className="text-xs text-gray-500 font-medium mt-1">
-                                             {st.count} {st.count === 1 ? 'title' : 'titles'} • {((st.count / sd.total) * 100).toFixed(0)}%
-                                        </p>
-                                    </div>
-                                </div>
-                            ))}
-                       </div>
-                   </div>
-
-                   {/* Format Distribution (Anime vs Visual Novels) */}
-                   <div className="z-10 mt-6 pt-6 border-t border-white/5 space-y-2">
-                       <div className="flex justify-between items-center text-xs text-gray-400 font-bold uppercase tracking-wider">
-                           <span>Anime Ratio</span>
-                           <span>Visual Novels</span>
-                       </div>
-                       <div className="h-2 w-full rounded-full bg-white/5 overflow-hidden flex shadow-inner">
-                            <div className={`h-full ${theme.progressbar}`} style={{ width: `${(fd.animeCount / fd.total) * 100}%` }} />
-                            <div className="h-full bg-indigo-500" style={{ width: `${(fd.vnCount / fd.total) * 100}%` }} />
-                       </div>
-                       <div className="flex justify-between text-xs text-gray-500 font-medium">
-                           <span>{fd.animeCount} anime ({((fd.animeCount / fd.total) * 100).toFixed(0)}%)</span>
-                           <span>{fd.vnCount} visual novels ({((fd.vnCount / fd.total) * 100).toFixed(0)}%)</span>
-                       </div>
-                   </div>
-              </div>
-          </div>
-
-          {/* Full-width Score Distribution Section */}
-          <div className="p-8 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-xl relative overflow-hidden">
-               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/5 pb-6 mb-6">
-                    <div>
-                        <h3 className="text-xl font-black text-white">Score Distribution</h3>
-                        <p className="text-xs text-gray-500 mt-1">Ratings grouped by nearest whole score; mean and median use exact scores</p>
-                    </div>
-
-                    <div className="flex flex-wrap gap-4">
-                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Mean Score</p>
-                            <p className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight mt-1`}>{sc.meanScore}</p>
-                        </div>
-                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Median Score</p>
-                            <p className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight mt-1`}>{sc.medianScore}</p>
-                        </div>
-                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Total Rated</p>
-                            <p className="text-2xl font-black text-white mt-1">{sc.ratedCount}</p>
-                        </div>
-                    </div>
-               </div>
-
-               {sc.ratedCount === 0 ? (
-                   <div className="py-12 text-center text-gray-500">
-                       <p className="text-sm">No scores rated yet. Click on any anime or visual novel to edit your entry and rate it!</p>
-                   </div>
-               ) : (
-                   <div className="pt-6 relative">
-                       {/* SVG/HTML Bar Columns */}
-                       <div className="flex justify-between items-end h-48 w-full gap-2 sm:gap-4 px-2">
-                           {sc.counts.map((count, index) => {
-                               const scoreLabel = index + 1;
-                               const heightPercent = count > 0 ? (count / sc.maxCount) * 100 : 0;
-                               return (
-                                   <div key={index} className="flex-grow flex flex-col justify-end items-center h-full group relative">
-                                       {/* Hover Tooltip Count */}
-                                       <AnimatePresence>
-                                           <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none bg-white text-black px-2 py-0.5 rounded text-[10px] font-bold shadow-md z-10 whitespace-nowrap">
-                                               {count} {count === 1 ? 'title' : 'titles'}
-                                           </div>
-                                       </AnimatePresence>
-                                       
-                                       {/* Column Bar */}
-                                       <motion.div
-                                           initial={{ height: 0 }}
-                                           animate={{ height: `${heightPercent}%` }}
-                                           transition={{ duration: 1, ease: "easeOut", delay: index * 0.05 }}
-                                           className={`w-full max-w-[40px] bg-gradient-to-t ${theme.gradient} rounded-t-lg transition-all group-hover:brightness-125`}
-                                           style={{ minHeight: count > 0 ? '6px' : '2px' }}
-                                       />
-
-                                       {/* Count text displayed at top of bar if count > 0 */}
-                                       {count > 0 && (
-                                           <span className="text-[10px] font-bold text-gray-400 mt-1 mb-1 block group-hover:text-white transition-colors">{count}</span>
-                                       )}
-                                       
-                                       {/* Score label (1 to 10) */}
-                                       <span className="text-xs font-bold text-gray-500 group-hover:text-white mt-2 transition-colors">{scoreLabel}</span>
-                                   </div>
-                               );
-                           })}
-                       </div>
-                   </div>
-               )}
-          </div>
-
-          <AnimeCarousel title="Recently Completed" animeList={stats.recentlyCompleted} onAnimeClick={(a) => setSelectedAnimeKitsuId(a.kitsuId)} isKitsuList={false} />
-          <AnimeCarousel title="Masterpieces (10/10)" animeList={stats.topRated.filter(anime => Number(anime.score) === 10)} onAnimeClick={(a) => setSelectedAnimeKitsuId(a.kitsuId)} isKitsuList={false} />
-          <details className="border-t border-white/10 pt-5">
-            <summary className="cursor-pointer text-sm font-bold text-gray-400 hover:text-white">More Insights</summary>
-            <dl className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-3">
-              {[
-                { label: 'Completion', value: stats.completionRate + '%' },
-                { label: 'Planned titles', value: sd.planning },
-                { label: 'Rating coverage', value: stats.ratingCoverage + '%' },
-                { label: 'Dropped', value: stats.dropRate + '%' },
-                { label: 'Favorites', value: stats.favorites },
-                { label: 'Rewatches logged', value: stats.rewatches }
-              ].map(insight => <div key={insight.label}><dt className="text-xs text-gray-500">{insight.label}</dt><dd className="mt-1 text-xl font-bold text-white">{insight.value}</dd></div>)}
-            </dl>
-            <AnimeCarousel title="Highest Rated" animeList={stats.topRated} onAnimeClick={anime => setSelectedAnimeKitsuId(anime.kitsuId)} isKitsuList={false} />
-          </details>
-        </>
-      )}
-      {selectedAnimeData && <AnimeDetailsModal anime={selectedAnimeData} onClose={() => {setSelectedAnimeData(null); setSelectedAnimeKitsuId(null)}} db={db} userId={userId} ownerId={userId} username={username} />}
-      
-      {selectedGenre && createPortal(
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6" onClick={() => setSelectedGenre(null)}>
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black/80 backdrop-blur-xl" 
-              />
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-[#0a0a0a]/90 w-full max-w-5xl max-h-[90vh] rounded-[2.5rem] overflow-hidden border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative z-10 flex flex-col backdrop-blur-2xl" 
-                onClick={e => e.stopPropagation()}
-              >
-                  <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/5">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-2 h-10 rounded-full bg-gradient-to-b ${theme.gradient}`}></div>
-                        <div>
-                          <h3 className="text-3xl font-black text-white tracking-tight leading-none">{selectedGenre}</h3>
-                          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em] mt-2">Genre Collection</p>
-                        </div>
-                      </div>
-                      <button onClick={() => setSelectedGenre(null)} className="p-3 bg-white/5 hover:bg-white/10 rounded-full text-white transition-all border border-white/10 hover:rotate-90">
-                        <CloseIcon />
-                      </button>
-                  </div>
-                  <div className="p-8 overflow-y-auto custom-scrollbar flex-grow bg-gradient-to-b from-transparent to-black/20">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                        {myList.filter(a => a.genres?.includes(selectedGenre)).map(a => (
-                            <AnimeCard key={a.id} anime={a} onCardClick={() => { setSelectedGenre(null); setSelectedAnimeKitsuId(a.kitsuId); }} />
-                        ))}
-                    </div>
-                    {myList.filter(a => a.genres?.includes(selectedGenre)).length === 0 && (
-                        <div className="py-32 text-center">
-                            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/5">
-                                <SearchIcon />
-                            </div>
-                            <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">No anime found in this sector.</p>
-                        </div>
-                    )}
-                  </div>
-              </motion.div>
-          </div>,
-          document.body
-      )}
-    </div>
-  );
+  if (loading) return <div className="py-20 text-center text-gray-400" role="status">Loading your stats…</div>;
+  if (error) return <div role="alert" className="py-20 text-center text-rose-300">{error}</div>;
+  return <><AnalyticsDashboard key={userId} entries={myList} userId={userId} onSelect={setSelectedAnimeData} />{selectedAnimeData && <AnimeDetailsModal key={selectedAnimeData.kitsuId || selectedAnimeData.id} anime={selectedAnimeData} onClose={() => setSelectedAnimeData(null)} db={db} userId={userId} ownerId={userId} username={username} />}</>;
 }
 
-function GenreRadarChart({ counts, theme, onSelectGenre }) {
-    const sorted = MAJOR_GENRES.map(g => [g, counts[g] || 0]);
-    const maxVal = Math.max(...sorted.map(s => s[1] as number)) || 1;
-    
-    const angleStep = (Math.PI * 2) / sorted.length;
-    const radius = 100;
-    const center = 150;
 
-    const points = sorted.map((entry, i) => {
-        const val = (entry[1] as number) / maxVal;
-        const x = center + Math.cos(i * angleStep - Math.PI/2) * (radius * val);
-        const y = center + Math.sin(i * angleStep - Math.PI/2) * (radius * val);
-        return `${x},${y}`;
-    }).join(" ");
-
-    const bgPoints = sorted.map((_, i) => {
-        const x = center + Math.cos(i * angleStep - Math.PI/2) * radius;
-        const y = center + Math.sin(i * angleStep - Math.PI/2) * radius;
-        return `${x},${y}`;
-    }).join(" ");
-
-    return (
-        <svg viewBox="0 0 300 300" className="w-full h-full max-h-[350px]">
-            {/* Background Web */}
-            <polygon points={bgPoints} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
-            {[0.25, 0.5, 0.75].map(scale => {
-                 const scaledPoints = sorted.map((_, i) => {
-                    const x = center + Math.cos(i * angleStep - Math.PI/2) * (radius * scale);
-                    const y = center + Math.sin(i * angleStep - Math.PI/2) * (radius * scale);
-                    return `${x},${y}`;
-                }).join(" ");
-                return <polygon key={scale} points={scaledPoints} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
-            })}
-
-            {/* Data Shape with Draw Animation */}
-            <motion.polygon 
-                initial={{ pathLength: 0, opacity: 0 }}
-                animate={{ pathLength: 1, opacity: 0.6 }}
-                transition={{ duration: 1.5, ease: "easeInOut" }}
-                points={points} 
-                className={`${theme.accentText.replace('text-', 'fill-')} stroke-white`}
-                strokeWidth="2"
-                strokeLinejoin="round"
-                fillOpacity="0.5"
-                transform-origin="center"
-            />
-
-            {/* Labels - Clickable */}
-            {sorted.map((entry, i) => {
-                const x = center + Math.cos(i * angleStep - Math.PI/2) * (radius + 25);
-                const y = center + Math.sin(i * angleStep - Math.PI/2) * (radius + 25);
-                const isActive = (entry[1] as number) > 0;
-                return (
-                    <g key={i} onClick={() => onSelectGenre(entry[0])} style={{ cursor: 'pointer' }}>
-                         <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill={isActive ? "white" : "gray"} className="text-[10px] font-bold uppercase tracking-wider transition-colors hover:fill-blue-400" style={{ textShadow: isActive ? '0 2px 4px black' : 'none' }}>
-                            {entry[0]}
-                        </text>
-                        <text x={x} y={y + 12} textAnchor="middle" fill="gray" fontSize="8">{entry[1]}</text>
-                    </g>
-                );
-            })}
-        </svg>
-    );
-}
 
 function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   const [anilistUsername, setAniListUsername] = useState("");
@@ -2756,29 +2270,12 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   };
 
   const stats = useMemo(() => {
-      let totalHours = 0;
-      let completed = 0;
-      let sumScores = 0;
-      let ratedCount = 0;
-      
-      myList.forEach(a => {
-          const isVn = a.mediaType === 'vn' || a.showType === 'Visual Novel';
-          const eps = isVn ? 0 : (a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0));
-          totalHours += isVn ? Number(a.vnPlaytimeHours || 0) * 60 : eps * AVG_EPISODE_MINUTES;
-          if(a.status === 'completed') completed++;
-          if(a.score > 0) {
-              sumScores += a.score;
-              ratedCount++;
-          }
-      });
-      
-      const daysWatched = totalHours > 0 ? (totalHours / 60 / 24).toFixed(1) : 0;
-      const meanScore = ratedCount > 0 ? (sumScores / ratedCount).toFixed(1) : "0.0";
-      
+      const summary = analyze(myList);
+      const completed = summary.statuses.completed;
       return { 
           total: myList.length,
-          daysWatched,
-          meanScore,
+          daysWatched: (summary.minutes / 1440).toFixed(1),
+          meanScore: summary.mean.toFixed(1),
           completed,
           completionRate: myList.length ? Math.round((completed / myList.length) * 100) : 0
       };
@@ -3115,14 +2612,29 @@ function HallOfFameSelector({ onClose, onSelect, myList, currentItem, slotNumber
     );
 }
 
+import { PROFILE_STATUSES, profileEntry, profileLibrary, profileMediaId, profileIsVn, profileProgress } from '../services/profile';
+
 export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, readOnly = false }) {
+    const targetUid = targetUser?.uid;
+    const targetUsername = targetUser?.username;
+    const [loadedTarget, setLoadedTarget] = useState(null);
     const [list, setList] = useState([]);
     const [myList, setMyList] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [status, setStatus] = useState("watching");
+    const [status, setStatus] = useState("all");
     const [tab, setTab] = useState("overview"); // 'overview', 'library', 'compare'
-    const [selectedAnimeKitsuId, setSelectedAnimeKitsuId] = useState(null);
     const [selectedAnimeData, setSelectedAnimeData] = useState(null);
+    const [selectedOwnerId, setSelectedOwnerId] = useState(null);
+    const [mediaFilter, setMediaFilter] = useState('all');
+    const [sort, setSort] = useState('updated');
+    const [viewMode, setViewMode] = useState('grid');
+    const [loadError, setLoadError] = useState('');
+    const [activityLoading, setActivityLoading] = useState(true);
+    const [activityError, setActivityError] = useState('');
+    const [compareLoading, setCompareLoading] = useState(false);
+    const [compareError, setCompareError] = useState('');
+    const [refresh, setRefresh] = useState(0);
+    const [friendBusy, setFriendBusy] = useState(false);
     const [searchQuery, setSearchQuery] = useState(""); 
     const { theme } = useContext(ThemeContext);
     const [friendHallOfFame, setFriendHallOfFame] = useState([]);
@@ -3131,121 +2643,126 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     const [libraryPrivate, setLibraryPrivate] = useState(false);
 
     useEffect(() => {
-        if(!targetUser) return;
         let isMounted = true;
+        setLoadedTarget({ targetUid, currentUserId, readOnly });
+        setList([]);
+        setMyList([]);
+        setLoading(true);
+        setLoadError('');
+        setActivityData([]);
+        setActivityLoading(true);
+        setActivityError('');
+        setFriendHallOfFame([]);
+        setLibraryPrivate(false);
+        setIsFriend(false);
+        setSelectedAnimeData(null);
+        setSelectedOwnerId(null);
+        setTab('overview');
+        setStatus('all');
+        setMediaFilter('all');
+        setSearchQuery('');
+        setSort('updated');
+        setViewMode('grid');
+        if (!targetUid) return;
         const fetchData = async () => {
             try {
-                if (!readOnly) {
-                    const myUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`));
-                    if (myUserSnap.exists() && isMounted) {
-                        const myFriends = myUserSnap.data().friends || [];
-                        setIsFriend(myFriends.some(f => f.uid === targetUser.uid));
-                    }
-                }
-
-                const friendUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUser.uid}`));
+                const friendUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUid}`));
+                if (!isMounted) return;
                 if(friendUserSnap.exists() && isMounted) {
                     setFriendHallOfFame(friendUserSnap.data().hallOfFame || Array(10).fill(null));
-                    setLibraryPrivate(friendUserSnap.data().libraryPublic === false && targetUser.uid !== currentUserId);
+                    setLibraryPrivate(friendUserSnap.data().libraryPublic === false && targetUid !== currentUserId);
                 }
 
-                const targetIsPrivate = friendUserSnap.exists() && friendUserSnap.data().libraryPublic === false && targetUser.uid !== currentUserId;
+                const targetIsPrivate = friendUserSnap.exists() && friendUserSnap.data().libraryPublic === false && targetUid !== currentUserId;
                 if (!targetIsPrivate) {
-                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUser.uid}/animeList`));
+                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/animeList`));
                     if (isMounted) {
-                        const friendData = friendSnap.docs.map(d => ({...d.data(), id: d.id}));
+                        const friendData = friendSnap.docs.map(d => profileEntry({...d.data(), id: d.id}));
                         setList(friendData);
                     }
                 }
-
-                if (!readOnly) {
-                    const mySnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${currentUserId}/animeList`));
-                    if (isMounted) {
-                        const myData = mySnap.docs.map(d => ({...d.data(), id: d.id}));
-                        setMyList(myData);
-                    }
-                }
-
-                const activityQ = query(collection(db, `artifacts/${appId}/public/data/activity`), where("userId", "==", targetUser.uid), orderBy("timestamp", "desc"), limit(20));
-                const activitySnap = await getDocs(activityQ);
-                if (isMounted) {
-                     setActivityData(activitySnap.docs.map(d => d.data()));
-                     setLoading(false);
-                }
-
             } catch (e) {
                 console.error(e);
+                if (isMounted) setLoadError('Unable to load this library. Please try again.');
+            } finally {
                 if (isMounted) setLoading(false);
             }
         };
         fetchData();
+        const activityQ = query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', targetUid), orderBy('timestamp', 'desc'), limit(20));
+        getDocs(activityQ).then(snapshot => {
+            if (isMounted) setActivityData(snapshot.docs.map(d => d.data()));
+        }).catch(() => {
+            if (isMounted) setActivityError('Recent activity is unavailable.');
+        }).finally(() => { if (isMounted) setActivityLoading(false); });
+        if (!readOnly && currentUserId) {
+            getDoc(doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`)).then(snapshot => {
+                if (isMounted) setIsFriend((snapshot.data()?.friends || []).some(friend => (friend.uid || friend) === targetUid));
+            }).catch(error => console.error('Unable to load following', error));
+        }
         return () => { isMounted = false; };
-    }, [db, targetUser, currentUserId, readOnly]);
+    }, [db, targetUid, currentUserId, readOnly, refresh]);
 
     useEffect(() => {
-        if (!selectedAnimeKitsuId) return;
+        setMyList([]);
+        setCompareError('');
+        setCompareLoading(false);
+        if (tab !== 'compare' || loading || libraryPrivate || loadError || readOnly || !currentUserId || targetUid === currentUserId) return;
         let isMounted = true;
-        const fetchDetails = async () => {
-            try {
-                const data = await fetchMediaDetails(selectedAnimeKitsuId);
-                if (isMounted) setSelectedAnimeData(data);
-            } catch (e) {
-                console.error(e);
-            }
-        };
-        fetchDetails();
+        setCompareLoading(true);
+        getDocs(collection(db, `artifacts/${appId}/public/data/users/${currentUserId}/animeList`)).then(snapshot => {
+            if (isMounted) setMyList(snapshot.docs.map(d => profileEntry({ ...d.data(), id: d.id })));
+        }).catch(() => { if (isMounted) setCompareError('Unable to load comparison.'); })
+            .finally(() => { if (isMounted) setCompareLoading(false); });
         return () => { isMounted = false; };
-    }, [selectedAnimeKitsuId]);
+    }, [db, tab, targetUid, currentUserId, readOnly, loading, libraryPrivate, loadError, refresh]);
+
+    const openEntry = (entry) => {
+        const id = profileMediaId(entry);
+        if (!id || libraryPrivate) return;
+        const saved = list.find(item => profileMediaId(item) === id);
+        setSelectedOwnerId(targetUid);
+        setSelectedAnimeData(saved || profileEntry({ ...entry, imageUrl: entry.imageUrl || entry.image }));
+    };
 
     const handleFriendAction = async () => {
+        if (readOnly || !currentUserId || !targetUid || targetUid === currentUserId || friendBusy) return;
+        setFriendBusy(true);
         try {
             const myRef = doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`);
-            const snapshot = await getDoc(myRef);
-            const existingFriends = snapshot.data()?.friends || [];
-            const nextFriends = isFriend
-                ? existingFriends.filter(friend => (friend.uid || friend) !== targetUser.uid)
-                : [...existingFriends.filter(friend => (friend.uid || friend) !== targetUser.uid), { uid: targetUser.uid, username: targetUser.username }];
-            await updateDoc(myRef, { friends: nextFriends });
-            setIsFriend(!isFriend);
-            showToast(isFriend ? `Unfollowed ${targetUser.username}.` : `Following ${targetUser.username}.`, 'success');
+            const following = await runTransaction(db, async transaction => {
+                const snapshot = await transaction.get(myRef);
+                const existingFriends = snapshot.data()?.friends || [];
+                const nextFriends = existingFriends.filter(friend => (friend.uid || friend) !== targetUid);
+                if (!isFriend) nextFriends.push({ uid: targetUid, username: targetUsername });
+                transaction.update(myRef, { friends: nextFriends });
+                return !isFriend;
+            });
+            setIsFriend(following);
+            showToast(following ? `Following ${targetUsername}.` : `Unfollowed ${targetUsername}.`, 'success');
         } catch (e) {
             console.error("Follow action failed", e);
             showToast("Failed to update following", 'error');
+        } finally {
+            setFriendBusy(false);
         }
     };
 
     const stats = useMemo(() => {
-        let totalHours = 0;
-        let totalEps = 0;
-        let completed = 0;
-        let sumScores = 0;
-        let ratedCount = 0;
-        list.forEach(a => {
-            const isVn = a.mediaType === 'vn' || a.showType === 'Visual Novel';
-            const eps = isVn ? 0 : (a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0));
-            totalEps += eps;
-            totalHours += isVn ? Number(a.vnPlaytimeHours || 0) * 60 : eps * AVG_EPISODE_MINUTES;
-            if(a.status === 'completed') {
-                completed++;
-            }
-            if(a.score > 0) {
-                sumScores += a.score;
-                ratedCount++;
-            }
-        });
-        
+        const summary = analyze(list);
+        const completed = summary.statuses.completed;
         return { 
-            hours: Math.round(totalHours / 60),
-            daysConsumed: (totalHours / 60 / 24).toFixed(1),
-            eps: totalEps, 
+            hours: Math.round(summary.minutes / 60),
+            daysConsumed: (summary.minutes / 1440).toFixed(1),
+            eps: summary.episodes,
             completed,
             completionRate: list.length ? Math.round((completed / list.length) * 100) : 0,
-            meanScore: ratedCount > 0 ? (sumScores / ratedCount).toFixed(1) : 0
+            meanScore: summary.mean.toFixed(1)
         };
     }, [list]);
 
     const compatibility = useMemo(() => {
-        if (loading || !myList.length || !list.length || targetUser?.uid === currentUserId) return null;
+        if (loading || !myList.length || !list.length || targetUid === currentUserId) return null;
         
         const myIds = new Set(myList.map(a => a.kitsuId));
         const shared = list.filter(a => myIds.has(a.kitsuId));
@@ -3269,28 +2786,29 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
             tasteScore: scoredCount > 0 ? tasteScore.toFixed(0) : "N/A",
             sharedList: shared
         };
-    }, [list, myList, loading, targetUser, currentUserId]);
+    }, [list, myList, loading, targetUid, currentUserId]);
 
-    const filtered = list.filter(i => 
-        i.status === status && 
-        (normalizeTitle(i.title).includes(normalizeTitle(searchQuery)))
-    );
+    const { items: filtered, counts } = useMemo(() => profileLibrary(list, mediaFilter, status, searchQuery, sort), [list, mediaFilter, status, searchQuery, sort]);
+    const statusLabel = (value) => value === 'watching' ? (mediaFilter === 'vn' ? 'Reading' : mediaFilter === 'anime' ? 'Watching' : 'Watching / Reading') : value === 'all' ? 'All statuses' : value;
+    const viewAll = (media) => { setMediaFilter(media); setStatus('watching'); setSearchQuery(''); setSort('updated'); setTab('library'); };
 
     if(!targetUser) return null;
+    if (loadedTarget?.targetUid !== targetUid || loadedTarget?.currentUserId !== currentUserId || loadedTarget?.readOnly !== readOnly) return <div role="status" className="mx-auto max-w-5xl pt-6 text-gray-500">Loading profile...</div>;
 
     return (
-        <div className="max-w-5xl mx-auto space-y-6 fade-in pt-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end pb-4 border-b border-white/10 gap-4">
-                <div>
-                    <div className="flex items-center gap-3 mb-1">
-                        <button onClick={() => setPage('social')} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors mr-2">
+        <div className="min-w-0 max-w-5xl mx-auto space-y-6 fade-in pt-6">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end pb-4 border-b border-white/10 gap-4">
+                <div className="w-full min-w-0 lg:flex-1">
+                    <div className="flex items-center gap-3 mb-1 min-w-0">
+                        <button onClick={() => setPage('social')} aria-label="Back to social" title="Back to social" className="shrink-0 p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                         </button>
-                        <h2 className="text-4xl font-black text-white tracking-tighter">{targetUser.username}</h2>
-                        {targetUser.uid !== currentUserId && !readOnly && (
+                        <h2 className="min-w-0 flex-1 break-words text-3xl font-black text-white">{targetUser.username}</h2>
+                        {targetUid !== currentUserId && currentUserId && !readOnly && (
                             <button 
                                 onClick={handleFriendAction}
-                                className={`ml-3 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${isFriend ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
+                                disabled={friendBusy}
+                                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${isFriend ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
                             >
                                 {isFriend ? 'Following' : 'Follow'}
                             </button>
@@ -3301,24 +2819,35 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     </div>
                 </div>
                 
-                <div className="flex items-center gap-3">
-                    <div className="bg-white/5 rounded-xl p-1 flex">
+                <div className="max-w-full min-w-0">
+                    <div className="bg-white/5 rounded-xl p-1 flex flex-wrap">
                         <button onClick={() => setTab("overview")} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tab === 'overview' ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>Overview</button>
                         <button onClick={() => setTab("library")} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tab === 'library' ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>Library</button>
-                        {targetUser.uid !== currentUserId && (
+                        {targetUid !== currentUserId && currentUserId && !readOnly && (
                             <button onClick={() => setTab("compare")} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tab === 'compare' ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>Compare</button>
                         )}
                     </div>
                 </div>
             </div>
 
-            {libraryPrivate && <div className="rounded-xl border border-white/10 bg-white/[0.03] p-8 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-bold text-white">This library is private</p><p className="mt-1 text-sm text-gray-500">Their public profile and activity remain visible, but tracked titles and taste comparison are hidden.</p></div>}
+            <div className="flex justify-end"><button onClick={() => setRefresh(value => value + 1)} aria-label="Refresh profile" title="Refresh profile" className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><ResetIcon size={16} /></button></div>
+            {loadError && <p role="alert" className="text-red-300">{loadError}</p>}
+            {libraryPrivate && <div className="rounded-lg border border-white/10 bg-white/[0.03] p-8 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-bold text-white">This library is private</p></div>}
 
             {tab === 'overview' && !libraryPrivate && (
                 <div className="space-y-6">
+                    {loading && <p role="status" className="text-gray-500">Loading library...</p>}
+                    {!loading && !loadError && [{ media: 'anime', title: 'Currently Watching' }, { media: 'vn', title: 'Currently Reading' }].map(section => {
+                        const active = profileLibrary(list, section.media, 'watching').items;
+                        return <section key={section.media} className="border-b border-white/5 pb-6">
+                            <div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-lg font-bold text-white">{section.title} <span className="text-sm text-gray-500">{active.length}</span></h3><button onClick={() => viewAll(section.media)} className="shrink-0 text-xs font-bold text-[#3db4f2] hover:text-white">View all</button></div>
+                            <div className="space-y-2">{active.slice(0, 4).map(entry => <button key={entry.id} onClick={() => openEntry(entry)} className="flex w-full items-center gap-3 rounded-lg bg-white/[0.03] p-2 text-left hover:bg-white/5"><img src={entry.imageUrl || entry.posterImage?.medium || entry.attributes?.posterImage?.medium || 'https://placehold.co/40x56?text=?'} alt="" className="h-14 w-10 shrink-0 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" /><span className="min-w-0 flex-1"><span className="block break-words text-sm font-bold text-white">{entry.title || entry.canonicalTitle || entry.attributes?.canonicalTitle}</span><span className="text-xs text-gray-400">{profileProgress(entry)}</span></span>{Number(entry.score) > 0 && <span className="shrink-0 text-xs text-yellow-400">{entry.score}/10</span>}</button>)}</div>
+                            {!active.length && <p className="py-4 text-sm text-gray-500">No titles in progress.</p>}
+                        </section>;
+                    })}
                     {/* Stats Panel */}
-                    <div className="bg-[#0f111a] border border-white/5 rounded-xl p-8 shadow-xl">
-                        <div className="grid grid-cols-3 divide-x divide-white/5">
+                    <div className="bg-[#0f111a] border border-white/5 rounded-xl p-4 sm:p-8 shadow-xl">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:divide-x divide-white/5 [&>div]:min-w-0 [&_p]:break-words">
                             <div className="text-center">
                                 <p className="text-3xl font-black text-[#3db4f2] mb-1">{list.length}</p>
                                 <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Titles</p>
@@ -3335,7 +2864,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                         <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-[#3db4f2]" style={{ width: `${stats.completionRate}%` }} /></div><div className="mt-2 flex justify-between text-[10px] font-bold text-gray-600"><span>{stats.completed} completed</span><span>{stats.completionRate}% of library</span></div>
                     </div>
 
-                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-4 sm:p-8 shadow-2xl relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
                         <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
@@ -3343,7 +2872,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                 <motion.div
                                     whileHover={{ scale: 1.05, y: -5 }}
                                     key={i} 
-                                    onClick={() => item && setSelectedAnimeKitsuId(item.id)}
+                                    onClick={() => item && openEntry(item)}
                                     className={`aspect-[2/3] rounded-xl border-2 border-dashed ${item ? 'border-transparent shadow-lg cursor-pointer' : 'border-white/5'} flex items-center justify-center relative overflow-hidden bg-black/20 group transition-all`}
                                 >
                                     {item ? (
@@ -3363,7 +2892,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
                     <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
                         <h3 className="text-xl font-black text-white mb-4">Activity Heatmap</h3>
-                        {loading ? <p className="text-gray-500">Loading activity...</p> : <ActivityHeatmap data={activityData} theme={theme} />}
+                        {activityLoading ? <p className="text-gray-500">Loading activity...</p> : activityError ? <p className="text-gray-500">{activityError}</p> : <ActivityHeatmap data={activityData} theme={theme} />}
                     </div>
 
                     <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
@@ -3380,7 +2909,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                     <div className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-white text-lg shadow-lg border border-white/10 overflow-hidden bg-gradient-to-br ${theme.gradient}`}>
                                         {item.username?.[0]?.toUpperCase() || '?'}
                                     </div>
-                                    <div className="flex-grow">
+                                    <div className="min-w-0 flex-1 break-words">
                                         <p className="text-gray-300 text-sm leading-relaxed">
                                             <span className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer">{item.username}</span> 
                                             <span className="opacity-60 mx-1">{item.context}</span>
@@ -3395,12 +2924,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                         <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
                                     </div>
                                     {item.animeImageUrl && (
-                                        <img src={item.animeImageUrl} className="w-10 h-14 object-cover rounded-lg shadow-xl border border-white/10 group-hover:scale-105 transition-transform" alt="anime" referrerPolicy="no-referrer" />
+                                        <img src={item.animeImageUrl} className="w-10 h-14 shrink-0 object-cover rounded-lg shadow-xl border border-white/10 group-hover:scale-105 transition-transform" alt="anime" referrerPolicy="no-referrer" />
                                     )}
                                 </motion.div>
                             ))}
-                            {activityData.length === 0 && !loading && (
-                                <div className="text-center py-10 text-gray-500">No recent activity.</div>
+                            {activityData.length === 0 && !activityLoading && (
+                                <div className="text-center py-10 text-gray-500">{activityError || 'No recent activity.'}</div>
                             )}
                         </div>
                     </div>
@@ -3409,53 +2938,43 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
             {tab === "library" && !libraryPrivate && (
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center gap-4 border-b border-white/5 pb-4">
-                        <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                            {["watching", "completed", "planned", "dropped"].map(s => (
-                                <button key={s} onClick={() => setStatus(s)} className={`px-5 py-2 rounded-full text-sm font-bold capitalize transition-all ${status === s ? "bg-white text-black" : "bg-white/5 text-gray-400 hover:text-white"}`}>{s}</button>
-                            ))}
-                        </div>
-                        <div className="relative">
-                            <input 
-                                type="text" 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search library..."
-                                className="w-48 pl-9 pr-3 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                            />
-                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                                <SearchIcon size={14} />
-                            </div>
-                        </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div aria-label="Media type" className="flex rounded-lg bg-white/5 p-1">{[{ id: 'all', label: 'All media' }, { id: 'anime', label: 'Anime' }, { id: 'vn', label: 'Visual novels' }].map(option => <button key={option.id} aria-pressed={mediaFilter === option.id} onClick={() => setMediaFilter(option.id)} className={`rounded px-3 py-2 text-xs font-bold ${mediaFilter === option.id ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}>{option.label}</button>)}</div>
+                        <div className="relative min-w-0 flex-[1_1_12rem]"><SearchIcon size={14} className="pointer-events-none absolute left-3 top-3 text-gray-400" /><input aria-label="Search profile library" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search library..." className="w-full min-w-0 rounded-lg border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white" /></div>
+                        <select aria-label="Sort library" value={sort} onChange={event => setSort(event.target.value)} className="rounded-lg border border-white/10 bg-[#0f111a] p-2 text-sm text-white"><option value="updated">Recently updated</option><option value="title">Title</option><option value="score">Highest score</option></select>
+                        <div className="flex gap-1">{[{ id: 'grid', Icon: ViewGridIcon }, { id: 'list', Icon: ViewListIcon }].map(({ id, Icon }) => <button key={id} onClick={() => setViewMode(id)} aria-label={`${id} view`} title={`${id === 'grid' ? 'Grid' : 'List'} view`} aria-pressed={viewMode === id} className={`rounded-lg p-2 ${viewMode === id ? 'bg-white text-black' : 'bg-white/5 text-gray-400'}`}><Icon size={18} /></button>)}</div>
                     </div>
-                    
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6 min-h-[50vh]">
+                    <div className="flex flex-wrap gap-2 border-b border-white/5 pb-4">{PROFILE_STATUSES.map(value => <button key={value} onClick={() => setStatus(value)} aria-pressed={status === value} className={`rounded-lg px-3 py-2 text-xs font-bold capitalize ${status === value ? 'bg-[#3db4f2] text-black' : 'bg-white/5 text-gray-400 hover:text-white'}`}>{statusLabel(value)} <span className="ml-1 opacity-70">{counts[value]}</span></button>)}</div>
+                    <p className="text-xs text-gray-500" aria-live="polite">{filtered.length} {filtered.length === 1 ? 'title' : 'titles'}</p>
+                    <div className={viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6' : 'space-y-2'}>
                         {loading && <p className="text-gray-500 col-span-full">Loading library...</p>}
-                        {!loading && filtered.map(a => <AnimeCard key={a.id} anime={a} onCardClick={() => setSelectedAnimeKitsuId(a.kitsuId)} viewMode="grid" />)}
-                        {!loading && filtered.length === 0 && <p className="col-span-full text-center text-gray-500 py-20 font-medium">No anime found in this category.</p>}
+                        {!loading && filtered.map(a => <div key={a.id} className="min-w-0"><AnimeCard anime={a} onCardClick={() => openEntry(a)} viewMode={viewMode} /><p className="mt-1 px-1 text-xs text-gray-400">{profileProgress(a)}</p></div>)}
+                        {!loading && !loadError && filtered.length === 0 && <p className="col-span-full text-center text-gray-500 py-20 font-medium">No matching titles.</p>}
                     </div>
                 </div>
             )}
 
-            {tab === "compare" && !libraryPrivate && targetUser.uid !== currentUserId && (
+            {tab === "compare" && !libraryPrivate && !readOnly && currentUserId && targetUid !== currentUserId && (
                 <div className="space-y-6">
+                    {compareLoading && <p role="status" className="text-gray-400">Loading comparison...</p>}
+                    {compareError && <p role="alert" className="text-red-300">{compareError}</p>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="bg-white/5 p-8 rounded-3xl border border-white/5 text-center">
-                            <p className="text-gray-400 text-xs font-bold uppercase mb-2 tracking-widest">Shared Anime</p>
+                            <p className="text-gray-400 text-xs font-bold uppercase mb-2 tracking-widest">Shared Titles</p>
                             <p className="text-5xl font-black text-white">{compatibility?.sharedCount || 0}</p>
                         </div>
                         <div className="bg-white/5 p-8 rounded-3xl border border-white/5 text-center">
                             <p className="text-gray-400 text-xs font-bold uppercase mb-2 tracking-widest">Taste Match</p>
-                            <p className={`text-5xl font-black ${compatibility?.tasteScore !== "N/A" && parseInt(compatibility.tasteScore) > 80 ? "text-green-400" : "text-blue-400"}`}>{compatibility?.tasteScore}%</p>
+                            <p className={`text-5xl font-black ${Number(compatibility?.tasteScore) > 80 ? "text-green-400" : "text-blue-400"}`}>{compatibility && compatibility.tasteScore !== 'N/A' ? `${compatibility.tasteScore}%` : 'N/A'}</p>
                         </div>
                     </div>
                     
-                    <h4 className="text-white font-bold mb-4 flex items-center gap-2 text-xl"><HeartIcon className="text-red-500" /> Shared Favorites</h4>
+                    <h4 className="text-white font-bold mb-4 flex items-center gap-2 text-xl"><HeartIcon className="text-red-500" /> Shared Titles</h4>
                     <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
                         {compatibility?.sharedList.length > 0 ? (
                             compatibility.sharedList.map(a => (
                                 <div key={a.id}>
-                                    <AnimeCard anime={a} onCardClick={() => setSelectedAnimeKitsuId(a.kitsuId)} viewMode="grid" />
+                                    <AnimeCard anime={a} onCardClick={() => openEntry(a)} viewMode="grid" />
                                     <div className="flex justify-between text-xs px-2 mt-2 font-bold bg-white/5 p-2 rounded-lg">
                                         <span className="text-gray-400">Them: <span className="text-white">{a.score || '-'}</span></span>
                                         <span className="text-gray-400">You: <span className="text-white">{myList.find(m => m.kitsuId === a.kitsuId)?.score || '-'}</span></span>
@@ -3463,21 +2982,22 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                 </div>
                             ))
                         ) : (
-                            <p className="text-gray-500 text-sm col-span-full">No shared anime found.</p>
+                            <p className="text-gray-500 text-sm col-span-full">{compareLoading ? 'Loading shared titles...' : compareError || 'No shared titles found.'}</p>
                         )}
                     </div>
                 </div>
             )}
 
-            {selectedAnimeData && (
-                <AnimeDetailsModal 
+            {selectedAnimeData && selectedOwnerId === targetUid && !libraryPrivate && (
+                <AnimeDetailsModal
+                    key={selectedAnimeData.kitsuId || selectedAnimeData.id}
                     anime={selectedAnimeData} 
-                    onClose={() => { setSelectedAnimeData(null); setSelectedAnimeKitsuId(null); }} 
+                    onClose={() => { setSelectedAnimeData(null); setSelectedOwnerId(null); }}
                     db={db} 
                     userId={currentUserId} 
-                    ownerId={targetUser.uid}
+                    ownerId={selectedOwnerId}
                     username={currentUsername}
-                    readOnly={readOnly}
+                    readOnly={readOnly || !currentUserId}
                 />
             )}
         </div>

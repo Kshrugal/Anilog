@@ -20,7 +20,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function harness({ failSave = false, missingId = false } = {}) {
+function harness({ failSave = false, missingId = false, mediaPromise, animeOverride } = {}) {
   const pendingRead = deferred();
   const states = [];
   const dependencies = [];
@@ -29,7 +29,7 @@ function harness({ failSave = false, missingId = false } = {}) {
   let cursor = 0;
   let tree;
   const props = {
-    anime: { ...(missingId ? {} : { id: 'v123' }), title: 'A visual novel', mediaType: 'vn', genres: [] },
+    anime: animeOverride || { ...(missingId ? {} : { id: 'v123' }), title: 'A visual novel', mediaType: 'vn', genres: [] },
     db: {}, userId: 'test-owner', ownerId: 'test-owner', username: 'Tester', onClose() {},
   };
   const sandbox = {
@@ -37,6 +37,8 @@ function harness({ failSave = false, missingId = false } = {}) {
     motion: { div: 'div', button: 'button' },
     CloseIcon: 'CloseIcon', StarIcon: 'StarIcon', HeartIcon: 'HeartIcon',
     ThemeContext: {}, useContext: () => ({ theme: { progressbar: 'bg-blue-500', button: 'bg-blue-500' } }),
+    useRef: initial => { const index = cursor++; if (!(index in states)) states[index] = { current: initial }; return states[index]; },
+    fetchMediaDetails: () => mediaPromise || Promise.resolve({ attributes: {} }),
     useState(initial) {
       const index = cursor++;
       if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
@@ -116,6 +118,20 @@ assert.ok(offline.nodes().some(node => node.props.role === 'alert'), 'save failu
 
 console.log('Detail editor behavioral tests passed.');
 
+const metadata = deferred();
+const hydrated = harness({ animeOverride: { kitsuId: 'anilist:1', title: 'Saved title', totalEpisodes: 12 }, mediaPromise: metadata.promise });
+hydrated.pendingRead.resolve({ exists: () => true, data: () => ({ status: 'watching', watchedEpisodes: 20, score: 8.5 }) });
+await hydrated.flush();
+metadata.resolve({ attributes: { canonicalTitle: 'Provider title', episodeCount: 24, episodeLength: 22, posterImage: { original: 'https://example.test/poster.jpg' }, genres: ['Drama'] } });
+await hydrated.flush();
+await hydrated.saveButton().props.onClick();
+assert.equal(hydrated.writes[0].data.watchedEpisodes, 20, 'fresh provider total prevents clamping to stale saved total');
+assert.equal(hydrated.writes[0].data.totalEpisodes, 24);
+assert.equal(hydrated.writes[0].data.imageUrl, 'https://example.test/poster.jpg');
+assert.deepEqual([...hydrated.writes[0].data.genres], ['Drama']);
+assert.equal(hydrated.writes[0].data.durationMinutes, 22);
+console.log('Deferred public metadata hydration tests passed.');
+
 const app = await readFile(new URL('../App.tsx', import.meta.url), 'utf8');
 const appTree = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const loader = appTree.statements.filter(ts.isVariableStatement).flatMap(node => [...node.declarationList.declarations]).find(node => node.name.getText(appTree) === 'fetchMediaDetails');
@@ -123,6 +139,8 @@ assert.ok(loader);
 let requestedFields;
 const mediaContext = vm.createContext({
   AbortSignal,
+  structuredClone,
+  mediaDetailsCache: { get: (_key, load) => load() },
   fetch: async (_url, options) => {
     requestedFields = JSON.parse(options.body).fields;
     return { ok: true, json: async () => ({ results: [{ id: 'v17', title: 'Test VN', length: 5, length_minutes: 1800, rating: 88.5 }] }) };
