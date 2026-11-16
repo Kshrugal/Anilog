@@ -33,6 +33,21 @@ const entries = [
   { id: 'v3', title: 'Novel C', status: 'dropped' },
 ].map(profileEntry);
 
+test('public tiles only add a fallback when the shared card has no progress caption', () => {
+  let fallback;
+  const visit = node => {
+    if (ts.isConditionalExpression(node) && node.condition.getText(pages) === 'profileIsVn(a)' && node.whenFalse.getText(pages).includes('totalEpisodes')) fallback = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(component);
+  assert.ok(fallback);
+  const check = a => evaluate(fallback, { a, ...helpers });
+  assert.equal(check({ totalEpisodes: 12, watchedEpisodes: 3 }), false);
+  assert.equal(check({ id: 'v1', watchedEpisodes: 5 }), false);
+  assert.equal(check({ id: 'v1', watchedEpisodes: 0 }), true);
+  assert.equal(check({ watchedEpisodes: 4 }), true);
+});
+
 test('all media and statuses include legacy planning, on_hold, reading and VN ID fallback', () => {
   assert.deepEqual(profileLibrary(entries).counts, { all: 6, watching: 2, completed: 1, planned: 1, paused: 1, dropped: 1 });
   assert.equal(entries[1].mediaType, 'vn');

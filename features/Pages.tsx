@@ -2948,7 +2948,10 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     <p className="text-xs text-gray-500" aria-live="polite">{filtered.length} {filtered.length === 1 ? 'title' : 'titles'}</p>
                     <div className={viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6' : 'space-y-2'}>
                         {loading && <p className="text-gray-500 col-span-full">Loading library...</p>}
-                        {!loading && filtered.map(a => <div key={a.id} className="min-w-0"><AnimeCard anime={a} onCardClick={() => openEntry(a)} viewMode={viewMode} /><p className="mt-1 px-1 text-xs text-gray-400">{profileProgress(a)}</p></div>)}
+                        {!loading && filtered.map(a => <div key={a.id} className="min-w-0">
+                            <AnimeCard anime={a} onCardClick={() => openEntry(a)} viewMode={viewMode} />
+                            {(profileIsVn(a) ? !(Number(a.watchedEpisodes) > 0) : !(Number(a.totalEpisodes || a.episodeCount || a.attributes?.episodeCount) > 0)) && <p className="mt-1 px-1 text-xs text-gray-400">{profileProgress(a)}</p>}
+                        </div>)}
                         {!loading && !loadError && filtered.length === 0 && <p className="col-span-full text-center text-gray-500 py-20 font-medium">No matching titles.</p>}
                     </div>
                 </div>
