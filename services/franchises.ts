@@ -54,7 +54,7 @@ export function titleFallback(title: unknown) {
   const original = String(title || '').trim();
   return original.replace(/(?:\s*[:\-–]?\s*)(?:the final season|final season|(?:season|part|cour)\s*\d+|\d+(?:st|nd|rd|th)\s+season)(?:\s.*)?$/i, '').replace(/\s+(?:II|III|IV|V|VI)$/, '').trim() || original || 'Untitled';
 }
-const franchiseRelations = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SUMMARY', 'SPIN_OFF', 'SOURCE', 'ADAPTATION', 'COMPILATION', 'ALTERNATIVE', 'CONTAINS']);
+const franchiseRelations = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SUMMARY', 'SPIN_OFF', 'SOURCE', 'ADAPTATION', 'COMPILATION', 'ALTERNATIVE']);
 const vnRelations: Record<string, string> = { preq: 'PREQUEL', seq: 'SEQUEL', side: 'SIDE_STORY', par: 'PARENT', orig: 'SOURCE', ser: 'SEQUEL', fan: 'SIDE_STORY', alt: 'ALTERNATIVE', set: 'SAME_UNIVERSE' };
 export const relationKind = (relation: Relation) => vnRelations[relation.type] || relation.type.toUpperCase();
 export const sourceUrl = (key: string, type = 'ANIME') => key.startsWith('anilist:') ? `https://anilist.co/${type === 'MANGA' ? 'manga' : 'anime'}/${key.slice(8)}` : /^v\d+$/.test(key) ? `https://vndb.org/${key}` : key.startsWith('kitsu:') ? `https://kitsu.app/anime/${key.slice(6)}` : '';
@@ -87,16 +87,27 @@ export function resolveMemberships(entries: Record<string, any>[], catalogue: Ca
   }
   // Family labels deliberately join anime, manga and VN records: type is not an identity boundary.
   for (const [key, family] of matched) { franchise.join(key, `family:${family.id}`); universe.join(key, `universe:${family.universe || family.id}`); }
+  const componentFamilies = new Map<string, Set<string>>();
+  for (const [key, family] of matched) { const root = franchise.root(key); componentFamilies.set(root, new Set([...(componentFamilies.get(root) || []), family.id])); }
+  const joinFranchise = (a: string, b: string) => {
+    const left = franchise.root(a), right = franchise.root(b);
+    const labels = new Set([...(componentFamilies.get(left) || []), ...(componentFamilies.get(right) || [])]);
+    // Protect the entire connected component, not only the two immediate endpoints.
+    if (labels.size > 1) return false;
+    franchise.join(a, b);
+    componentFamilies.delete(left); componentFamilies.delete(right);
+    componentFamilies.set(franchise.root(a), labels);
+    return true;
+  };
   const evidence = new Map<string, string[]>();
   for (const node of Object.values(nodes)) {
     for (const relation of node.relations || []) {
       if (relation.official === false) continue;
       const target = identity.get(relation.key) || relation.key;
       const kind = relationKind(relation);
-      const left = matched.get(node.key), right = matched.get(target);
       // Character cameos and generic OTHER edges are never franchise evidence.
-      if (franchiseRelations.has(kind) && !(left && right && left.id !== right.id)) {
-        franchise.join(node.key, target); universe.join(node.key, target);
+      if (franchiseRelations.has(kind) && joinFranchise(node.key, target)) {
+        universe.join(node.key, target);
         for (const key of [node.key, target]) evidence.set(key, [...(evidence.get(key) || []), kind.toLowerCase().replaceAll('_', ' ')]);
       } else if (kind === 'SAME_UNIVERSE') universe.join(node.key, target);
     }
@@ -120,7 +131,8 @@ export function resolveMemberships(entries: Record<string, any>[], catalogue: Ca
       if (left && right && left.id !== right.id) continue;
       const originalCredits = credits(b);
       if (![...credits(a)].some(name => originalCredits.has(name))) continue;
-      franchise.join(a.key, b.key); universe.join(a.key, b.key);
+      if (!joinFranchise(a.key, b.key)) continue;
+      universe.join(a.key, b.key);
       for (const key of [a.key, b.key]) evidence.set(key, [...(evidence.get(key) || []), 'cross-provider identity: exact alias and original credit']);
     }
   }

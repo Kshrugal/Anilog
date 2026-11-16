@@ -10,7 +10,8 @@ Membership combines:
 
 - Exact AniList IDs and exact Kitsu-to-AniList/MAL mappings, never fuzzy search.
 - AniList source/adaptation, prequel/sequel, parent, side-story, spin-off,
-  compilation, summary, alternative and contains relationships.
+  compilation, summary and alternative relationships. Anthology `CONTAINS` edges
+  are excluded because an anthology is not necessarily one franchise.
 - Official VNDB relationships. VNDB `set` and AniList `SAME_UNIVERSE` join only
   the umbrella graph, not the individual series graph.
 - A small reviewed alias/identity registry for renamed branches and cross-media
@@ -22,7 +23,8 @@ Membership combines:
 
 Shared studios, directors, authors, composers, `CHARACTER` cameos, generic
 `OTHER` edges, and unofficial VN relations do not independently merge series.
-Distinct reviewed families are protected from broad franchise-edge unions.
+Distinct reviewed families are protected across entire connected components,
+including indirect paths through unlabelled crossover/anthology hubs.
 Unconfirmed title-suffix fallbacks are labeled rather than presented as verified.
 
 The resolver retains Unicode identities and has deterministic union roots. The

@@ -34,7 +34,7 @@ test('unfamiliar titles connect through source/adaptation and intermediate catal
 });
 test('same studio, creator, cameo, OTHER, unofficial relations and crossover names cannot silently merge', () => {
   const entries = [entry('anilist:1', 'Unrelated Story A'), entry('anilist:2', 'Unrelated Story B')];
-  for (const type of ['CHARACTER', 'OTHER']) {
+  for (const type of ['CHARACTER', 'OTHER', 'CONTAINS']) {
     const creators = [{ name: 'Same Author', role: 'Original Creator' }];
     const result = resolveMemberships(entries, { 'anilist:1': { key: 'anilist:1', title: entries[0].title, creators, relations: [{ key: 'anilist:2', type }] }, 'anilist:2': { key: 'anilist:2', title: entries[1].title, creators } });
     assert.notEqual(result['anilist:1'].universeKey, result['anilist:2'].universeKey);
@@ -44,6 +44,16 @@ test('same studio, creator, cameo, OTHER, unofficial relations and crossover nam
   assert.equal(familyFor(['Fateful Encounter']), null);
   const fan = resolveMemberships([entry('v7', 'Tsukihime', 'vn'), entry('v999', 'Tsukihime Fan Game', 'vn')], { v7: { key: 'v7', title: 'Tsukihime' }, v999: { key: 'v999', title: 'Tsukihime Fan Game', relations: [{ key: 'v7', type: 'side', official: false }] } });
   assert.notEqual(fan.v7.universeKey, fan.v999.universeKey);
+});
+test('an unlabelled hub cannot transitively merge two distinct reviewed franchises', () => {
+  const entries = [entry('anilist:20', 'Naruto'), entry('anilist:269', 'Bleach')];
+  const result = resolveMemberships(entries, {
+    'anilist:20': { key: 'anilist:20', title: 'Naruto' },
+    'anilist:269': { key: 'anilist:269', title: 'Bleach' },
+    'anilist:99999': { key: 'anilist:99999', title: 'Ambiguous crossover hub', relations: [{ key: 'anilist:20', type: 'SPIN_OFF' }, { key: 'anilist:269', type: 'SPIN_OFF' }] },
+  });
+  assert.notEqual(result['anilist:20'].franchiseKey, result['anilist:269'].franchiseKey);
+  assert.notEqual(result['anilist:20'].universeKey, result['anilist:269'].universeKey);
 });
 test('official VN setting links join universes without collapsing individual series', () => {
   const entries = [entry('v1', 'Unknown VN One', 'vn'), entry('v2', 'Unknown VN Two', 'vn')];
