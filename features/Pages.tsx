@@ -2194,7 +2194,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   const [libraryPublic, setLibraryPublic] = useState(true);
   const [privacySaving, setPrivacySaving] = useState(false);
   
-  // Tabs: overview, journal, settings
+  const [profileSelection, setProfileSelection] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
@@ -2310,7 +2310,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pt-6">
+    <div className="max-w-6xl mx-auto space-y-8 pt-6">
       {/* Profile Header & Tabs */}
       <div className="flex flex-col sm:flex-row justify-between items-end pb-4 border-b border-white/10 gap-4">
            <div>
@@ -2323,10 +2323,10 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                        <UserIcon size={14} /> Public View
                    </button>
                </div>
-               <p className="text-gray-500 text-xs uppercase font-bold tracking-widest mt-1">Pilot Profile</p>
+               <p className="text-gray-400 text-xs mt-2">{myList.length} library listings · {libraryPublic ? 'Public library' : 'Private library'}</p>
            </div>
-           <div className="flex bg-white/5 p-1 rounded-xl">
-               {['overview', 'journal', 'settings'].map(tab => (
+           <div className="flex flex-wrap gap-1 bg-white/5 p-1 rounded-lg">
+               {['overview', 'statistics', 'journal', 'settings'].map(tab => (
                    <button 
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -2337,6 +2337,9 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                ))}
            </div>
       </div>
+      {activeTab === 'statistics' && <AnalyticsDashboard entries={myList} userId={userId} onSelect={setProfileSelection} />}
+      {profileSelection && <AnimeDetailsModal key={profileSelection.kitsuId || profileSelection.id} anime={profileSelection} onClose={() => setProfileSelection(null)} db={db} userId={userId} ownerId={userId} username={username} />}
+      {activeTab === 'overview' && <section className="border-b border-white/10 pb-6"><div className="flex items-center justify-between gap-4 mb-4"><h3 className="text-lg font-semibold">Library activity</h3><button onClick={() => setActiveTab('statistics')} className="text-sm text-cyan-200 hover:text-white">View statistics</button></div><div className="grid grid-cols-2 sm:grid-cols-5 gap-3">{Object.entries(analyze(myList, {}, false, { catalogue }).statuses).map(([status, count]) => <div key={status} className="border-l-2 border-cyan-300/40 pl-3"><p className="text-2xl font-semibold">{count}</p><p className="text-xs text-gray-400 capitalize">{status === 'watching' ? 'Watching / reading' : status}</p></div>)}</div><div className="mt-5 flex flex-wrap gap-3">{myList.filter(entry => entry.status === 'watching').map(entry => <button key={entry.kitsuId || entry.id} onClick={() => setProfileSelection(entry)} className="flex items-center gap-3 text-left min-w-0 max-w-full"><img src={entry.imageUrl} alt="" className="w-10 h-14 object-cover rounded" /><span className="text-sm break-words">{entry.title}</span></button>)}</div></section>}
       
       {activeTab === 'overview' && (
           <>
