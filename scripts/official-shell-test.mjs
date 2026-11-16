@@ -65,7 +65,7 @@ assert.match(text('fetchMediaDetails'), /AbortSignal.timeout\(15_000\)/);
 assert.match(text('exportUserData'), /URL.revokeObjectURL\(url\)/);
 
 const headerTools = text('HeaderTools');
-for (const label of ['Schedule', 'Decks', 'Commands', 'Notifications']) assert.ok(headerTools.includes(`label: '${label}'`));
+for (const label of ['Schedule', 'Decks', 'Notifications']) assert.ok(headerTools.includes(`label: '${label}'`));
 assert.match(headerTools, /!guestMode \? \[\{ label: 'Notifications'/);
 assert.match(headerTools, /hidden items-center space-x-2 sm:flex/);
 assert.match(headerTools, /relative sm:hidden/);
@@ -75,9 +75,11 @@ assert.match(headerTools, /setIsOpen\(false\); triggerRef.current\?\.focus\(\); 
 assert.match(headerTools, /menuRef.current\?\.contains\(event.target\)/);
 assert.match(headerTools, /removeEventListener\('keydown', onKeyDown\)/);
 assert.match(headerTools, /removeEventListener\('pointerdown', onPointerDown\)/);
-assert.match(app, /title="Stats"/);
+assert.doesNotMatch(app, /title="Stats"/, 'Stats remains in the dock without a duplicate header button');
+assert.match(app, /openUserProfile\(\{ uid: userId, username \}\)/);
 assert.match(app, /title="Profile"/);
-assert.match(app, /title=\{guestMode \? "Sign in" : "Logout"\}/);
+assert.match(app, /title="Sign in"/);
+assert.doesNotMatch(app, /title="Logout"/, 'sign out belongs to owner account controls');
 // Exercise the actual menu handlers without Firebase or a browser dependency.
 let open = false;
 let refIndex = 0;
@@ -110,10 +112,10 @@ const mobileMenu = () => find(render(), element => element.props.id === 'header-
 const trigger = find(render(), element => element.props['aria-label'] === 'More tools')[0];
 trigger.props.onClick();
 assert.equal(open, true);
-for (const [index, expected] of ['schedule', 'decks', 'commands', 'notifications'].entries()) {
+for (const [index, expected] of ['schedule', 'decks', 'notifications'].entries()) {
   open = true;
   const actions = find(mobileMenu(), element => element.type === 'button');
-  assert.equal(actions.length, 4);
+  assert.equal(actions.length, 3);
   actions[index].props.onClick();
   assert.equal(open, false, 'menu closes after an action');
   assert.equal(calls.at(-1), expected);
@@ -131,7 +133,7 @@ listeners.get('pointerdown')({ target: 'outside' });
 assert.equal(open, false);
 open = true;
 const guestMenu = find(render(true), element => element.props.id === 'header-tools-menu')[0];
-assert.equal(find(guestMenu, element => element.type === 'button').length, 3, 'guests cannot access notifications');
+assert.equal(find(guestMenu, element => element.type === 'button').length, 2, 'guests cannot access notifications');
 cleanup?.();
 assert.equal(listeners.size, 0, 'menu listeners are cleaned up');
 console.log('Official shell, mobile menu, and preview safety contracts passed (no Git history required).');

@@ -119,7 +119,7 @@ const PAGE_META = {
   schedule: ['Anime Airing Schedule — AniLog', 'See the next seven days of anime releases in your local timezone.'],
   decks: ['Community Anime & VN Decks — AniLog', 'Explore and publish shareable curated anime and visual novel collections.'],
   stats: ['Your Anime Stats — AniLog', 'Explore your watch time, ratings, genres, milestones, and anime history.'],
-  profile: ['Your Profile — AniLog', 'Manage your AniLog profile, appearance, data, and hall of fame.'],
+  profile: ['Account Settings — AniLog', 'Manage your AniLog appearance, private journal, data, and favorites.'],
   user_profile: ['Community Profile — AniLog', 'View an AniLog community member’s public anime profile and library.'],
 };
 
@@ -867,7 +867,7 @@ function CommandPalette({ isOpen, onClose, setPage, theme, setThemeId, userId })
             { id: 'social', label: 'Go to Social', icon: <SocialIcon />, action: () => setPage('social') },
             { id: 'schedule', label: 'Open Airing Schedule', icon: <ScheduleIcon />, action: () => setPage('schedule') },
             { id: 'decks', label: 'Explore Community Decks', icon: <DecksIcon />, action: () => setPage('decks') },
-            { id: 'profile', label: 'Go to Profile', icon: <ProfileIcon />, action: () => setPage('profile') },
+            { id: 'profile', label: 'Account settings', icon: <ProfileIcon />, action: () => setPage('profile') },
         ];
         
         const themes = Object.values(THEMES).map(t => ({
@@ -1106,7 +1106,6 @@ function HeaderTools({ guestMode, setPage, onCommands, onNotifications }) {
   const tools = [
     { label: 'Schedule', Icon: ScheduleIcon, action: () => setPage('schedule') },
     { label: 'Decks', Icon: DecksIcon, action: () => setPage('decks') },
-    { label: 'Commands', Icon: SearchIcon, action: onCommands },
     ...(!guestMode ? [{ label: 'Notifications', Icon: BellIcon, action: onNotifications }] : []),
   ];
 
@@ -1473,7 +1472,7 @@ export default function App() {
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
         : <ProfilePage db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
       case "user_profile": return viewTargetUser && viewTargetUser.uid === targetProfileUid
-        ? <UserProfilePage key={targetProfileUid} db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} readOnly={guestMode} />
+        ? <UserProfilePage key={targetProfileUid} db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} onLogout={handleLogout} readOnly={guestMode} />
         : <div className="py-24 text-center text-gray-500">Loading profile…</div>;
       default: return <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
     }
@@ -1522,15 +1521,12 @@ export default function App() {
             </button>
             <div className="ml-auto flex shrink-0 items-center space-x-0.5 sm:space-x-2">
               <HeaderTools guestMode={guestMode} setPage={setPage} onCommands={() => setIsCmdOpen(true)} onNotifications={() => setIsNotificationsOpen(true)} />
-              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("stats")} title="Stats" className={`p-2 rounded-full transition-all duration-300 ${page === "stats" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
-                <StatsIcon />
-              </motion.button>}
-              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
+              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => openUserProfile({ uid: userId, username })} title="Profile" aria-label="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "user_profile" && targetProfileUid === userId ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
                 <ProfileIcon />
               </motion.button>}
-              <motion.button whileTap={{ scale: 0.9 }} onClick={guestMode ? leaveGuestMode : handleLogout} title={guestMode ? "Sign in" : "Logout"} className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
+              {guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={leaveGuestMode} title="Sign in" className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
                 <LogoutIcon />
-              </motion.button>
+              </motion.button>}
             </div>
           </nav>
         </header>

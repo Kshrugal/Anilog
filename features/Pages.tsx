@@ -6,6 +6,7 @@ import React, {
   useRef,
 } from "react";
 import { createPortal } from "react-dom";
+import { Settings as SettingsIcon, LogOut as LogoutIcon } from 'lucide-react';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -2195,7 +2196,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   const [privacySaving, setPrivacySaving] = useState(false);
   
   const [profileSelection, setProfileSelection] = useState(null);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("settings");
 
   useEffect(() => {
       if(!db || !userId) return;
@@ -2320,19 +2321,19 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                        onClick={() => openUserProfile({uid: userId, username})}
                        className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold text-white transition-colors flex items-center gap-1"
                    >
-                       <UserIcon size={14} /> Public View
+                       <UserIcon size={14} /> Back to profile
                    </button>
                </div>
-               <p className="text-gray-400 text-xs mt-2">{myList.length} library listings · {libraryPublic ? 'Public library' : 'Private library'}</p>
+               <p className="text-gray-400 text-xs mt-2">Account settings · {libraryPublic ? 'Public library' : 'Private library'}</p>
            </div>
            <div className="flex flex-wrap gap-1 bg-white/5 p-1 rounded-lg">
-               {['overview', 'statistics', 'journal', 'settings'].map(tab => (
+               {['settings', 'overview', 'journal'].map(tab => (
                    <button 
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${activeTab === tab ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                    >
-                       {tab}
+                       {tab === 'overview' ? 'Favorites' : tab === 'journal' ? 'Private journal' : tab}
                    </button>
                ))}
            </div>
@@ -2645,7 +2646,7 @@ function HallOfFameSelector({ onClose, onSelect, myList, currentItem, slotNumber
 
 import { PROFILE_STATUSES, profileEntry, profileLibrary, profileMediaId, profileIsVn, profileProgress } from '../services/profile';
 
-export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, readOnly = false }) {
+export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, onLogout = undefined, readOnly = false }) {
     const targetUid = targetUser?.uid;
     const targetUsername = targetUser?.username;
     const [loadedTarget, setLoadedTarget] = useState(null);
@@ -2830,6 +2831,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
     return (
   <div className="min-w-0 max-w-6xl mx-auto space-y-7 pb-8">
+    {targetUid === currentUserId && !readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3"><span className="text-xs text-gray-400">Your profile</span><div className="flex items-center gap-3"><button onClick={() => setPage('profile')} className="inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white"><SettingsIcon size={16} />Manage account</button>{onLogout && <button onClick={onLogout} title="Sign out" aria-label="Sign out" className="p-2 text-gray-400 hover:text-red-300"><LogoutIcon size={17} /></button>}</div></div>}
     <PublicProfileHeader name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
     {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
     {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}

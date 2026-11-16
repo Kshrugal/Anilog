@@ -48,18 +48,26 @@ test('overview controls open complete status/format libraries and statistics', (
 const pages = await readFile(new URL('../features/Pages.tsx', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('Pages.tsx', pages, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'UserProfilePage');
-function renderProfile(state) {
+function renderProfile(state, props = {}) {
   const names = component.body.statements.filter(ts.isVariableStatement).flatMap(s => [...s.declarationList.declarations]).filter(n => ts.isArrayBindingPattern(n.name) && n.initializer?.expression?.getText(ast) === 'useState').map(n => n.name.elements[0].name.text);
   let index = 0;
   const values = { loadedTarget: { targetUid: 'friend', currentUserId: 'me', readOnly: false }, list: entries, loading: false, activityLoading: false, ...state };
   const bound = { React, ...profile, ...analytics, ...ui, useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
     useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false } }),
     AnalyticsDashboard: props => React.createElement('div', { 'data-public-statistics': props.title, 'data-editable': String(props.editableGroups) }),
-    ActivityHeatmap: () => React.createElement('div'), LockIcon: icons.Lock,
+    ActivityHeatmap: () => React.createElement('div'), LockIcon: icons.Lock, SettingsIcon: icons.Settings, LogoutIcon: icons.LogOut,
   };
   const Page = new Function(...Object.keys(bound), `${compile(component.getText(ast).replace(/^export /, ''))};return UserProfilePage;`)(...Object.values(bound));
-  return renderToStaticMarkup(React.createElement(Page, { db: {}, currentUserId: 'me', targetUser: { uid: 'friend', username: 'Friend' }, readOnly: false }));
+  return renderToStaticMarkup(React.createElement(Page, { db: {}, currentUserId: 'me', targetUser: { uid: 'friend', username: 'Friend' }, readOnly: false, ...props }));
 }
+test('account controls appear only on the signed-in owner profile', () => {
+  const state = { loadedTarget: { targetUid: 'me', currentUserId: 'me', readOnly: false } };
+  const props = { targetUser: { uid: 'me', username: 'Owner' }, onLogout() {} };
+  assert.match(renderProfile(state, props), /Manage account/);
+  assert.match(renderProfile(state, props), /aria-label="Sign out"/);
+  assert.doesNotMatch(renderProfile({}, { onLogout() {} }), /Manage account|aria-label="Sign out"/);
+  assert.doesNotMatch(renderProfile({ loadedTarget: { ...state.loadedTarget, readOnly: true } }, { ...props, readOnly: true }), /Manage account|aria-label="Sign out"/);
+});
 test('public statistics uses target library, disables grouping writes, and respects privacy/error guards', () => {
   const html = renderProfile({ tab: 'stats' });
   assert.match(html, /data-public-statistics="Friend&#x27;s Statistics"/); assert.match(html, /data-editable="false"/);
