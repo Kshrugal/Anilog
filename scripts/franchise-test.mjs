@@ -108,12 +108,15 @@ function loader(fetch, storage = new Map()) {
   return { ...exports, calls, storage };
 }
 const response = data => ({ ok: true, json: async () => data });
-const media = id => ({ id, idMal: id, type: 'ANIME', title: { english: id === 20 ? 'Naruto' : 'Naruto Shippuden' }, relations: { edges: [] }, staff: { edges: [] } });
+const media = id => ({ id, idMal: id, type: 'ANIME', format: 'TV', duration: 23, episodes: 220, status: 'FINISHED', title: { english: id === 20 ? 'Naruto' : 'Naruto Shippuden' }, relations: { edges: [] }, staff: { edges: [] } });
 test('loader batches public IDs, deduplicates inflight scans and reuses persistent metadata', async () => {
   const scan = loader(async () => response({ data: { Page: { media: [media(20), media(1735)] } } }));
   const entries = library.slice(0, 2);
   const [a, b] = await Promise.all([scan.loadFranchiseCatalogue(entries), scan.loadFranchiseCatalogue(entries)]);
   assert.equal(scan.calls.length, 1); assert.equal(a['anilist:20'].title, b['anilist:20'].title);
+  assert.equal(a['anilist:20'].durationMinutes, 23);
+  assert.equal(a['anilist:20'].episodeCount, 220);
+  assert.equal(a['anilist:20'].runtimeSource, 'AniList');
   assert.ok(scan.calls[0].body.query.includes('relationType(version: 3)'));
   assert.deepEqual(scan.calls[0].body.variables.ids, [1735, 20]);
   const restored = loader(async () => { throw new Error('Should be cached'); }, scan.storage);
@@ -136,4 +139,16 @@ test('HTTP/rate-limit failures release dedup jobs and are retryable', async () =
   fail = false;
   const result = await scan.loadFranchiseCatalogue([library[0]]);
   assert.equal(result['anilist:20'].title, 'Naruto');
+});
+test('Kitsu supplies an exact runtime when the mapped catalogue lacks one', async () => {
+  const scan = loader(async url => url.includes('/mappings')
+    ? response({ data: [{ attributes: { externalSite: 'anilist/anime', externalId: '20' } }] })
+    : url.includes('kitsu.io') ? response({ data: { attributes: { canonicalTitle: 'Naruto', episodeLength: 23, episodeCount: 220, showType: 'TV', status: 'finished' } } })
+    : response({ data: { Page: { media: [{ ...media(20), duration: null }] } } }));
+  const result = await scan.loadFranchiseCatalogue([entry('1', 'Naruto')]);
+  assert.equal(result['anilist:20'].durationMinutes, 23);
+  assert.equal(result['anilist:20'].runtimeSource, 'Kitsu');
+  assert.equal(result['anilist:20'].runtimeSourceUrl, 'https://kitsu.app/anime/1');
+  assert.ok(result['anilist:20'].aliases.includes('kitsu:1'));
+  assert.equal(scan.calls.length, 3);
 });

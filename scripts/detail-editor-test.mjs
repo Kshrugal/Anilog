@@ -12,6 +12,10 @@ assert.ok(component, 'detail editor must exist');
 const compiled = ts.transpileModule(component.getText(parsed), {
   compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const compileService = text => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const franchiseUrl = `data:text/javascript;base64,${Buffer.from(compileService(await readFile(new URL('../services/franchises.ts', import.meta.url), 'utf8'))).toString('base64')}`;
+const analyticsSource = compileService(await readFile(new URL('../services/analytics.ts', import.meta.url), 'utf8')).replace(/from ['"]\.\/franchises['"]/, `from '${franchiseUrl}'`);
+const { runtimeFor, exactTime } = await import(`data:text/javascript;base64,${Buffer.from(analyticsSource).toString('base64')}`);
 
 function deferred() {
   let resolve;
@@ -35,7 +39,7 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   const sandbox = {
     React: { createElement: (type, attributes, ...children) => ({ type, props: attributes || {}, children }) },
     motion: { div: 'div', button: 'button' },
-    CloseIcon: 'CloseIcon', StarIcon: 'StarIcon', HeartIcon: 'HeartIcon',
+    CloseIcon: 'CloseIcon', StarIcon: 'StarIcon', HeartIcon: 'HeartIcon', ClockIcon: 'ClockIcon', MinusIcon: 'MinusIcon', PlusIcon: 'PlusIcon', ChevronDownIcon: 'ChevronDownIcon', runtimeFor, exactTime,
     ThemeContext: {}, useContext: () => ({ theme: { progressbar: 'bg-blue-500', button: 'bg-blue-500' } }),
     useRef: initial => { const index = cursor++; if (!(index in states)) states[index] = { current: initial }; return states[index]; },
     fetchMediaDetails: () => mediaPromise || Promise.resolve({ attributes: {} }),

@@ -1,5 +1,5 @@
 export type Relation = { key: string; type: string; official?: boolean };
-export type CatalogueNode = { key: string; title: string; type?: string; titles?: string[]; aliases?: string[]; relations?: Relation[]; creators?: { id?: string; name: string; role: string }[]; developers?: { id: string; name: string }[]; year?: number; fetchedAt?: number; cachedAt?: number };
+export type CatalogueNode = { key: string; title: string; type?: string; format?: string; durationMinutes?: number; episodeCount?: number; status?: string; airedEpisodes?: number; runtimeSource?: string; runtimeSourceUrl?: string; runtimeChecked?: boolean; titles?: string[]; aliases?: string[]; relations?: Relation[]; creators?: { id?: string; name: string; role: string }[]; developers?: { id: string; name: string }[]; year?: number; fetchedAt?: number; cachedAt?: number };
 export type Catalogue = Record<string, CatalogueNode>;
 export type Membership = { franchise: string; franchiseKey: string; universe: string; universeKey: string; basis: string; source: string; confidence: 'catalogue' | 'reviewed' | 'title' | 'unresolved'; creators: string[] };
 type Family = { id: string; name: string; aliases: string[]; universe?: string; source?: string };

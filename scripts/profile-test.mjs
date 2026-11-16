@@ -194,7 +194,7 @@ test('saved provider IDs and Hall of Fame fallbacks keep the unified hydration r
 
 test('actual modal hydration accepts immediate saved data for all three providers', async () => {
   const modal = pages.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AnimeDetailsModal');
-  const hydrationEffect = modal.body.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(pages) === 'useEffect' && node.expression.arguments[0].getText(pages).includes('fetchMediaDetails(kitsuId)'));
+  const hydrationEffect = modal.body.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(pages) === 'useEffect' && node.expression.arguments[0].getText(pages).includes('fetchMediaDetails(publicId)'));
   assert.ok(hydrationEffect, 'modal must hydrate immediate entries independently');
   for (const entry of [{ id: '123', title: 'Kitsu' }, { id: '123', provider: 'anilist', title: 'AniList' }, { id: '123', mediaType: 'vn', title: 'VN' }]) {
     const saved = profileEntry(entry);
@@ -203,6 +203,7 @@ test('actual modal hydration accepts immediate saved data for all three provider
     const metadata = { attributes: { synopsis: 'Hydrated public metadata' } };
     evaluate(hydrationEffect.expression.arguments[0], {
       kitsuId: saved.kitsuId,
+      isAniList: saved.provider === 'anilist', isVn: saved.mediaType === 'vn',
       setHydratedMedia: value => { hydrated = value; }, setDetailsError() {},
       fetchMediaDetails: async id => { receivedId = id; return metadata; },
     })();

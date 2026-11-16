@@ -47,6 +47,22 @@ notes, credentials, or private library associations. Coverage reports successful
 retrieved identities, not a guarantee that every catalogue relationship is correct.
 API outages and rate limits preserve reviewed identities and available cache.
 
+## Runtime Accounting
+
+Cache version 2 includes each anime listing's catalogue duration, episode count,
+format, release status, and available aired-episode count. AniList runtime takes
+precedence over older saved metadata; exact Kitsu mappings can fall back to Kitsu
+runtime when AniList has none. Missing runtimes are not replaced with 24 minutes.
+They are visibly excluded from known-time totals and the backlog calculator.
+
+Completed finished titles use their episode count; unfinished entries use recorded
+progress, bounded by known totals and aired episodes. Optional rewatches add full
+known completed cycles. Films use their own runtime. TV uses the catalogue's general
+per-episode duration, so skipped credits and unusually long episodes are not stopwatch
+accurate. Visual novels and manga use logged hours only, never progress guesses.
+The Runtimes audit exposes exact minutes, calculation, source, and missing metadata.
+Personal and public profiles, franchise totals, and Time Lab share this calculation.
+
 ## Public Profiles
 
 Public statistics receive only the target profile's already-authorized library.

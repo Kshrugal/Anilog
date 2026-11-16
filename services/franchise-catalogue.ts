@@ -1,14 +1,14 @@
 import { mediaKey, type Catalogue, type CatalogueNode } from './franchises';
 
-const CACHE_KEY = 'anilog:public-franchise-catalogue:v1';
+const CACHE_KEY = 'anilog:public-franchise-catalogue:v2';
 const TTL = 7 * 24 * 60 * 60_000;
 const nodes: Catalogue = {};
 let restored = false;
 let queue = Promise.resolve();
 const jobs = new Map<string, Promise<Catalogue>>();
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const fields = 'id type idMal title { romaji english native } synonyms startDate { year }';
-const publicFields = `${fields} staff(perPage: 25) { edges { role node { id name { full } } } } relations { edges { relationType(version: 3) node { ${fields} } } }`;
+const fields = 'id type idMal format duration episodes status title { romaji english native } synonyms startDate { year }';
+const publicFields = `${fields} nextAiringEpisode { episode } staff(perPage: 25) { edges { role node { id name { full } } } } relations { edges { relationType(version: 3) node { ${fields} } } }`;
 
 function restore() {
   if (restored) return;
@@ -37,7 +37,7 @@ async function json(url: string, body?: unknown) {
 }
 
 function aniNode(media: any, full = false): CatalogueNode {
-  return { key: `anilist:${media.id}`, type: media.type, title: media.title?.english || media.title?.romaji || media.title?.native || `Media ${media.id}`, titles: [...Object.values(media.title || {}), ...(media.synonyms || [])].filter((v): v is string => typeof v === 'string'), aliases: media.idMal ? [`mal:${media.type === 'MANGA' ? 'manga:' : ''}${media.idMal}`] : [], year: media.startDate?.year || 0, cachedAt: Date.now(),
+  return { key: `anilist:${media.id}`, type: media.type, format: media.format, durationMinutes: Number(media.duration) > 0 ? Number(media.duration) : 0, episodeCount: Number(media.episodes) > 0 ? Number(media.episodes) : 0, status: media.status, airedEpisodes: media.nextAiringEpisode?.episode ? Math.max(0, media.nextAiringEpisode.episode - 1) : undefined, runtimeSource: 'AniList', runtimeChecked: full, title: media.title?.english || media.title?.romaji || media.title?.native || `Media ${media.id}`, titles: [...Object.values(media.title || {}), ...(media.synonyms || [])].filter((v): v is string => typeof v === 'string'), aliases: media.idMal ? [`mal:${media.type === 'MANGA' ? 'manga:' : ''}${media.idMal}`] : [], year: media.startDate?.year || 0, cachedAt: Date.now(),
     ...(full ? { fetchedAt: Date.now(), creators: (media.staff?.edges || []).filter((e: any) => /^(original (creator|story)|author|story(?:\s*&\s*art)?|scenario)$/i.test(e.role)).map((e: any) => ({ id: String(e.node.id), name: e.node.name.full, role: e.role })), relations: (media.relations?.edges || []).map((e: any) => ({ key: `anilist:${e.node.id}`, type: e.relationType })) } : {}) };
 }
 async function aniBatch(ids: number[], malIds: number[] = []) {
@@ -78,12 +78,23 @@ export async function loadFranchiseCatalogue(entries: Record<string, any>[], onP
     for (const key of needed.filter(k => /^kitsu:\d+$/.test(k)).slice(0, 100)) {
       const data = await json(`https://kitsu.io/api/edge/anime/${key.slice(6)}/mappings?page%5Blimit%5D=20`);
       const mapping = data.data?.find((m: any) => m.attributes?.externalSite === 'anilist/anime') || data.data?.find((m: any) => m.attributes?.externalSite === 'myanimelist/anime');
+      let mappedId: string;
       if (mapping && /^\d+$/.test(String(mapping.attributes.externalId))) {
         const numeric = Number(mapping.attributes.externalId);
         const result = await aniBatch(mapping.attributes.externalSite === 'anilist/anime' ? [numeric] : [], mapping.attributes.externalSite === 'myanimelist/anime' ? [numeric] : []);
         const exact = result.find(id => mapping.attributes.externalSite === 'anilist/anime' ? id === `anilist:${numeric}` : nodes[id].aliases?.includes(`mal:${numeric}`));
+        mappedId = exact;
         if (exact) nodes[exact].aliases = [...new Set([...(nodes[exact].aliases || []), key])];
         await pause(1200);
+      }
+      if (!mappedId || !nodes[mappedId].durationMinutes) {
+        const original = await json(`https://kitsu.io/api/edge/anime/${key.slice(6)}?fields%5Banime%5D=canonicalTitle,episodeLength,episodeCount,showType,status`);
+        const attributes = original.data?.attributes;
+        if (attributes) {
+          const duration = Number(attributes.episodeLength) > 0 ? Number(attributes.episodeLength) : 0;
+          if (mappedId) nodes[mappedId] = { ...nodes[mappedId], durationMinutes: duration, runtimeSource: 'Kitsu', runtimeSourceUrl: `https://kitsu.app/anime/${key.slice(6)}`, episodeCount: nodes[mappedId].episodeCount || Number(attributes.episodeCount) || 0 };
+          else nodes[key] = { key, title: attributes.canonicalTitle || `Anime ${key.slice(6)}`, type: 'ANIME', format: String(attributes.showType || '').toUpperCase(), status: attributes.status, durationMinutes: duration, episodeCount: Number(attributes.episodeCount) || 0, runtimeSource: 'Kitsu', runtimeSourceUrl: `https://kitsu.app/anime/${key.slice(6)}`, runtimeChecked: true, fetchedAt: Date.now() };
+        }
       }
       report(1);
     }

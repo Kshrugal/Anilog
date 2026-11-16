@@ -30,8 +30,9 @@ test('separate listing counts and reproducible legacy grouping, without non-Lati
 });
 test('numeric bounded progress, real VN logged hours only, explicit repeat assumption', () => {
   const result = analyze(entries);
-  assert.equal(result.episodes, 29); assert.equal(result.minutes, 948);
-  assert.equal(result.estimatedTitles, 3); assert.equal(result.missingVnTime, 1);
+  assert.equal(result.episodes, 29); assert.equal(result.minutes, 540);
+  assert.equal(result.estimatedTitles, 1); assert.equal(result.missingVnTime, 1);
+  assert.equal(result.missingAnimeTime, 3, 'unknown runtimes are excluded, never guessed as 24 minutes');
   assert.equal(timeFor(entries[0], true).episodes, 36);
   assert.equal(timeFor(entries[4], true).minutes, 300);
   assert.equal(timeFor({ watchedEpisodes: Infinity, totalEpisodes: 'bad', durationMinutes: -1 }).minutes, 0);
@@ -49,7 +50,7 @@ test('valid completion dates only; custom groups cannot change title counts or m
   assert.equal(suggestedGroup('Story II'), 'Story'); assert.equal(suggestedGroup('星'), '星');
 });
 test('backlog excludes VNs and finished/dropped titles; missing totals stay unknown', () => {
-  assert.deepEqual(remainingAnime([...entries, { status: 'watching' }]), { minutes: 288, unknown: 1 });
+  assert.deepEqual(remainingAnime([...entries, { status: 'watching' }]), { minutes: 0, unknown: 2 });
   const empty = analyze([]); assert.equal(empty.mean, 0); assert.equal(empty.median, 0); assert.equal(empty.minutes, 0);
 });
 test('manga context cannot inflate completed anime, episode counts, or anime queue time', () => {
@@ -68,11 +69,12 @@ function render(tab, format = 'all', data = entries) {
   const iconBindings = Object.fromEntries(['ChevronDown', 'Pencil', 'RotateCcw', 'Search', 'X', 'Clock3', 'Layers3', 'Check', 'BookOpen', 'Tv'].map(name => [name, icons[name]]));
   const binding = { React, ...helpers, ...iconBindings, useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false, done: 0, total: data.length }, retry() {} }), useMemo: callback => callback(), useState: initial => [Object.hasOwn(state, index) ? state[index++] : (index++, typeof initial === 'function' ? initial() : initial), () => {}], localStorage: { getItem: () => '{}' } };
   const js = compile(body).replace(/export \{\};?/, '');
+  binding.RuntimeAudit = () => React.createElement('div', null, 'Runtime audit');
   const Dashboard = new Function(...Object.keys(binding), `${js}\nreturn AnalyticsDashboard;`)(...Object.values(binding));
   return renderToStaticMarkup(React.createElement(Dashboard, { entries: data, userId: 'test', onSelect() {} }));
 }
 test('all analytics tabs render real fixture and empty states without invalid numbers', () => {
-  for (const tab of ['overview', 'franchises', 'timeline', 'lab']) for (const data of [entries, []]) {
+  for (const tab of ['overview', 'franchises', 'timeline', 'lab', 'runtimes']) for (const data of [entries, []]) {
     const html = render(tab, 'all', data); assert.ok(!/NaN|Infinity/.test(html)); assert.match(html, /Counting &amp; estimates/);
   }
   assert.match(render('overview'), /h-32/);

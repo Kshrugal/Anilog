@@ -61,6 +61,8 @@ import {
   Layers3 as DeckIcon,
   Copy as CopyIcon,
   Plus as PlusIcon,
+  Minus as MinusIcon,
+  ChevronDown as ChevronDownIcon,
 } from 'lucide-react';
 import {
   APP_NAME, KITSU_API_URL,
@@ -73,7 +75,8 @@ import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, 
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
 import { PublicProfileHeader, PublicProfileOverview, PublicProfileFavorites } from './PublicProfile';
-import { analyze } from '../services/analytics';
+import { analyze, runtimeFor, exactTime } from '../services/analytics';
+import { useFranchiseCatalogue } from './useFranchiseCatalogue';
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -1094,6 +1097,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [hydratedMedia, setHydratedMedia] = useState(null);
     const [detailsError, setDetailsError] = useState("");
     const [extraDetailsOpen, setExtraDetailsOpen] = useState(false);
+    const [synopsisExpanded, setSynopsisExpanded] = useState(false);
     const [fetchedGenres, setFetchedGenres] = useState(anime.genres || anime.attributes?.genres || []);
     const [cast, setCast] = useState([]);
     
@@ -1102,7 +1106,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
 
     useEffect(() => { closeRef.current = onClose; savingRef.current = loading; }, [onClose, loading]);
     const title = anime.title || anime.canonicalTitle || hydratedMedia?.attributes?.canonicalTitle || anime.attributes?.canonicalTitle;
-    const poster = anime.imageUrl || hydratedMedia?.attributes?.posterImage?.original || hydratedMedia?.attributes?.posterImage?.large ||
+    const poster = hydratedMedia?.attributes?.posterImage?.original || hydratedMedia?.attributes?.posterImage?.large || anime.imageUrl ||
         anime.posterImage?.original || 
         anime.posterImage?.large || 
         anime.posterImage?.medium || 
@@ -1124,6 +1128,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel' || String(kitsuId).startsWith('v');
     const isAniList = anime.provider === 'anilist' || anime.attributes?.provider === 'anilist' || String(kitsuId).startsWith('anilist:');
     const isKitsu = !isVn && !isAniList;
+    const resolvedRuntime = runtimeFor({ ...anime, totalEpisodes: totalEps, durationMinutes: Number(details.episodeLength || anime.durationMinutes || 0), showType: details.showType || anime.showType });
+    const backdrop = details.coverImage?.original || anime.attributes?.coverImage?.original || poster;
 
     const isOwner = userId === ownerId;
 
@@ -1155,11 +1161,12 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         let active = true;
         setHydratedMedia(null);
         setDetailsError("");
-        fetchMediaDetails(kitsuId)
+        const publicId = isAniList && /^\d+$/.test(String(kitsuId)) ? `anilist:${kitsuId}` : isVn && /^\d+$/.test(String(kitsuId)) ? `v${kitsuId}` : kitsuId;
+        fetchMediaDetails(publicId)
             .then(media => { if (active) { setHydratedMedia(media); if (media?.attributes?.genres?.length) setFetchedGenres(media.attributes.genres); } })
             .catch(() => { if (active) setDetailsError("Extra details could not be loaded."); });
         return () => { active = false; };
-    }, [kitsuId]);
+    }, [kitsuId, isAniList, isVn]);
 
     useEffect(() => {
         let active = true;
@@ -1346,7 +1353,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-[#0a0a0a] w-full max-w-4xl max-h-[90dvh] rounded-3xl overflow-hidden relative shadow-2xl flex flex-col md:flex-row border border-white/10"
+                className="bg-[#0b0d15]/95 backdrop-blur-2xl w-full max-w-5xl max-h-[90dvh] rounded-2xl overflow-hidden relative shadow-2xl flex flex-col md:flex-row border border-white/15"
                 role="dialog"
                 ref={dialogRef}
                 tabIndex={-1}
@@ -1358,25 +1365,26 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     <CloseIcon />
                 </button>
 
-                <div className="relative w-full md:w-1/3 h-64 md:h-auto max-h-[30dvh] md:max-h-none flex-shrink-0 [@media(max-height:450px)]:hidden">
-                    <img src={poster || "https://placehold.co/300x450"} alt={title || ''} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent md:bg-gradient-to-r md:from-transparent md:to-[#0a0a0a]" />
+                <div className="absolute inset-x-0 top-0 h-64 pointer-events-none overflow-hidden" aria-hidden="true"><img src={backdrop} alt="" className="w-full h-full object-cover opacity-[0.12]" referrerPolicy="no-referrer" /><div className="absolute inset-0 bg-gradient-to-t from-[#0b0d15] to-transparent" /></div>
+                <div className="hidden md:flex relative w-56 flex-col gap-4 p-5 flex-shrink-0 border-r border-white/10 bg-white/[0.02] [@media(max-height:450px)]:hidden">
+                    <img src={poster || "https://placehold.co/300x450"} alt={title || ''} className="w-full aspect-[2/3] object-cover rounded-lg border border-white/10 shadow-xl" referrerPolicy="no-referrer" />
+                    <p className="text-xs font-medium text-gray-400 uppercase">{isVn ? 'Visual novel' : String(details.showType || anime.showType || 'Anime').replaceAll('_', ' ')}</p>
                     {score > 0 && (
-                        <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full border border-yellow-500/30 flex items-center gap-2">
+                        <div className="text-xs text-gray-400 flex items-center gap-2">
                              <StarIcon /> <span className="font-bold text-yellow-400">{score}</span>
+                             <span>/ 10 personal score</span>
                         </div>
                     )}
+                    {!isVn && resolvedRuntime.duration > 0 && <div className="border-t border-white/10 pt-4"><p className="text-xs text-gray-500">{resolvedRuntime.film ? 'Film runtime' : 'Episode duration'}</p><p className="text-lg font-semibold text-white mt-1">{exactTime(resolvedRuntime.duration)}</p>{resolvedRuntime.total > 1 && <p className="text-xs text-gray-500 mt-1">{resolvedRuntime.total} episodes · {exactTime(resolvedRuntime.fullMinutes)} total</p>}</div>}
                 </div>
 
-                <div className="flex-1 min-h-0 min-w-0 p-6 md:p-8 overflow-y-auto custom-scrollbar">
+                <div className="relative flex-1 min-h-0 min-w-0 p-5 sm:p-6 md:p-8 overflow-y-auto overscroll-contain custom-scrollbar">
                     <div className="space-y-6">
                         <div>
-                            <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight mb-2 pr-10 break-words">{title}</h2>
+                            <div className="flex items-start gap-4 pr-8 mb-4"><img src={poster} alt="" className="md:hidden w-20 h-28 shrink-0 object-cover rounded-lg border border-white/15 [@media(max-height:450px)]:hidden" referrerPolicy="no-referrer" /><div className="min-w-0"><p className="text-[10px] font-semibold uppercase text-cyan-200/70 mb-2">{isVn ? 'Visual novel' : String(details.showType || anime.showType || 'Anime').replaceAll('_', ' ')}</p><h2 className="text-2xl sm:text-3xl font-bold text-white leading-tight break-words">{title}</h2>{!isVn && resolvedRuntime.duration > 0 && <p className="text-xs text-gray-400 mt-3 flex items-center gap-2"><ClockIcon size={13} />{resolvedRuntime.film ? `${exactTime(resolvedRuntime.duration)} film` : `${resolvedRuntime.duration} min / episode${resolvedRuntime.total ? ` · ${resolvedRuntime.total} episodes` : ''}`}</p>}</div></div>
                             {detailsError && <p role="status" className="mb-3 text-xs text-amber-300">{detailsError}</p>}
                             {synopsis && (
-                                <p className="text-gray-400 text-sm leading-relaxed line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">
-                                    {synopsis}
-                                </p>
+                                <div className="mb-4"><p className={`text-gray-400 text-sm leading-relaxed ${synopsisExpanded ? '' : 'line-clamp-3'}`}>{synopsis}</p><button onClick={() => setSynopsisExpanded(value => !value)} aria-expanded={synopsisExpanded} className="inline-flex items-center gap-1.5 text-xs text-cyan-200/70 mt-2 hover:text-white">{synopsisExpanded ? 'Less' : 'Synopsis'}<ChevronDownIcon size={13} className={synopsisExpanded ? 'rotate-180' : ''} /></button></div>
                             )}
                             <div className="flex flex-wrap gap-2 mt-3">
                                 {fetchedGenres.slice(0, 5).map(g => (
@@ -1442,7 +1450,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 <p className="mt-1 text-sm text-gray-400">Sign in or create a free account to track progress, ratings, and notes.</p>
                             </div>
                         ) : isOwner ? (
-                            <fieldset disabled={!logLoaded || loading} className="min-w-0 space-y-6 bg-white/5 p-6 rounded-2xl border border-white/5 shadow-inner disabled:opacity-60">
+                            <fieldset disabled={!logLoaded || loading} className="min-w-0 space-y-6 border-t border-white/10 pt-6 disabled:opacity-60">
                                 {logError && !logLoaded && <legend className="px-2"><button onClick={() => setLoadAttempt(value => value + 1)} className="text-xs font-bold text-blue-300 hover:text-white">Retry loading log</button></legend>}
                                 {!logLoaded && !logError && <p role="status" className="text-sm text-gray-400">Loading your log...</p>}
                                 {logError && <div role="alert" className="text-sm text-red-300">{logError}</div>}
@@ -1453,15 +1461,16 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                         {['watching', 'completed', 'planned', 'paused', 'dropped'].map(s => (
                                             <button 
                                                 key={s} 
+                                                aria-pressed={status === s}
                                                 onClick={() => { setStatus(s); if (s === 'completed' && (isVn || Number(totalEps) > 0)) setEpisodes(isVn ? 100 : Number(totalEps)); }}
-                                                className={`px-4 py-2 rounded-xl text-sm font-bold capitalize transition-all border ${status === s ? `bg-white text-black border-white shadow-lg` : 'bg-transparent text-gray-400 border-white/10 hover:border-white/30'}`}
+                                                className={`min-h-10 px-3 py-2 rounded-lg text-xs font-semibold capitalize transition-colors border ${status === s ? `bg-white text-black border-white shadow-lg` : 'bg-transparent text-gray-400 border-white/10 hover:border-white/30'}`}
                                             >
                                                 {s === 'watching' && isVn ? 'reading' : s}
                                             </button>
                                         ))}
                                     </div>
 
-                                <div className="grid grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                     {isVn ? (
                                         <div className="space-y-3">
                                             <label className="text-xs font-bold text-gray-500 uppercase tracking-widest flex justify-between">
@@ -1498,8 +1507,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                                 aria-label="Episodes watched"
                                             />
                                             <div className="flex gap-2">
-                                                <button onClick={() => setEpisodes(Math.max(0, episodes - 1))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">-</button>
-                                                <button onClick={() => setEpisodes(Math.min(Number(totalEps) > 0 ? Number(totalEps) : Infinity, episodes + 1))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">+</button>
+                                                <button aria-label="Decrease episodes" title="Decrease episodes" onClick={() => setEpisodes(Math.max(0, episodes - 1))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-2 text-white grid place-items-center"><MinusIcon size={15} /></button>
+                                                <button aria-label="Increase episodes" title="Increase episodes" onClick={() => setEpisodes(Math.min(Number(totalEps) > 0 ? Number(totalEps) : Infinity, episodes + 1))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-2 text-white grid place-items-center"><PlusIcon size={15} /></button>
                                             </div>
                                         </div>
                                     )}
@@ -1509,7 +1518,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                             <span>Score</span>
                                             <span className={score > 0 ? "text-yellow-400" : "text-gray-600"}>{score > 0 ? score : '-'}</span>
                                         </label>
-                                        <div className="flex gap-1" onMouseLeave={() => setHoverScore(null)}>
+                                        <div className="grid grid-cols-10 gap-1 h-10" onMouseLeave={() => setHoverScore(null)}>
                                             {[1,2,3,4,5,6,7,8,9,10].map(s => (
                                                 <button 
                                                     key={s}
@@ -1518,7 +1527,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                                     aria-label={`Rate ${s} out of 10`}
                                                     aria-pressed={s === score}
                                                     title={`${s}/10`}
-                                                    className={`w-full aspect-square rounded-sm text-[0px] transition-colors ${s <= (hoverScore ?? score) ? 'bg-yellow-400 shadow-sm' : 'bg-gray-800'}`}
+                                                    className={`h-10 w-full min-w-0 rounded text-[10px] font-semibold transition-colors ${s <= (hoverScore ?? score) ? 'bg-yellow-300 text-black shadow-sm' : 'bg-white/5 text-gray-500 hover:bg-white/10'}`}
                                                 >
                                                     {s}
                                                 </button>
@@ -1558,7 +1567,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
 
                                 </div></details>
                                 <div className="space-y-3">
-                                    <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label><label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-500"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500" /> Share update to activity</label></div>
+                                    <div className="flex flex-wrap items-center justify-between gap-3"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label><label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500 shrink-0" /> Share update to activity</label></div>
                                     <textarea 
                                         value={notes} 
                                         onChange={(e) => setNotes(e.target.value)}
@@ -1567,14 +1576,16 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     />
                                 </div>
 
+                                <div className="sticky bottom-0 z-10 bg-[#0b0d15]/95 backdrop-blur-xl border-t border-white/10 pt-4 pb-1">
                                 <motion.button 
                                     whileTap={{ scale: 0.98 }}
                                     onClick={handleSave}
                                     disabled={loading || !logLoaded}
-                                    className={`w-full py-4 rounded-xl font-black text-white shadow-lg ${theme.button} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    className={`w-full py-3 rounded-lg font-bold text-white shadow-lg ${theme.button} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                     {loading ? "Saving..." : "Update Log"}
                                 </motion.button>
+                                </div>
                             </fieldset>
                         ) : !logLoaded && ownerId ? (
                             <p role="status" className="text-sm text-gray-400">Loading saved progress...</p>
@@ -2181,6 +2192,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   const [myList, setMyList] = useState([]);
   const [myDecks, setMyDecks] = useState([]);
   const [libraryPublic, setLibraryPublic] = useState(true);
+  const [privacySaving, setPrivacySaving] = useState(false);
   
   // Tabs: overview, journal, settings
   const [activeTab, setActiveTab] = useState("overview");
@@ -2270,17 +2282,32 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
       showToast('Hall of Fame slot cleared.');
   };
 
+  const { catalogue, state: runtimeState } = useFranchiseCatalogue(myList);
   const stats = useMemo(() => {
-      const summary = analyze(myList);
+      const summary = analyze(myList, {}, false, { catalogue });
       const completed = summary.statuses.completed;
       return { 
           total: myList.length,
           daysWatched: (summary.minutes / 1440).toFixed(1),
+          timePending: runtimeState.loading && summary.missingAnimeTime > 0,
           meanScore: summary.mean.toFixed(1),
           completed,
           completionRate: myList.length ? Math.round((completed / myList.length) * 100) : 0
       };
-  }, [myList]);
+  }, [myList, catalogue, runtimeState.loading]);
+
+  const handleLibraryPrivacyToggle = async () => {
+      if (!db || !userId || privacySaving) return;
+      setPrivacySaving(true);
+      const next = !libraryPublic;
+      try {
+          await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { libraryPublic: next });
+          setLibraryPublic(next);
+          showToast(next ? 'Your library is public.' : 'Your library is private.');
+      } catch {
+          showToast('Privacy could not be updated. Please try again.', 'error');
+      } finally { setPrivacySaving(false); }
+  };
 
   return (
     <div className="max-w-3xl mx-auto space-y-8 pt-6">
@@ -2321,7 +2348,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Titles</p>
                     </div>
                     <div className="text-center">
-                        <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.daysWatched}</p>
+                        <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.timePending ? '…' : stats.daysWatched}</p>
                         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Consumed</p>
                     </div>
                     <div className="text-center">
@@ -2455,7 +2482,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                         Security & Privacy
                     </h3>
                     <div className="space-y-4 relative z-10">
-                        <div className="flex items-center justify-between rounded-xl border border-blue-500/15 bg-blue-500/[0.05] p-5"><div className="pr-4"><p className="text-sm font-bold text-white">Public library</p><p className="mt-1 text-xs leading-relaxed text-gray-400">Let other people view your tracked titles, stats, and taste compatibility. Your profile and social posts stay public.</p></div><button type="button" onClick={async () => { const next = !libraryPublic; await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { libraryPublic: next }); setLibraryPublic(next); showToast(next ? 'Your library is public.' : 'Your library is private.'); }} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${libraryPublic ? theme.accentBg : 'bg-gray-700'}`} aria-pressed={libraryPublic}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition-transform ${libraryPublic ? 'translate-x-6' : 'translate-x-1'}`} /></button></div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-5 rounded-lg border border-blue-500/15 bg-blue-500/[0.05] p-5"><div className="min-w-0"><p id="public-library-label" className="text-sm font-bold text-white">Public library</p><p id="public-library-description" className="mt-1 text-xs leading-relaxed text-gray-400">Let other people view your tracked titles, stats, and taste compatibility. Your profile and social posts stay public.</p></div><button type="button" role="switch" aria-checked={libraryPublic} aria-labelledby="public-library-label" aria-describedby="public-library-description" aria-busy={privacySaving} disabled={privacySaving} onClick={handleLibraryPrivacyToggle} className={`relative block h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 ${libraryPublic ? theme.accentBg : 'bg-gray-700'}`}><span aria-hidden="true" className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${libraryPublic ? 'translate-x-5' : 'translate-x-0'}`} /></button></div>
                         <div className="p-5 bg-black/40 rounded-2xl border border-white/5 hover:border-emerald-500/30 transition-colors">
                             <p className="text-sm font-bold text-white mb-1 flex items-center gap-2">
                                 <LockIcon size={14} className="text-emerald-500" />
@@ -2749,18 +2776,20 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         }
     };
 
+    const { catalogue, state: runtimeState } = useFranchiseCatalogue(libraryPrivate || loadError ? [] : list);
     const stats = useMemo(() => {
-        const summary = analyze(list);
+        const summary = analyze(list, {}, false, { catalogue });
         const completed = summary.statuses.completed;
         return { 
             hours: Math.round(summary.minutes / 60),
+            timePending: runtimeState.loading && summary.missingAnimeTime > 0,
             daysConsumed: (summary.minutes / 1440).toFixed(1),
             eps: summary.episodes,
             completed,
             completionRate: list.length ? Math.round((completed / list.length) * 100) : 0,
             meanScore: summary.mean.toFixed(1)
         };
-    }, [list]);
+    }, [list, catalogue, runtimeState.loading]);
 
     const compatibility = useMemo(() => {
         if (loading || !myList.length || !list.length || targetUid === currentUserId) return null;

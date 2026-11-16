@@ -53,6 +53,7 @@ function renderProfile(state) {
   let index = 0;
   const values = { loadedTarget: { targetUid: 'friend', currentUserId: 'me', readOnly: false }, list: entries, loading: false, activityLoading: false, ...state };
   const bound = { React, ...profile, ...analytics, ...ui, useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
+    useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false } }),
     AnalyticsDashboard: props => React.createElement('div', { 'data-public-statistics': props.title, 'data-editable': String(props.editableGroups) }),
     ActivityHeatmap: () => React.createElement('div'), LockIcon: icons.Lock,
   };
