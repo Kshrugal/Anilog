@@ -17,7 +17,6 @@ import {
   getAuth,
   onAuthStateChanged,
   signOut,
-  signInAnonymously,
   setPersistence,
   browserLocalPersistence,
 } from "firebase/auth";
@@ -134,15 +133,17 @@ const getPageFromPath = (pathname) => {
 let app;
 export let auth;
 let db;
-let firebaseInitError = null;
 try {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  setLogLevel("silent"); 
+  if (firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    setLogLevel("silent");
+  }
 } catch (error) {
   console.error("Error initializing Firebase:", error);
-  firebaseInitError = error;
+  auth = undefined;
+  db = undefined;
 }
 
 // --- Kitsu API Configuration ---
@@ -157,10 +158,11 @@ export const fetchMediaDetails = async (id) => {
   } else if (strId.startsWith('v')) {
     const response = await fetch('https://api.vndb.org/kana/vn', {
         method: 'POST',
+        signal: AbortSignal.timeout(15_000),
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             filters: ["id", "=", strId],
-            fields: 'id, title, alttitle, image.url, rating, length, description'
+            fields: 'id, title, alttitle, image.url, rating, length_minutes, description'
         })
     });
     if (!response.ok) throw new Error("VNDB details fetch failed");
@@ -179,8 +181,9 @@ export const fetchMediaDetails = async (id) => {
                     small: vn.image?.url || ''
                 },
                 showType: 'Visual Novel',
-                episodeCount: vn.length ? `${vn.length}h` : 'N/A',
-                averageRating: vn.rating ? (vn.rating / 10).toFixed(1) : null,
+                episodeCount: 0,
+                estimatedLengthMinutes: Number(vn.length_minutes || 0),
+                averageRating: vn.rating ? String(vn.rating) : null,
                 synopsis: vn.description || ''
             }
         };
@@ -188,7 +191,7 @@ export const fetchMediaDetails = async (id) => {
         throw new Error("No VN found");
     }
   } else {
-    const response = await fetch(`${KITSU_API_URL}/anime/${id}`);
+    const response = await fetch(`${KITSU_API_URL}/anime/${id}`, { signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error("Failed to fetch Kitsu details");
     const resData = await response.json();
     return resData.data;
@@ -593,14 +596,13 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel';
     const percentWidth = isVn ? progress : Math.min(100, (progress / (total || 12)) * 100);
 
-    // Smart Airing Badge Logic
-    const isAiring = !isVn && (status === 'current' || anime.attributes?.status === 'current');
+    const isAiring = !isVn && [status, anime.attributes?.status].some(value => value === 'current' || value === 'RELEASING');
+    const airingAt = anime.nextAiringEpisode?.airingAt ?? anime.attributes?.nextAiringEpisode?.airingAt;
     const nextEpDay = useMemo(() => {
-        if(!isAiring) return null;
-        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const idNum = parseInt(anime.id || anime.kitsuId || "0");
-        return days[idNum % 7];
-    }, [anime.id, isAiring]);
+        if (!isAiring || typeof airingAt !== 'number' || !Number.isFinite(airingAt) || airingAt <= 0) return null;
+        const date = new Date(airingAt * 1000);
+        return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString('en-US', { weekday: 'short' });
+    }, [airingAt, isAiring]);
 
     if (viewMode === 'list') {
         return (
@@ -631,7 +633,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                 </div>
                 {isAiring && (
                     <div className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-[10px] font-bold border border-blue-500/30 whitespace-nowrap z-10">
-                        ON AIR: {nextEpDay}
+                        ON AIR{nextEpDay ? `: ${nextEpDay}` : ''}
                     </div>
                 )}
                 {onQuickIncrement && (
@@ -679,7 +681,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
 
                 {isAiring && (
                     <div className={`absolute top-2 ${favorite ? 'left-11' : 'left-2'} bg-blue-600/90 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-bold text-white shadow-lg animate-pulse z-30`}>
-                        ON AIR: {nextEpDay}
+                        ON AIR{nextEpDay ? `: ${nextEpDay}` : ''}
                     </div>
                 )}
 
@@ -991,18 +993,26 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userId, setUserId] = useState(null);
   const [username, setUsername] = useState("");
-  const [loading, setLoading] = useState(!firebaseInitError);
+  const [loading, setLoading] = useState(Boolean(auth));
   const [viewTargetUser, setViewTargetUser] = useState(null);
-  const [guestMode, setGuestMode] = useState(() => sessionStorage.getItem('anilog_guest') === 'true');
+  const [guestMode, setGuestMode] = useState(() => !auth || sessionStorage.getItem('anilog_guest') === 'true');
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const page = getPageFromPath(location.pathname);
+  const targetProfileUid = useMemo(() => {
+    if (page !== 'user_profile') return null;
+    try {
+      return decodeURIComponent(location.pathname.slice('/users/'.length));
+    } catch {
+      return null;
+    }
+  }, [location.pathname, page]);
 
   useEffect(() => {
     const [baseTitle, description] = PAGE_META[page] || PAGE_META.home;
-    const title = page === 'user_profile' && viewTargetUser?.username
+    const title = page === 'user_profile' && viewTargetUser?.uid === targetProfileUid && viewTargetUser?.username
       ? `${viewTargetUser.username} on AniLog`
       : baseTitle;
     document.title = title;
@@ -1018,7 +1028,7 @@ export default function App() {
     document.querySelector('link[rel="canonical"]')?.setAttribute('href', canonicalUrl);
     document.querySelector('meta[property="og:url"]')?.setAttribute('content', canonicalUrl);
     document.querySelector('meta[property="twitter:url"]')?.setAttribute('content', canonicalUrl);
-  }, [location.pathname, page, viewTargetUser?.username]);
+  }, [location.pathname, page, targetProfileUid, viewTargetUser?.uid, viewTargetUser?.username]);
 
   const setPage = useCallback((nextPage) => {
     navigate(PAGE_PATHS[nextPage] || '/');
@@ -1078,8 +1088,13 @@ export default function App() {
   // Resolve shared/refreshed profile URLs without relying on in-memory state.
   useEffect(() => {
     if (page !== 'user_profile' || !db) return;
-    const targetUid = decodeURIComponent(location.pathname.slice('/users/'.length));
-    if (!targetUid || viewTargetUser?.uid === targetUid) return;
+    const targetUid = targetProfileUid;
+    if (!targetUid) {
+      setViewTargetUser(null);
+      navigate('/social', { replace: true });
+      return;
+    }
+    setViewTargetUser(null);
 
     let active = true;
     getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUid}`))
@@ -1099,7 +1114,7 @@ export default function App() {
       });
 
     return () => { active = false; };
-  }, [location.pathname, navigate, page, showToast, viewTargetUser?.uid]);
+  }, [targetProfileUid, navigate, page, showToast]);
 
   const triggerConfetti = useCallback(() => {
       const colors = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#ec4899'];
@@ -1153,19 +1168,20 @@ export default function App() {
       setLoading(false);
       return;
     }
-    setPersistence(auth, browserLocalPersistence)
-      .then(() => {
-        const initializeAuth = async () => {
-          try {
-             if (!auth.currentUser) {
-              await signInAnonymously(auth);
-            }
-          } catch (error) {
-            console.error("Initial sign-in error:", error);
-          }
-        };
-
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let active = true;
+    let authVersion = 0;
+    let unsubscribe = () => {};
+    const initializeAuth = async () => {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (error) {
+        console.error("Error setting persistence:", error);
+      }
+      if (!active) return;
+      unsubscribe = onAuthStateChanged(auth, async (user) => {
+          if (!active) return;
+          const version = ++authVersion;
+          const isCurrent = () => active && version === authVersion;
           setLoading(true);
           if (user) {
             if (!user.isAnonymous) {
@@ -1178,6 +1194,7 @@ export default function App() {
             try {
               const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${user.uid}`);
               const userDocSnap = await getDoc(userDocRef);
+              if (!isCurrent()) return;
 
               if (userDocSnap.exists()) {
                 const userData = userDocSnap.data();
@@ -1187,20 +1204,23 @@ export default function App() {
                 if (userData.email) {
                   await updateDoc(userDocRef, { email: deleteField() });
                 }
+                if (!isCurrent()) return;
                 setUsername(userData.username || (user.email ? user.email.split("@")[0] : "Guest"));
               } else if (!user.isAnonymous) {
-                const newUsername = user.email.split("@")[0];
+                const newUsername = user.email ? user.email.split("@")[0] : "User";
                 await setDoc(userDocRef, {
                   uid: user.uid,
                   username: newUsername,
                   createdAt: serverTimestamp(),
                   friends: [],
                 });
+                if (!isCurrent()) return;
                 setUsername(newUsername);
               } else {
                 setUsername("Guest");
               }
             } catch (error) {
+              if (!isCurrent()) return;
               console.error("Error fetching/creating user profile:", error);
               setUsername(user.email ? user.email.split("@")[0] : "Guest");
             }
@@ -1209,25 +1229,23 @@ export default function App() {
             setUserId(null);
             setUsername("");
           }
-          setLoading(false);
+          if (isCurrent()) setLoading(false);
         });
-
-        if (!auth.currentUser) {
-          initializeAuth();
-        }
-        return () => unsubscribe();
-      })
-      .catch((error) => {
-        console.error("Error setting persistence:", error);
-        setLoading(false);
-      });
+    };
+    initializeAuth().catch((error) => {
+      console.error("Error initializing auth:", error);
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
     if (!auth) return;
     try {
       await signOut(auth);
-      await signInAnonymously(auth);
       setPage("home");
       showToast("Logged out successfully");
     } catch (error) {
@@ -1235,26 +1253,7 @@ export default function App() {
     }
   };
 
-  if (firebaseInitError) {
-      return (
-          <div className="min-h-screen bg-[#050505] flex items-center justify-center text-white font-sans text-center px-4 relative">
-              <StarField active={true} />
-              <div className="flex flex-col items-center max-w-lg z-10">
-                  <h1 className="text-4xl font-black mb-4 tracking-tight text-red-500">
-                      Configuration Error
-                  </h1>
-                  <p className="text-gray-400 mb-6">
-                      Firebase failed to initialize. Please ensure all environment variables are correctly set in your GitHub Secrets before deploying.
-                  </p>
-                  <pre className="text-xs bg-black/50 p-4 rounded-xl text-red-400 text-left overflow-auto w-full border border-red-500/30 whitespace-pre-wrap">
-                      {firebaseInitError.message}
-                  </pre>
-              </div>
-          </div>
-      );
-  }
-
-  if (loading || !db) {
+  if (loading && !guestMode) {
       return (
           <div className="flex items-center justify-center min-h-screen bg-[#050505] text-white overflow-hidden relative">
                 <StarField active={true} />
@@ -1273,7 +1272,10 @@ export default function App() {
         );
     }
 
-  if (!currentUser || (currentUser.isAnonymous && !guestMode)) {
+  if (!guestMode && (!currentUser || currentUser.isAnonymous)) {
+    if (!auth || !db) {
+      return <div className="grid min-h-screen place-items-center bg-[#0b0d10] px-6 text-center text-white"><div className="max-w-md"><h1 className="text-2xl font-bold">Sign-in unavailable</h1><p role="status" className="mt-3 text-sm text-gray-400">Firebase is not configured or could not initialize. You can still browse anime as a guest.</p><button onClick={enterGuestMode} className="mt-6 rounded-lg bg-white px-5 py-3 text-sm font-bold text-black">Explore as Guest</button></div></div>;
+    }
     return (
       <>
         <PreviewBanner />
@@ -1293,6 +1295,9 @@ export default function App() {
   const pageTransition = { type: "spring", stiffness: 100, damping: 20, duration: 0.3 } as any;
 
   const renderPage = () => {
+    if (!db && ['social', 'decks', 'user_profile'].includes(page)) {
+      return <div className="py-24 text-center"><h1 className="text-xl font-bold text-white">Community unavailable</h1><p role="status" className="mt-3 text-sm text-gray-500">Firebase is not configured or could not initialize. Search, Discover, and Schedule are still available.</p><button onClick={() => setPage('discovery')} className="mt-5 rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-black">Discover anime</button></div>;
+    }
     switch (page) {
       case "home": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
@@ -1308,8 +1313,8 @@ export default function App() {
       case "profile": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
         : <ProfilePage db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
-      case "user_profile": return viewTargetUser
-        ? <UserProfilePage db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} readOnly={guestMode} />
+      case "user_profile": return viewTargetUser && viewTargetUser.uid === targetProfileUid
+        ? <UserProfilePage key={targetProfileUid} db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} readOnly={guestMode} />
         : <div className="py-24 text-center text-gray-500">Loading profile…</div>;
       default: return <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
     }

@@ -49,11 +49,17 @@ jobs:
           npm run check
 
       - name: Build and Deploy to Cloud Run
+        id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE }}
           region: ${{ env.REGION }}
           source: ./
+
+      - name: Verify live production routes
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+        run: node scripts/check-deployment.mjs "$DEPLOY_URL"
 
       # Deploy rules after the compatible frontend is live so sign-up never
       # encounters a rules/code mismatch during rollout.

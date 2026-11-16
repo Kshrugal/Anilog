@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:features": "node scripts/feature-regression-test.mjs",
-    "check": "npm run lint && npm run typecheck && npm run test:features && npm run build && npm run test:smoke",
+    "test:behavior": "node scripts/anilist-test.mjs && node scripts/tracking-test.mjs && node scripts/detail-editor-test.mjs",
+    "check": "npm run lint && npm run typecheck && npm run test:features && npm run test:behavior && npm run build && npm run test:smoke",
     "start": "serve -s dist -l 3000",
     "preview": "vite preview"
   },

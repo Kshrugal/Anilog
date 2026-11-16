@@ -25,6 +25,10 @@ import {
   orderBy,
   addDoc,
   deleteDoc,
+  runTransaction,
+  getDocsFromServer,
+  getDocFromServer,
+  snapshotEqual,
 } from "firebase/firestore";
 import { 
     motion, 
@@ -65,6 +69,7 @@ import {
   fetchMediaDetails, logActivity, normalizeTitle,
 } from "../App";
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
+import { nextProgress, scoreSummary, planImport, importPayload, resetBackup } from "../services/tracking";
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -251,36 +256,33 @@ export function HomePage({ db, userId, username, showToast }) {
 
   const handleQuickIncrement = async (anime) => {
     if(!db || !userId) return;
-    const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel';
-    const currentEp = anime.watchedEpisodes || 0;
-    const totalEp = anime.totalEpisodes || 0;
-    
-    if(!isVn && totalEp > 0 && currentEp >= totalEp) return;
-    if(isVn && currentEp >= 100) return;
-
-    const newEp = isVn ? Math.min(100, currentEp + 5) : currentEp + 1;
-    const isNowComplete = isVn ? newEp >= 100 : totalEp > 0 && newEp >= totalEp;
     const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, anime.id);
     
     try {
-        await updateDoc(docRef, {
-          watchedEpisodes: newEp,
-          updatedAt: Date.now(),
-          ...(isNowComplete ? { status: 'completed', completedAt: new Date().toISOString().slice(0, 10) } : {}),
+        const result = await runTransaction(db, async transaction => {
+          const snapshot = await transaction.get(docRef);
+          if (!snapshot.exists()) throw new Error('This library entry no longer exists.');
+          const current = snapshot.data();
+          const next = nextProgress(current);
+          if (!next) return null;
+          transaction.update(docRef, next.changes);
+          return { ...next, title: current.title, imageUrl: current.imageUrl };
         });
+        if (!result) return;
+        const { isVn, progress: newEp, completed: isNowComplete, title, imageUrl } = result;
         logActivity({
             userId, 
             username, 
             type: 'progress', 
-            animeTitle: anime.title, 
+            animeTitle: title,
             animeKitsuId: anime.id, 
-            animeImageUrl: anime.imageUrl, 
+            animeImageUrl: imageUrl,
             context: isVn ? `read ${newEp}% of` : `watched episode ${newEp} of`
         });
         showToast(
           isNowComplete
-            ? `${anime.title} completed!`
-            : isVn ? `Marked ${newEp}% of ${anime.title}` : `Marked ep ${newEp} of ${anime.title}`,
+            ? `${title} completed!`
+            : isVn ? `Marked ${newEp}% of ${title}` : `Marked ep ${newEp} of ${title}`,
           'success'
         );
     } catch(e) {
@@ -571,6 +573,8 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
     const [query, setQuery] = useState("");
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [searchError, setSearchError] = useState("");
+    const [searchAttempt, setSearchAttempt] = useState(0);
     const [selectedAnime, setSelectedAnime] = useState(null);
     const [trending, setTrending] = useState([]);
     const [isSeasonal, setIsSeasonal] = useState(false);
@@ -587,6 +591,10 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
 
     useEffect(() => {
         let isMounted = true;
+        const controller = new AbortController();
+        const requestTimeout = setTimeout(() => controller.abort(), 15_500);
+        setLoading(isSeasonal || query.trim().length >= 3);
+        setSearchError("");
         const delayDebounceFn = setTimeout(() => {
             if (isSeasonal) {
                 setLoading(true);
@@ -599,13 +607,13 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                     })
                     .catch(err => {
                         console.error('AniList seasonal error:', err);
-                        if (isMounted) { setResults([]); setLoading(false); }
+                        if (isMounted) { setResults([]); setLoading(false); setSearchError("Seasonal anime could not be loaded. Please try again."); }
                     });
                 return;
             }
 
-            if (query.length < 3) {
-                if (isMounted) setResults([]);
+            if (query.trim().length < 3) {
+                if (isMounted) { setResults([]); setLoading(false); }
                 return;
             }
             setLoading(true);
@@ -613,10 +621,11 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
             if (searchType === 'vn') {
                 fetch('https://api.vndb.org/kana/vn', {
                     method: 'POST',
+                    signal: controller.signal,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         filters: ["search", "=", query],
-                        fields: 'id, title, alttitle, image.url, rating, length, description',
+                        fields: 'id, title, alttitle, image.url, rating, length_minutes, description',
                         results: 20
                     })
                 })
@@ -650,8 +659,9 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                                         small: posterUrl
                                     },
                                     showType: 'Visual Novel',
-                                    episodeCount: vn.length ? `${vn.length}h` : 'N/A',
-                                    averageRating: vn.rating ? (vn.rating / 10).toFixed(1) : null,
+                                    episodeCount: 0,
+                                    estimatedLengthMinutes: Number(vn.length_minutes || 0),
+                                    averageRating: vn.rating ? String(vn.rating) : null,
                                     synopsis: vn.description || ''
                                 }
                             };
@@ -665,6 +675,7 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                     if (isMounted) {
                         setResults([]);
                         setLoading(false);
+                        setSearchError("Visual novel search is unavailable. Please try again.");
                     }
                 });
             } else {
@@ -677,15 +688,17 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                     })
                     .catch(err => {
                         console.error(err);
-                        if (isMounted) setLoading(false);
+                        if (isMounted) { setResults([]); setLoading(false); setSearchError(err.message || "Anime search is unavailable. Please try again."); }
                     });
             }
         }, 500);
         return () => {
             isMounted = false;
             clearTimeout(delayDebounceFn);
+            clearTimeout(requestTimeout);
+            controller.abort();
         };
-    }, [query, isSeasonal, searchType]);
+    }, [query, isSeasonal, searchType, searchAttempt]);
 
     return (
         <div className="space-y-8">
@@ -749,6 +762,8 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                 </div>
             )}
 
+            {searchError && <div role="alert" className="flex items-center justify-between gap-4 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300"><span>{searchError}</span><button onClick={() => setSearchAttempt(value => value + 1)} title="Retry search" aria-label="Retry search" className="shrink-0 p-2 hover:text-white"><ResetIcon size={18} /></button></div>}
+
             {loading && (
                  <div className="flex justify-center py-20">
                     <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
@@ -772,7 +787,7 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                 </div>
             )}
             
-            {!loading && results.length === 0 && query.length >= 3 && (
+            {!loading && !searchError && results.length === 0 && query.trim().length >= 3 && (
                 <div className="text-center py-20 opacity-50">
                     <p className="text-xl font-bold">No results found for "{query}"</p>
                     <p className="text-sm">Try a different search term.</p>
@@ -1059,6 +1074,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [status, setStatus] = useState("watching");
     const [episodes, setEpisodes] = useState(0);
     const [score, setScore] = useState(0);
+    const [hoverScore, setHoverScore] = useState(null);
     const [notes, setNotes] = useState("");
     const [favorite, setFavorite] = useState(false);
     const [priority, setPriority] = useState("normal");
@@ -1074,6 +1090,11 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [platform, setPlatform] = useState("");
     const [loading, setLoading] = useState(false);
     const [existingData, setExistingData] = useState(null);
+    const [logLoaded, setLogLoaded] = useState(false);
+    const [logError, setLogError] = useState("");
+    const [loadAttempt, setLoadAttempt] = useState(0);
+    const [hydratedMedia, setHydratedMedia] = useState(null);
+    const [detailsError, setDetailsError] = useState("");
     const [fetchedGenres, setFetchedGenres] = useState(anime.genres || anime.attributes?.genres || []);
     const [cast, setCast] = useState([]);
     
@@ -1093,13 +1114,13 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         anime.attributes?.coverImage?.original ||
         `https://placehold.co/300x450?text=${encodeURIComponent(title || '?')}`;
     const totalEps = anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
-    const synopsis = anime.synopsis || anime.attributes?.synopsis;
-    const details = anime.attributes || anime;
+    const details = hydratedMedia?.attributes || anime.attributes || anime;
+    const synopsis = details.synopsis || anime.synopsis || anime.attributes?.synopsis;
     const relatedMedia = details.relations || [];
     const recommendations = details.recommendations || [];
     const anilistCharacters = details.characters || [];
     const streamingLinks = [...(details.streamingEpisodes || []), ...(details.externalLinks || []).filter(link => link.type === 'STREAMING')];
-    const kitsuId = anime.kitsuId || anime.id;
+    const kitsuId = anime.kitsuId || anime.id || anime.attributes?.kitsuId || anime.attributes?.id;
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel' || String(kitsuId).startsWith('v');
     const isAniList = anime.provider === 'anilist' || anime.attributes?.provider === 'anilist' || String(kitsuId).startsWith('anilist:');
     const isKitsu = (!!anime.attributes || !!anime.canonicalTitle) && !isVn && !isAniList;
@@ -1107,6 +1128,31 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const isOwner = userId === ownerId;
 
     useEffect(() => {
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        const onKeyDown = event => { if (event.key === 'Escape' && !loading) onClose(); };
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [onClose, loading]);
+
+    useEffect(() => {
+        if (!isAniList || !kitsuId) return;
+        let active = true;
+        setHydratedMedia(null);
+        setDetailsError("");
+        fetchMediaDetails(kitsuId)
+            .then(media => { if (active) setHydratedMedia(media); })
+            .catch(() => { if (active) setDetailsError("Extra details could not be loaded."); });
+        return () => { active = false; };
+    }, [isAniList, kitsuId]);
+
+    useEffect(() => {
+        let active = true;
+        setLogLoaded(false);
+        setLogError("");
         if (!db || !ownerId || !kitsuId) return;
         
         // Fetch Genres & Cast if not present
@@ -1144,13 +1190,14 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         const fetchUserData = async () => {
             try {
                 const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/animeList`, String(kitsuId));
-                const snap = await getDoc(docRef);
+                const snap = await getDocFromServer(docRef);
+                if (!active) return;
                 if (snap.exists()) {
                     const data = snap.data();
                     setExistingData(data);
-                    setStatus(data.status);
-                    setEpisodes(data.watchedEpisodes);
-                    setScore(data.score);
+                    setStatus(data.status === 'planning' ? 'planned' : data.status === 'on_hold' ? 'paused' : data.status || 'watching');
+                    setEpisodes(Number(data.watchedEpisodes || 0));
+                    setScore(Number(data.score || 0));
                     setNotes(data.notes || "");
                     setFavorite(Boolean(data.favorite));
                     setPriority(data.priority || "normal");
@@ -1165,17 +1212,28 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     setPlatform(data.platform || "");
                     if(data.genres) setFetchedGenres(data.genres); 
                 } else if (isOwner) {
+                    setExistingData(null);
                     setStatus("watching");
                     setEpisodes(0);
                     setScore(0);
                 }
-            } catch(e) { console.error(e); }
+                setLogLoaded(true);
+            } catch(e) {
+                console.error(e);
+                if (active) setLogError("Your log could not be loaded. Retry before making changes.");
+            }
         };
         fetchUserData();
-    }, [db, ownerId, kitsuId, isOwner, isKitsu]);
+        return () => { active = false; };
+    }, [db, ownerId, kitsuId, isOwner, isKitsu, loadAttempt]);
 
     const handleSave = async () => {
-        if (!isOwner) return;
+        if (!isOwner || readOnly || !db || !kitsuId || !logLoaded || loading) return;
+        if (startedAt && completedAt && completedAt < startedAt) {
+            setLogError("The finish date cannot be earlier than the start date.");
+            return;
+        }
+        setLogError("");
         setLoading(true);
         try {
             const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(kitsuId));
@@ -1188,7 +1246,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 imageUrl: poster,
                 totalEpisodes: totalEps,
                 status,
-                watchedEpisodes: Number(episodes),
+                watchedEpisodes: Math.max(0, Math.min(isVn ? 100 : Number(totalEps) > 0 ? Number(totalEps) : Infinity, Math.floor(Number(episodes) || 0))),
                 score: Number(score),
                 notes,
                 favorite,
@@ -1204,8 +1262,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
                 provider: anime.provider || anime.attributes?.provider || (isVn ? 'vndb' : isAniList ? 'anilist' : 'kitsu'),
                 anilistId: anime.anilistId || anime.attributes?.anilistId || null,
-                durationMinutes: Number(anime.durationMinutes || anime.attributes?.episodeLength || 0),
-                nextAiringEpisode: anime.nextAiringEpisode || anime.attributes?.nextAiringEpisode || null,
+                durationMinutes: Number(anime.durationMinutes || details.episodeLength || 0),
+                nextAiringEpisode: details.nextAiringEpisode || anime.nextAiringEpisode || null,
                 updatedAt: Date.now(),
             };
             
@@ -1243,6 +1301,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
             onClose();
         } catch (e) {
             console.error(e);
+            setLogError("Your log could not be saved. Please try again.");
         }
         setLoading(false);
     };
@@ -1263,21 +1322,24 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 fade-in" onClick={onClose}>
+        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 fade-in" onClick={() => { if (!loading) onClose(); }}>
             <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
             <motion.div 
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 className="relative flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#0e1014] shadow-2xl md:flex-row"
+                role="dialog"
+                aria-modal="true"
+                aria-label={title || 'Media details'}
                 onClick={e => e.stopPropagation()}
             >
-                <button onClick={onClose} className="absolute top-4 right-4 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-md border border-white/10 transition-colors">
+                <button onClick={onClose} disabled={loading} aria-label="Close details" title="Close details" className="absolute top-4 right-4 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-md border border-white/10 transition-colors">
                     <CloseIcon />
                 </button>
 
                 <div className="relative w-full md:w-1/3 h-64 md:h-auto flex-shrink-0">
-                    <img src={poster || "https://placehold.co/300x450"} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={poster || "https://placehold.co/300x450"} alt={title || ''} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent md:bg-gradient-to-r md:from-transparent md:to-[#0a0a0a]" />
                     {score > 0 && (
                         <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full border border-yellow-500/30 flex items-center gap-2">
@@ -1290,6 +1352,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     <div className="space-y-6">
                         <div>
                             <h2 className="text-3xl sm:text-4xl font-black text-white leading-tight mb-2">{title}</h2>
+                            {detailsError && <p role="status" className="mb-3 text-xs text-amber-300">{detailsError}</p>}
                             {synopsis && (
                                 <p className="text-gray-400 text-sm leading-relaxed line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">
                                     {synopsis}
@@ -1300,10 +1363,11 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     <span key={g} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase text-gray-300">{g}</span>
                                 ))}
                             </div>
-                            {(details.studios?.length > 0 || details.seasonYear || details.averageRating) && <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
+                            {(details.studios?.length > 0 || details.seasonYear || details.averageRating || details.estimatedLengthMinutes) && <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
                                 {details.studios?.[0] && <span><strong className="text-gray-300">Studio</strong> {details.studios[0].name}</span>}
                                 {details.seasonYear && <span><strong className="text-gray-300">Season</strong> {details.season} {details.seasonYear}</span>}
                                 {details.averageRating && <span><strong className="text-gray-300">Community</strong> {details.averageRating}%</span>}
+                                {isVn && details.estimatedLengthMinutes > 0 && <span><strong className="text-gray-300">Estimated length</strong> {(details.estimatedLengthMinutes / 60).toFixed(1)}h</span>}
                                 {details.nextAiringEpisode && <span className="text-blue-400"><strong>Episode {details.nextAiringEpisode.episode}</strong> airs in {Math.max(1, Math.ceil(details.nextAiringEpisode.timeUntilAiring / 86400))}d</span>}
                             </div>}
                         </div>
@@ -1356,7 +1420,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 <p className="mt-1 text-sm text-gray-400">Sign in or create a free account to track progress, ratings, and notes.</p>
                             </div>
                         ) : isOwner ? (
-                            <div className="space-y-6 bg-white/5 p-6 rounded-2xl border border-white/5 shadow-inner">
+                            <fieldset disabled={!logLoaded || loading} className="min-w-0 space-y-6 bg-white/5 p-6 rounded-2xl border border-white/5 shadow-inner disabled:opacity-60">
+                                {logError && !logLoaded && <legend className="px-2"><button onClick={() => setLoadAttempt(value => value + 1)} className="text-xs font-bold text-blue-300 hover:text-white">Retry loading log</button></legend>}
+                                {!logLoaded && !logError && <p role="status" className="text-sm text-gray-400">Loading your log...</p>}
+                                {logError && <div role="alert" className="text-sm text-red-300">{logError}</div>}
                                 <div className="flex justify-between items-center">
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Status</label>
                                 </div>
@@ -1364,7 +1431,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                         {['watching', 'completed', 'planned', 'paused', 'dropped'].map(s => (
                                             <button 
                                                 key={s} 
-                                                onClick={() => setStatus(s)}
+                                                onClick={() => { setStatus(s); if (s === 'completed' && (isVn || Number(totalEps) > 0)) setEpisodes(isVn ? 100 : Number(totalEps)); }}
                                                 className={`px-4 py-2 rounded-xl text-sm font-bold capitalize transition-all border ${status === s ? `bg-white text-black border-white shadow-lg` : 'bg-transparent text-gray-400 border-white/10 hover:border-white/30'}`}
                                             >
                                                 {s === 'watching' && isVn ? 'reading' : s}
@@ -1386,7 +1453,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                                 value={episodes}
                                                 onChange={(e) => setEpisodes(Number(e.target.value))}
                                                 className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${theme.progressbar.replace('bg-', 'bg-')}/30`}
-                                                style={{ backgroundSize: `${episodes}% 100%`, backgroundImage: `linear-gradient(${theme.accentBg.replace('bg-','').replace('hover:','')}, ${theme.accentBg.replace('bg-','').replace('hover:','')})`, backgroundRepeat: 'no-repeat' }}
+                                                aria-label="Reading progress"
                                             />
                                             <div className="flex gap-2">
                                                 <button onClick={() => setEpisodes(Math.max(0, episodes - 5))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">-5%</button>
@@ -1406,11 +1473,11 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                                 value={episodes}
                                                 onChange={(e) => setEpisodes(Number(e.target.value))}
                                                 className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${theme.progressbar.replace('bg-', 'bg-')}/30`}
-                                                style={{ backgroundSize: `${(episodes / (totalEps || 100)) * 100}% 100%`, backgroundImage: `linear-gradient(${theme.accentBg.replace('bg-','').replace('hover:','')}, ${theme.accentBg.replace('bg-','').replace('hover:','')})`, backgroundRepeat: 'no-repeat' }}
+                                                aria-label="Episodes watched"
                                             />
                                             <div className="flex gap-2">
                                                 <button onClick={() => setEpisodes(Math.max(0, episodes - 1))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">-</button>
-                                                <button onClick={() => setEpisodes(episodes + 1)} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">+</button>
+                                                <button onClick={() => setEpisodes(Math.min(Number(totalEps) > 0 ? Number(totalEps) : Infinity, episodes + 1))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">+</button>
                                             </div>
                                         </div>
                                     )}
@@ -1420,18 +1487,22 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                             <span>Score</span>
                                             <span className={score > 0 ? "text-yellow-400" : "text-gray-600"}>{score > 0 ? score : '-'}</span>
                                         </label>
-                                        <div className="flex gap-1">
+                                        <div className="flex gap-1" onMouseLeave={() => setHoverScore(null)}>
                                             {[1,2,3,4,5,6,7,8,9,10].map(s => (
                                                 <button 
                                                     key={s}
-                                                    onMouseEnter={() => setScore(s)} 
+                                                    onMouseEnter={() => setHoverScore(s)}
                                                     onClick={() => setScore(s)}
-                                                    className={`w-full aspect-square rounded-sm text-[0px] transition-colors ${s <= score ? 'bg-yellow-400 shadow-sm' : 'bg-gray-800'}`}
+                                                    aria-label={`Rate ${s} out of 10`}
+                                                    aria-pressed={s === score}
+                                                    title={`${s}/10`}
+                                                    className={`w-full aspect-square rounded-sm text-[0px] transition-colors ${s <= (hoverScore ?? score) ? 'bg-yellow-400 shadow-sm' : 'bg-gray-800'}`}
                                                 >
                                                     {s}
                                                 </button>
                                             ))}
                                         </div>
+                                        {score > 0 && <button onClick={() => setScore(0)} className="text-xs text-gray-400 hover:text-white">Clear rating</button>}
                                     </div>
                                 </div>
 
@@ -1475,12 +1546,12 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 <motion.button 
                                     whileTap={{ scale: 0.98 }}
                                     onClick={handleSave}
-                                    disabled={loading}
+                                    disabled={loading || !logLoaded}
                                     className={`w-full py-4 rounded-xl font-black text-white shadow-lg ${theme.button} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                     {loading ? "Saving..." : "Update Log"}
                                 </motion.button>
-                            </div>
+                            </fieldset>
                         ) : (
                             <div className="space-y-6 bg-white/5 p-6 rounded-2xl border border-white/5">
                                 <div className="flex items-center justify-between">
@@ -1491,7 +1562,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 </div>
                                 <div className="flex justify-between items-center border-b border-white/5 pb-4">
                                     <span className="text-gray-400 font-bold">Progress</span>
-                                    <span className="text-white font-mono text-lg">{episodes} <span className="text-gray-600">/ {totalEps || '?'}</span></span>
+                                    <span className="text-white font-mono text-lg">{isVn ? `${episodes}% read` : <>{episodes} <span className="text-gray-600">/ {totalEps || '?'}</span></>}</span>
                                 </div>
                                 {notes && (
                                     <div className="bg-black/30 p-4 rounded-xl border-l-4 border-gray-600">
@@ -1637,7 +1708,7 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
 
             {selectedAnime && (
                 <AnimeDetailsModal 
-                    anime={selectedAnime.attributes ? selectedAnime : { attributes: selectedAnime }} 
+                    anime={selectedAnime.attributes ? selectedAnime : { ...selectedAnime, attributes: selectedAnime }}
                     onClose={() => setSelectedAnime(null)} 
                     db={db} 
                     userId={userId} 
@@ -1856,9 +1927,7 @@ export function StatsPage({ db, userId, username }) {
     let planningCount = 0;
 
     // Score distribution
-    const scoreCounts = Array(10).fill(0);
-    let ratedCount = 0;
-    let sumScores = 0;
+    const scores = scoreSummary(myList);
 
     for (const anime of myList) {
       const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel';
@@ -1877,14 +1946,6 @@ export function StatsPage({ db, userId, username }) {
         planningCount++;
       }
 
-      // Score counting
-      const score = Number(anime.score || 0);
-      if (score >= 1 && score <= 10) {
-        scoreCounts[score - 1]++;
-        ratedCount++;
-        sumScores += score;
-      }
-
       if (isVn) {
         totalMinutes += Number(anime.vnPlaytimeHours || 0) * 60;
         if (anime.status === 'completed') {
@@ -1897,7 +1958,7 @@ export function StatsPage({ db, userId, username }) {
       } else {
         const eps = anime.status === 'completed' && anime.totalEpisodes > 0 ? anime.totalEpisodes : (anime.watchedEpisodes || 0);
         totalEpisodesWatched += eps;
-        totalMinutes += eps * AVG_EPISODE_MINUTES;
+        totalMinutes += eps * (Number(anime.durationMinutes) > 0 ? Number(anime.durationMinutes) : AVG_EPISODE_MINUTES);
 
         if (anime.status === "completed") {
           completed.push(anime);
@@ -1906,19 +1967,7 @@ export function StatsPage({ db, userId, username }) {
       }
     }
 
-    const meanScore = ratedCount > 0 ? (sumScores / ratedCount).toFixed(1) : "0.0";
-    
-    // Median Score
-    const sortedScores = myList.filter(a => Number(a.score || 0) > 0).map(a => Number(a.score)).sort((a, b) => a - b);
-    let medianScore = "0.0";
-    if (sortedScores.length > 0) {
-      const mid = Math.floor(sortedScores.length / 2);
-      if (sortedScores.length % 2 !== 0) {
-        medianScore = sortedScores[mid].toFixed(1);
-      } else {
-        medianScore = ((sortedScores[mid - 1] + sortedScores[mid]) / 2).toFixed(1);
-      }
-    }
+    const { ratedCount } = scores;
 
     const animeCount = myList.filter(a => !(a.mediaType === 'vn' || a.showType === 'Visual Novel')).length;
     const vnCount = myList.filter(a => (a.mediaType === 'vn' || a.showType === 'Visual Novel')).length;
@@ -1954,11 +2003,7 @@ export function StatsPage({ db, userId, username }) {
         total: myList.length || 1
       },
       scoreDistribution: {
-        counts: scoreCounts,
-        meanScore,
-        medianScore,
-        ratedCount,
-        maxCount: Math.max(...scoreCounts) || 1
+        ...scores,
       },
       formatDistribution: {
         animeCount,
@@ -2307,15 +2352,10 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   const [error, setError] = useState("");
   const [lastImport, setLastImport] = useState(null);
 
-  const existingIds = useMemo(() => new Set(myList.map(item => String(item.kitsuId || item.id))), [myList]);
-  const existingTitles = useMemo(() => new Set(myList.map(item => normalizeTitle(item.title || '')).filter(Boolean)), [myList]);
-  const importableEntries = useMemo(() => {
-    if (!preview) return [];
-    return preview.entries.filter(entry => updateExisting || (
-      !existingIds.has(String(entry.kitsuId)) && !existingTitles.has(normalizeTitle(entry.title || ''))
-    ));
-  }, [existingIds, existingTitles, preview, updateExisting]);
-  const conflictingEntries = useMemo(() => preview ? preview.entries.filter(entry => existingIds.has(String(entry.kitsuId)) || existingTitles.has(normalizeTitle(entry.title || ''))) : [], [existingIds, existingTitles, preview]);
+  const [freshList, setFreshList] = useState(null);
+  const importPlan = useMemo(() => planImport(preview?.entries || [], freshList || myList, updateExisting, normalizeTitle), [preview, freshList, myList, updateExisting]);
+  const importableEntries = importPlan.filter(item => item.importable).map(item => item.entry);
+  const conflictingEntries = importPlan.filter(item => item.reason !== 'Add');
 
   const statusCounts = useMemo(() => {
     if (!preview) return {};
@@ -2335,6 +2375,8 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
     try {
       const result = await getAniListUserAnimeList(cleanName);
       if (!result.user) throw new Error("AniList user not found or their anime list is private.");
+      const current = await getDocsFromServer(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
+      setFreshList(current.docs.map(entry => ({ ...entry.data(), id: entry.id })));
       setPreview(result);
     } catch (importError) {
       console.error("AniList preview failed", importError);
@@ -2349,21 +2391,32 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
     setImporting(true);
     setError("");
     try {
-      for (let offset = 0; offset < importableEntries.length; offset += 400) {
-        const batch = writeBatch(db);
-        importableEntries.slice(offset, offset + 400).forEach(entry => {
-          const entryRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(entry.kitsuId));
-          batch.set(entryRef, entry, { merge: true });
+      const current = await getDocsFromServer(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
+      const currentList = current.docs.map(entry => ({ ...entry.data(), id: entry.id }));
+      setFreshList(currentList);
+      const plan = planImport(preview.entries, currentList, updateExisting, normalizeTitle);
+      const imported = [];
+      for (const { entry, importable } of plan) {
+        if (!importable) continue;
+        const entryRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(entry.kitsuId));
+        const saved = await runTransaction(db, async transaction => {
+          const snapshot = await transaction.get(entryRef);
+          if (snapshot.exists() && !updateExisting) return null;
+          const existing = snapshot.exists() ? snapshot.data() : undefined;
+          const payload = importPayload(entry, existing);
+          transaction.set(entryRef, payload, { merge: true });
+          return { ...existing, ...payload, id: entryRef.id };
         });
-        await batch.commit();
+        if (saved) imported.push(saved);
       }
-      onImported(importableEntries);
-      setLastImport({ username: preview.user.name, imported: importableEntries.length, skipped: preview.entries.length - importableEntries.length });
-      showToast(`Imported ${importableEntries.length} AniList ${importableEntries.length === 1 ? 'entry' : 'entries'}!`, 'success');
+      onImported(imported);
+      setLastImport({ username: preview.user.name, imported: imported.length, skipped: preview.entries.length - imported.length });
+      showToast(`Imported ${imported.length} AniList ${imported.length === 1 ? 'entry' : 'entries'}!`, 'success');
       setPreview(null);
       setAniListUsername("");
     } catch (importError) {
       console.error("AniList import failed", importError);
+      setPreview(null);
       setError("The import stopped before completion. Entries already written are safe; you can run it again to continue.");
       showToast("AniList import could not finish.", 'error');
     } finally {
@@ -2392,7 +2445,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
           placeholder="AniList username"
           className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/40 px-5 py-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
         />
-        <button type="submit" disabled={loadingPreview || !anilistUsername.trim()} className="rounded-2xl bg-blue-600 px-6 py-4 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
+        <button type="submit" disabled={importing || loadingPreview || !anilistUsername.trim()} className="rounded-2xl bg-blue-600 px-6 py-4 text-sm font-black text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
           {loadingPreview ? "Checking…" : "Review Import"}
         </button>
       </form>
@@ -2401,7 +2454,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
       {lastImport && !preview && (
         <div className="mt-4 flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200 sm:flex-row sm:items-center sm:justify-between">
           <span><strong>{lastImport.imported}</strong> entries imported from {lastImport.username}.</span>
-          <span className="text-xs text-emerald-300/70">{lastImport.skipped} duplicates preserved</span>
+          <span className="text-xs text-emerald-300/70">{lastImport.skipped} entries skipped</span>
         </div>
       )}
 
@@ -2421,13 +2474,13 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
 
           <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-white/5 p-4">
             <label className="flex cursor-pointer items-center gap-3 text-sm text-gray-300">
-              <input type="checkbox" checked={updateExisting} onChange={event => setUpdateExisting(event.target.checked)} className="h-4 w-4 accent-blue-500" />
-              Overwrite previously imported AniList entries
+              <input type="checkbox" checked={updateExisting} disabled={importing} onChange={event => setUpdateExisting(event.target.checked)} className="h-4 w-4 accent-blue-500" />
+              Overwrite exact AniList IDs (keep local notes and settings)
             </label>
             <span className="whitespace-nowrap text-xs text-gray-500">{preview.entries.length - importableEntries.length} skipped</span>
           </div>
 
-          {conflictingEntries.length > 0 && <details className="mt-3 rounded-xl border border-amber-500/15 bg-amber-500/[0.04] p-4"><summary className="cursor-pointer text-xs font-bold text-amber-300">Review {conflictingEntries.length} existing {conflictingEntries.length === 1 ? 'match' : 'matches'}</summary><div className="mt-3 grid gap-2 sm:grid-cols-2">{conflictingEntries.slice(0, 12).map(entry => <div key={entry.kitsuId} className="flex items-center justify-between gap-3 rounded-lg bg-black/20 px-3 py-2"><span className="truncate text-xs text-gray-300">{entry.title}</span><span className={`shrink-0 text-[9px] font-black uppercase ${updateExisting ? 'text-amber-300' : 'text-gray-600'}`}>{updateExisting ? 'Update' : 'Keep AniLog'}</span></div>)}</div>{conflictingEntries.length > 12 && <p className="mt-2 text-[10px] text-gray-600">And {conflictingEntries.length - 12} more matches.</p>}</details>}
+          {conflictingEntries.length > 0 && <details className="mt-3 rounded-xl border border-amber-500/15 bg-amber-500/[0.04] p-4"><summary className="cursor-pointer text-xs font-bold text-amber-300">Review {conflictingEntries.length} existing matches or duplicates</summary><div className="mt-3 grid gap-2 sm:grid-cols-2">{conflictingEntries.slice(0, 12).map(({ entry, reason }, index) => <div key={`${entry.kitsuId}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-black/20 px-3 py-2"><span className="truncate text-xs text-gray-300">{entry.title}</span><span className="shrink-0 text-[9px] font-black uppercase text-amber-300">{reason}</span></div>)}</div>{conflictingEntries.length > 12 && <p className="mt-2 text-[10px] text-gray-600">And {conflictingEntries.length - 12} more matches.</p>}</details>}
 
           <button onClick={importList} disabled={importing || importableEntries.length === 0} className="mt-4 w-full rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4 text-sm font-black text-white shadow-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">
             {importing ? "Importing…" : `Import ${importableEntries.length} ${importableEntries.length === 1 ? 'Entry' : 'Entries'}`}
@@ -2438,20 +2491,14 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   );
 }
 
-function LibraryResetPanel({ db, userId, username, myList, activityData, onReset, showToast }) {
+function LibraryResetPanel({ db, userId, username, myList, activityData: _activityData, onReset, showToast }) {
   const confirmationPhrase = 'DELETE MY LIBRARY';
   const [isOpen, setIsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [backupReady, setBackupReady] = useState(true);
 
-  const downloadBackup = (activities = activityData) => {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      username,
-      animeList: myList,
-      activity: activities,
-    };
+  const downloadBackup = (payload) => {
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -2460,33 +2507,52 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   const resetLibrary = async () => {
     if (confirmation !== confirmationPhrase || isResetting) return;
     setIsResetting(true);
     try {
-      const listSnapshot = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
-      const activitySnapshot = await getDocs(query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', userId)));
-      const fullActivity = activitySnapshot.docs.map(activityDoc => activityDoc.data());
-
-      if (backupReady) downloadBackup(fullActivity);
-
-      const refs = [...listSnapshot.docs, ...activitySnapshot.docs].map(snapshotDoc => snapshotDoc.ref);
-      for (let offset = 0; offset < refs.length; offset += 400) {
-        const batch = writeBatch(db);
-        refs.slice(offset, offset + 400).forEach(ref => batch.delete(ref));
-        await batch.commit();
+      const profileRef = doc(db, `artifacts/${appId}/public/data/users/${userId}`);
+      const [listSnapshot, activitySnapshot, profileSnapshot] = await Promise.all([
+        getDocsFromServer(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`)),
+        getDocsFromServer(query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', userId))),
+        getDocFromServer(profileRef),
+      ]);
+      if (!profileSnapshot.exists()) throw new Error('Profile no longer exists.');
+      if (backupReady) {
+        const fullActivity = await Promise.all(activitySnapshot.docs.map(async activityDoc => {
+          const interactions = await getDocsFromServer(collection(activityDoc.ref, 'interactions'));
+          return { ...activityDoc.data(), id: activityDoc.id, interactions: interactions.docs.map(item => ({ ...item.data(), id: item.id })) };
+        }));
+        const fullList = listSnapshot.docs.map(item => ({ ...item.data(), id: item.id }));
+        downloadBackup(resetBackup(username, fullList, fullActivity, profileSnapshot.data().hallOfFame || []));
       }
-      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: Array(10).fill(null) });
+
+      const records = [...listSnapshot.docs, ...activitySnapshot.docs];
+      for (let offset = 0; offset < records.length; offset += 400) {
+        const chunk = records.slice(offset, offset + 400);
+        await runTransaction(db, async transaction => {
+          const current = await Promise.all(chunk.map(record => transaction.get(record.ref)));
+          if (current.some((record, index) => record.exists() && !snapshotEqual(record, chunk[index]))) {
+            throw new Error('Tracking data changed during reset. Download a fresh backup and try again.');
+          }
+          current.forEach(record => { if (record.exists()) transaction.delete(record.ref); });
+        });
+      }
+      await runTransaction(db, async transaction => {
+        const current = await transaction.get(profileRef);
+        if (!snapshotEqual(current, profileSnapshot)) throw new Error('Profile changed during reset. Please try again.');
+        transaction.update(profileRef, { hallOfFame: Array(10).fill(null) });
+      });
       onReset();
       setConfirmation('');
       setIsOpen(false);
       showToast(`Library reset complete. ${listSnapshot.size} entries removed.`, 'success');
     } catch (resetError) {
       console.error('Library reset failed', resetError);
-      showToast('Library reset could not finish. Please try again.', 'error');
+      showToast('Reset stopped. Some entries may already be removed. Download a fresh backup before retrying.', 'error');
     } finally {
       setIsResetting(false);
     }
@@ -2515,7 +2581,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData, onReset
             </div>
 
             <label className="mt-6 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-              <input type="checkbox" checked={backupReady} onChange={event => setBackupReady(event.target.checked)} className="h-4 w-4 accent-red-500" />
+              <input type="checkbox" checked={backupReady} disabled={isResetting} onChange={event => setBackupReady(event.target.checked)} className="h-4 w-4 accent-red-500" />
               Download a JSON backup before deleting
             </label>
 

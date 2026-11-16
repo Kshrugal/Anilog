@@ -22,6 +22,28 @@ https://anilog.app/
 - **Visual Novel Data:** VNDB Kana API
 - **Icons:** Lucide React
 
+## Local Development
+
+Run `npm ci`, then `npm run dev`. Without Firebase environment variables,
+Search, Discover, and Schedule remain available in read-only guest mode.
+Account and community features require the Firebase values in `.env.example`.
+Never commit a populated environment file.
+
+`npm run check` runs lint, TypeScript checks, source regression checks,
+mocked behavioral tests, the production build, and route smoke tests.
+The behavioral tests do not read or modify production Firebase data.
+
+## Deployment Troubleshooting
+
+Cloud Run can report a healthy revision while requests fail because project
+billing is disabled. Check the request's `textPayload` in Cloud Run Logs before
+changing application code. Billing must be restored by the project owner in
+Google Cloud; a source-code deployment cannot restore it.
+
+Both deployment workflows now check the deployed routes before reporting success.
+These HTTP checks verify that AniLog HTML is served, not authenticated database
+operations or browser rendering. Preview never deploys Firestore rules.
+
 ## 🔒 Security & Deployment
 
 ### Firestore Security Rules

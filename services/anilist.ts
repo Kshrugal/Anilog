@@ -21,27 +21,25 @@ const MEDIA_FIELDS = `
 async function queryAniList(query: string, variables: Record<string, unknown> = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
-  let response: Response;
   try {
-    response = await fetch(ANILIST_API_URL, {
+    const response = await fetch(ANILIST_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ query, variables }),
       signal: controller.signal,
     });
+    const payload = await response.json();
+    if (!response.ok || payload.errors?.length) {
+      const message = payload.errors?.[0]?.message || `AniList request failed (${response.status})`;
+      throw new Error(message);
+    }
+    return payload.data;
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw new Error('AniList took too long to respond. Please try again.', { cause: error });
     throw error;
   } finally {
     clearTimeout(timeout);
   }
-
-  const payload = await response.json();
-  if (!response.ok || payload.errors?.length) {
-    const message = payload.errors?.[0]?.message || `AniList request failed (${response.status})`;
-    throw new Error(message);
-  }
-  return payload.data;
 }
 
 function cleanDescription(description = '') {
@@ -236,7 +234,17 @@ export async function getAniListUserAnimeList(userName: string) {
   }`, { userName });
 
   const collection = data.MediaListCollection;
-  const entries = (collection?.lists || []).flatMap((list: any) => list.entries || []);
+  const rawEntries = (collection?.lists || []).flatMap((list: any) => list.entries || []);
+  // A title may appear in both standard and custom lists. A private copy must
+  // exclude that ID entirely, rather than exposing notes from another copy.
+  const privateIds = new Set(rawEntries.filter((entry: any) => entry.private).map((entry: any) => entry.media?.id));
+  const seenIds = new Set();
+  const entries = rawEntries.filter((entry: any) => {
+    const id = entry.media?.id;
+    if (id == null || privateIds.has(id) || seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
   return {
     user: collection?.user,
     entries: entries.map((entry: any) => {
