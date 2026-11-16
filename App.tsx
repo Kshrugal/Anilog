@@ -41,6 +41,8 @@ import {
     AnimatePresence, 
     useSpring, 
     useTransform, 
+    useMotionValue,
+    useMotionTemplate,
 } from "framer-motion";
 import { 
   Search as SearchIcon, 
@@ -55,13 +57,10 @@ import {
   Heart as HeartIcon,
   FileText as DocumentTextIcon,
   Compass as CompassIcon,
-  List as LibraryIcon,
   Bell as BellIcon,
   CalendarDays as ScheduleIcon,
   Layers3 as DecksIcon,
   Menu as MenuIcon,
-  PanelLeftClose,
-  PanelLeftOpen,
 } from 'lucide-react';
 // Removed AI and GenreGalaxy imports as requested
 
@@ -92,11 +91,10 @@ export const APP_NAME = "AniLog";
 const CREATOR_NAME = "KshrugalJain";
 const IS_PREVIEW = import.meta.env.VITE_DEPLOY_ENV === 'preview';
 
-export function AniLogMark({ className = "h-9 w-9" }) {
+export function AniLogMark({ className = "text-2xl" }) {
   return (
-    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-[10px] bg-[#f5f7fa] text-[#0b0d10] shadow-[0_0_0_1px_rgba(255,255,255,.15)] ${className}`} aria-hidden="true">
-      <span className="text-[13px] font-black tracking-[-0.18em]">AL</span>
-      <span className="absolute bottom-1 left-1.5 flex items-end gap-[2px]"><i className="h-1 w-1 rounded-sm bg-blue-500" /><i className="h-1.5 w-1 rounded-sm bg-purple-500" /><i className="h-2 w-1 rounded-sm bg-cyan-500" /></span>
+    <span className={`inline-flex items-center font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-500 via-purple-500 to-cyan-500 ${className}`}>
+      {APP_NAME}
     </span>
   );
 }
@@ -312,6 +310,8 @@ export const ThemeContext = createContext({
   setThemeId: (id) => {},
   viewMode: 'grid',
   setViewMode: (mode) => {},
+  showTrail: true,
+  setShowTrail: (show) => {},
   setPage: (page) => {},
   sidebarCollapsed: false,
   setSidebarCollapsed: (collapsed) => {},
@@ -442,6 +442,47 @@ export function StarField({ active }) {
 
   if(!active) return null;
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0 opacity-60" />;
+}
+
+function MouseTrail({ themeId, active }) {
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const smoothX = useSpring(x, { stiffness: 500, damping: 20 }); // Smoother
+  const smoothY = useSpring(y, { stiffness: 500, damping: 20 });
+  const colors = {
+      neon: 'rgba(59, 130, 246, 0.4)',
+      toxic: 'rgba(132, 204, 22, 0.4)',
+      sunset: 'rgba(244, 63, 94, 0.4)',
+      indigo: 'rgba(99, 102, 241, 0.4)',
+      orange: 'rgba(249, 115, 22, 0.4)',
+      monochrome: 'rgba(255, 255, 255, 0.3)',
+      emerald: 'rgba(16, 185, 129, 0.4)'
+  };
+
+  useEffect(() => {
+    if (!active) return;
+    const updateMouse = (e) => {
+      x.set(e.clientX);
+      y.set(e.clientY);
+    };
+    window.addEventListener('mousemove', updateMouse);
+    return () => window.removeEventListener('mousemove', updateMouse);
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <>
+        <motion.div
+            style={{ x: smoothX, y: smoothY, backgroundColor: colors[themeId] || colors.neon }}
+            className="fixed top-0 left-0 w-32 h-32 rounded-full blur-[60px] pointer-events-none z-[0] -translate-x-1/2 -translate-y-1/2 mix-blend-screen opacity-20"
+        />
+        <motion.div
+            style={{ x: smoothX, y: smoothY, backgroundColor: colors[themeId] || colors.neon }}
+            className="fixed top-0 left-0 w-4 h-4 rounded-full blur-sm pointer-events-none z-[9999] -translate-x-1/2 -translate-y-1/2 mix-blend-screen"
+        />
+    </>
+  )
 }
 
 export function AnimatedCounter({ value }) {
@@ -576,6 +617,32 @@ export function AnimeCarouselSkeleton({ title }) {
 export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, viewMode = 'grid' }) {
     const { theme } = useContext(ThemeContext);
     
+    const mouseX = useMotionValue(0);
+    const mouseY = useMotionValue(0);
+    const rotateX = useTransform(mouseY, [-0.5, 0.5], ["15deg", "-15deg"]);
+    const rotateY = useTransform(mouseX, [-0.5, 0.5], ["-15deg", "15deg"]);
+    const sheenGradient = useMotionTemplate`radial-gradient(
+      circle at ${useTransform(mouseX, [-0.5, 0.5], ["0%", "100%"])} ${useTransform(mouseY, [-0.5, 0.5], ["0%", "100%"])},
+      rgba(255, 255, 255, 0.15),
+      transparent 80%
+    )`;
+    const handleMouseMove = (e) => {
+        if (viewMode === 'list') return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        const mouseXPos = e.clientX - rect.left;
+        const mouseYPos = e.clientY - rect.top;
+        const xPct = mouseXPos / width - 0.5;
+        const yPct = mouseYPos / height - 0.5;
+        mouseX.set(xPct);
+        mouseY.set(yPct);
+    };
+    const handleMouseLeave = () => {
+        mouseX.set(0);
+        mouseY.set(0);
+    };
+
     const title = anime.title || anime.canonicalTitle || anime.attributes?.canonicalTitle || "Unknown Anime";
     const image = anime.imageUrl || 
                   anime.posterImage?.large || 
@@ -657,14 +724,18 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
             style={{
                 perspective: 1000
             }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
             onClick={onCardClick}
             className="group relative flex flex-col cursor-pointer"
         >
             <motion.div 
-                className="relative mb-3 aspect-[2/3] overflow-hidden rounded-lg border border-[#282d35] bg-[#14171c] shadow-sm"
+                style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
+                className="relative aspect-[2/3] rounded-xl overflow-hidden mb-3 shadow-lg border border-white/5 bg-gray-900"
             >
-                <img src={image || "https://placehold.co/200x300?text=No+Image"} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" loading="lazy" alt={title} referrerPolicy="no-referrer" />
+                <img src={image || "https://placehold.co/200x300?text=No+Image"} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" alt={title} referrerPolicy="no-referrer" />
                 
+                <motion.div style={{ background: sheenGradient }} className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-20 mix-blend-overlay" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10"></div>
                 
                 {score > 0 && (
@@ -986,6 +1057,51 @@ function NotificationCenter({ db, userId, onClose, setPage }) {
   );
 }
 
+function HeaderTools({ guestMode, setPage, onCommands, onNotifications }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+  const tools = [
+    { label: 'Schedule', Icon: ScheduleIcon, action: () => setPage('schedule') },
+    { label: 'Decks', Icon: DecksIcon, action: () => setPage('decks') },
+    { label: 'Commands', Icon: SearchIcon, action: onCommands },
+    ...(!guestMode ? [{ label: 'Notifications', Icon: BellIcon, action: onNotifications }] : []),
+  ];
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const onPointerDown = (event) => {
+      if (!menuRef.current?.contains(event.target)) setIsOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <div className="hidden items-center space-x-2 sm:flex">
+        {tools.map(({ label, Icon, action }) => <motion.button key={label} whileTap={{ scale: 0.9 }} onClick={action} title={label} aria-label={label} className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/5"><Icon className="w-5 h-5" /></motion.button>)}
+      </div>
+      <div ref={menuRef} className="relative sm:hidden">
+        <motion.button ref={triggerRef} type="button" whileTap={{ scale: 0.9 }} onClick={() => setIsOpen(open => !open)} title="More tools" aria-label="More tools" aria-expanded={isOpen} aria-controls="header-tools-menu" className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/5"><MenuIcon className="h-5 w-5" /></motion.button>
+        {isOpen && <nav id="header-tools-menu" aria-label="More tools" className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-white/10 bg-[#0a0a0a]/95 p-2 shadow-2xl backdrop-blur-2xl">
+          {tools.map(({ label, Icon, action }) => <button key={label} type="button" onClick={() => { setIsOpen(false); triggerRef.current?.focus(); action(); }} className="flex w-full items-center gap-3 rounded-lg p-3 text-left text-sm text-gray-300 hover:bg-white/10 hover:text-white"><Icon className="h-5 w-5" />{label}</button>)}
+        </nav>}
+      </div>
+    </>
+  );
+}
+
 // --- Main App Component ---
 export default function App() {
   const location = useLocation();
@@ -999,7 +1115,6 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const page = getPageFromPath(location.pathname);
   const targetProfileUid = useMemo(() => {
     if (page !== 'user_profile') return null;
@@ -1058,6 +1173,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('anilog_sidebar_collapsed') === 'true');
   const [density, setDensity] = useState(() => localStorage.getItem('anilog_density') || 'comfortable');
   const [showQuickTip, setShowQuickTip] = useState(() => localStorage.getItem('anilog_quick_tip') !== 'false');
+  const [showTrail, setShowTrail] = useState(() => localStorage.getItem('anilog_trail') !== 'false');
 
   // Effects to save state
   useEffect(() => localStorage.setItem('anilog_theme', themeId), [themeId]);
@@ -1065,6 +1181,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('anilog_sidebar_collapsed', String(sidebarCollapsed)), [sidebarCollapsed]);
   useEffect(() => localStorage.setItem('anilog_density', density), [density]);
   useEffect(() => localStorage.setItem('anilog_quick_tip', String(showQuickTip)), [showQuickTip]);
+  useEffect(() => localStorage.setItem('anilog_trail', String(showTrail)), [showTrail]);
 
   // Global Keybind for Command Palette
   useEffect(() => {
@@ -1322,17 +1439,58 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
-      <div className="min-h-screen bg-[#0b0d10] text-gray-100 font-sans flex flex-col relative selection:bg-blue-500/30">
+      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
+      <div className="min-h-screen bg-[#050505] text-gray-100 font-sans flex flex-col relative overflow-hidden selection:bg-white/20">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
-        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} />}
         
+        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} />}
+        <StarField active={true} />
+        <MouseTrail themeId={themeId} active={showTrail} />
+
         <PreviewBanner />
-        <header className="sticky top-0 z-50 flex h-16 items-center border-b border-[#242830] bg-[#0b0d10]/95 px-4 backdrop-blur-xl lg:px-6">
-          <button className={`flex items-center gap-3 text-left transition-[width] ${sidebarCollapsed ? 'w-14' : 'w-52'}`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}><AniLogMark /><span className={`text-lg font-black tracking-tight text-white transition-opacity ${sidebarCollapsed ? 'hidden' : 'block'}`}>AniLog</span></button>
-          <button onClick={() => setIsCmdOpen(true)} className="mx-auto hidden w-full max-w-xl items-center gap-3 rounded-lg border border-[#2a2f38] bg-[#14171c] px-4 py-2.5 text-left text-sm text-gray-500 transition-colors hover:border-[#3a414c] hover:text-gray-300 sm:flex"><SearchIcon className="h-4 w-4" /><span className="flex-1">Search anime, users, and commands</span><kbd className="rounded border border-[#333943] bg-[#1b1f25] px-2 py-0.5 text-[10px]">⌘K</kbd></button>
-          <div className="ml-auto flex w-52 justify-end gap-1">{!guestMode && <button onClick={() => setIsNotificationsOpen(true)} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white" title="Notifications"><BellIcon className="h-5 w-5" /></button>}{!guestMode && <button onClick={() => setPage('profile')} className="rounded-lg p-2.5 text-gray-500 hover:bg-[#191d23] hover:text-white"><ProfileIcon className="h-5 w-5" /></button>}<button onClick={guestMode ? leaveGuestMode : handleLogout} className="rounded-lg p-2.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400"><LogoutIcon className="h-5 w-5" /></button></div>
+
+        {/* Dynamic Nebula - Physics Based */}
+        <div className="fixed inset-0 pointer-events-none overflow-hidden">
+          <motion.div
+            animate={{
+              x: [0, 50, -50, 0],
+              y: [0, -30, 30, 0],
+              scale: [1, 1.2, 1],
+              opacity: [0.15, 0.25, 0.15]
+            }}
+            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+            className={`absolute top-[-20%] left-[-10%] w-[800px] h-[800px] rounded-full blur-[150px] mix-blend-screen ${theme.accentBg.replace('bg-', 'bg-')}`}
+          />
+          <motion.div
+            animate={{
+              x: [0, -50, 50, 0],
+              y: [0, 30, -30, 0],
+              scale: [1, 1.3, 1],
+              opacity: [0.1, 0.2, 0.1]
+            }}
+            transition={{ duration: 25, repeat: Infinity, ease: "linear", delay: 2 }}
+            className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-purple-900/30 rounded-full blur-[150px] mix-blend-screen"
+          />
+        </div>
+        <header className="sticky top-0 z-30 bg-[#050505]/60 backdrop-blur-xl border-b border-white/5">
+          <nav className="container mx-auto px-4 py-3 flex flex-wrap gap-x-1 gap-y-2 justify-between items-center">
+            <button type="button" aria-label="AniLog home" className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}>
+              {APP_NAME}
+            </button>
+            <div className="ml-auto flex shrink-0 items-center space-x-0.5 sm:space-x-2">
+              <HeaderTools guestMode={guestMode} setPage={setPage} onCommands={() => setIsCmdOpen(true)} onNotifications={() => setIsNotificationsOpen(true)} />
+              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("stats")} title="Stats" className={`p-2 rounded-full transition-all duration-300 ${page === "stats" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
+                <StatsIcon />
+              </motion.button>}
+              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
+                <ProfileIcon />
+              </motion.button>}
+              <motion.button whileTap={{ scale: 0.9 }} onClick={guestMode ? leaveGuestMode : handleLogout} title={guestMode ? "Sign in" : "Logout"} className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
+                <LogoutIcon />
+              </motion.button>
+            </div>
+          </nav>
         </header>
 
         {guestMode && (
@@ -1341,15 +1499,9 @@ export default function App() {
           </div>
         )}
 
-        <div className="mx-auto flex w-full max-w-[1680px] flex-1">
-        <aside className={`sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col border-r border-[#242830] bg-[#0d0f12] p-3 transition-[width] duration-200 md:flex ${sidebarCollapsed ? 'w-[72px]' : 'w-60'}`}>
-          <button onClick={() => setSidebarCollapsed(value => !value)} className={`mb-3 flex items-center rounded-lg p-2 text-gray-500 transition-colors hover:bg-[#191d23] hover:text-white ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}><span className={`text-[10px] font-bold uppercase tracking-[0.18em] ${sidebarCollapsed ? 'hidden' : 'block'}`}>Workspace</span>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}</button>
-          <nav className="space-y-1">{(guestMode ? ['search','discovery','schedule','decks','social'] : ['home','search','discovery','schedule','decks','social','stats','profile']).map(navItem => { const labels={home:'Library',search:'Search',discovery:'Discover',schedule:'Schedule',decks:'Decks',social:'Community',stats:'Insights',profile:'Profile'}; const icons={home:LibraryIcon,search:SearchIcon,discovery:CompassIcon,schedule:ScheduleIcon,decks:DecksIcon,social:SocialIcon,stats:StatsIcon,profile:ProfileIcon}; const Icon=icons[navItem]; return <button key={navItem} title={labels[navItem]} onClick={() => setPage(navItem)} className={`relative flex w-full items-center rounded-lg py-2.5 text-sm font-semibold transition-colors ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} ${page===navItem?'bg-[#20252d] text-white':'text-gray-500 hover:bg-[#171a1f] hover:text-gray-200'}`}><Icon className={`h-[18px] w-[18px] shrink-0 ${page===navItem?theme.accentText:''}`} /><span className={sidebarCollapsed ? 'hidden' : 'block'}>{labels[navItem]}</span>{page===navItem && sidebarCollapsed && <span className={`absolute left-0 h-5 w-0.5 rounded-r ${theme.accentBg}`} />}</button>})}</nav>
-          {showQuickTip && !sidebarCollapsed && <div className="mt-auto rounded-xl border border-[#242830] bg-[#14171c] p-4"><p className="text-xs font-bold text-white">Quick tip</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Press ⌘K anywhere to navigate or change themes.</p></div>}
-        </aside>
-        <main className={`z-10 flex min-w-0 flex-1 flex-col p-4 pb-28 pt-7 ${density === 'compact' ? 'sm:p-5 lg:p-6' : 'sm:p-7 lg:p-10'}`}>
+        <main className={`flex-grow min-w-0 w-full container mx-auto p-4 pb-32 z-10 ${density === "compact" ? "sm:px-3" : "sm:px-4"}`}>
           <AnimatePresence mode="popLayout">
-            <motion.div className="flex-1" key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
+            <motion.div key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
                 {renderPage()}
               </Suspense>
@@ -1358,43 +1510,41 @@ export default function App() {
           
           <FooterInfo />
         </main>
-        </div>
 
-        {isMobileMoreOpen && !guestMode && <div className="fixed inset-0 z-[55] bg-black/65 md:hidden" onClick={() => setIsMobileMoreOpen(false)}><div className="absolute inset-x-3 bottom-20 rounded-xl border border-white/10 bg-[#12151a] p-3 shadow-2xl" onClick={event => event.stopPropagation()}><p className="px-2 pb-2 text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">More AniLog</p>{[{item:'discovery',label:'Discover',Icon:CompassIcon},{item:'decks',label:'Decks',Icon:DecksIcon},{item:'stats',label:'Insights',Icon:StatsIcon},{item:'profile',label:'Profile',Icon:ProfileIcon}].map(({item,label,Icon}) => <button key={item} onClick={() => { setPage(item); setIsMobileMoreOpen(false); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-bold ${page === item ? 'bg-white/10 text-white' : 'text-gray-400'}`}><Icon className="h-5 w-5" />{label}</button>)}</div></div>}
-
-        <div className="fixed inset-x-0 bottom-0 z-[60] border-t border-[#242830] bg-[#0d0f12]/95 px-2 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:hidden">
-          <div className="mx-auto flex max-w-md items-center justify-around">
-            {(guestMode ? ['search', 'discovery', 'schedule', 'decks', 'social'] : ['home', 'search', 'schedule', 'social']).map((navItem) => {
+        {/* Floating Magnetic Navigation Dock */}
+        <div className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-40 max-w-[calc(100%-1rem)]">
+          <div className="relative flex items-center gap-2 px-3 py-2 bg-[#0a0a0a]/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl">
+            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 
-                      key={navItem} 
+                      key={navItem}
+                      title={{home:"Home",search:"Search",discovery:"Discover",social:"Social",schedule:"Schedule",decks:"Decks",stats:"Stats"}[navItem]}
+                      aria-label={{home:"Home",search:"Search",discovery:"Discover",social:"Social",schedule:"Schedule",decks:"Decks",stats:"Stats"}[navItem]}
+                      aria-current={isActive ? "page" : undefined}
+                      whileHover={{ scale: 1.1, y: -2 }}
                       whileTap={{ scale: 0.95 }} 
                       onClick={() => setPage(navItem)} 
-                      className={`relative flex min-w-12 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-bold transition-colors ${isActive ? "text-white" : "text-gray-600"}`}
+                      className={`relative shrink-0 p-3 rounded-xl transition-all duration-300 group overflow-hidden ${isActive ? "text-white" : "text-gray-500 hover:text-white"}`}
                   >
                       {isActive && (
                           <motion.div 
                               layoutId="nav-glow"
-                              className="absolute inset-0 rounded-lg bg-[#20252d]"
+                              className={`absolute inset-0 rounded-xl bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]`}
                               transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                           />
                       )}
-                      <div className="relative z-10">
+                      {/* Spotlight Effect */}
+                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-white/10 to-transparent pointer-events-none" />
+                      <div className="relative z-10 [&>svg]:h-6 [&>svg]:w-6">
                           {navItem === 'home' && <HomeIcon />}
                           {navItem === 'search' && <SearchIcon />}
                           {navItem === 'discovery' && <CompassIcon />}
-                          {navItem === 'schedule' && <ScheduleIcon />}
-                          {navItem === 'decks' && <DecksIcon />}
                           {navItem === 'social' && <SocialIcon />}
-                          {navItem === 'stats' && <StatsIcon />}
-                          {navItem === 'profile' && <ProfileIcon />}
                       </div>
-                      <span className="relative z-10">{{home:'Library',search:'Search',discovery:'Discover',schedule:'Schedule',decks:'Decks',social:'Social'}[navItem]}</span>
                   </motion.button>
               )
             })}
-            {!guestMode && <motion.button whileTap={{ scale: 0.95 }} onClick={() => setIsMobileMoreOpen(value => !value)} className={`relative flex min-w-12 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-bold ${(isMobileMoreOpen || ['discovery','decks','stats','profile'].includes(page)) ? 'text-white' : 'text-gray-600'}`}><MenuIcon /><span>More</span></motion.button>}
           </div>
         </div>
       </div>

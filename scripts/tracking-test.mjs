@@ -210,3 +210,26 @@ test('reset refuses to delete a record edited after its backup was taken', async
   assert.deepEqual(state.deleted, []);
   assert.deepEqual(state.events, ['backup']);
 });
+
+test('deck additions preserve existing logs and never copy another user rating', async () => {
+  const records = new Map([['anilist:1', { score: 8.5, notes: 'My note', watchedEpisodes: 7 }]]);
+  const add = handler('DecksPage', 'addDeckToLibrary', {
+    db: {}, userId: 'me', readOnly: false, appId: 'app', showToast: quiet,
+    doc: (_db, _path, id) => id,
+    runTransaction: async (_db, callback) => callback({
+      get: async id => snapshot(records.get(id), id),
+      set: (id, value) => records.set(id, value),
+    }),
+  });
+  await add({ items: [
+    { kitsuId: 'anilist:1', title: 'Existing', score: 1 },
+    { kitsuId: 'anilist:2', title: 'New', score: 10, watchedEpisodes: 12, notes: 'Creator note' },
+    { kitsuId: 'anilist:2', title: 'Duplicate' },
+  ] });
+  assert.deepEqual(records.get('anilist:1'), { score: 8.5, notes: 'My note', watchedEpisodes: 7 });
+  assert.equal(records.size, 2);
+  assert.equal(records.get('anilist:2').score, 0);
+  assert.equal(records.get('anilist:2').notes, '');
+  assert.equal(records.get('anilist:2').watchedEpisodes, 0);
+  assert.equal(records.get('anilist:2').status, 'planned');
+});

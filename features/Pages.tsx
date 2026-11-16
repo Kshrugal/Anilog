@@ -330,32 +330,46 @@ export function HomePage({ db, userId, username, showToast }) {
 
   const plannedList = myList.filter(a => a.status === 'planned');
   const availableTags = useMemo(() => [...new Set(myList.flatMap(item => Array.isArray(item.personalTags) ? item.personalTags : []))].sort(), [myList]);
-  const watchingList = useMemo(() => myList
-    .filter(item => item.status === 'watching')
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)), [myList]);
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    return hour < 12 ? "Good Morning" : hour < 18 ? "Good Afternoon" : "Good Evening";
+  }, []);
+  const heroIsVn = heroAnime?.mediaType === 'vn' || heroAnime?.showType === 'Visual Novel';
+  const heroProgress = Math.max(0, Number(heroAnime?.watchedEpisodes) || 0);
+  const heroTotal = heroIsVn ? 100 : Math.max(0, Number(heroAnime?.totalEpisodes) || 0);
+  const heroPercent = heroTotal > 0 ? Math.min(100, heroProgress / heroTotal * 100) : 0;
   return (
-    <div className="mx-auto flex max-w-7xl flex-col space-y-7">
+    <div className="flex flex-col space-y-8">
+      <div className="flex justify-between items-end pb-4 border-b border-white/5">
+        <div>
+          <h2 className="text-4xl font-black text-white tracking-tighter mb-1 flex items-center gap-2">
+              {greeting}
+          </h2>
+          <p className="text-gray-500 text-sm">Welcome back, {username}.</p>
+        </div>
+      </div>
+
       {heroAnime && !loading && (
           <motion.div 
               initial={{ opacity: 0, y: 20 }} 
               animate={{ opacity: 1, y: 0 }} 
-              className="group relative min-h-[260px] w-full cursor-pointer overflow-hidden rounded-xl border border-[#262b33] bg-[#111419] lg:min-h-[300px]"
+              className="relative w-full h-72 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10"
               onClick={() => setSelectedAnimeKitsuId(heroAnime.kitsuId)}
           >
-              <img src={heroAnime.imageUrl} className="absolute inset-0 h-full w-full object-cover opacity-50 blur-[1px] transition-transform duration-[2s] group-hover:scale-105" alt="" referrerPolicy="no-referrer" />
-              <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/20"></div>
-              <div className="relative flex min-h-[260px] max-w-3xl flex-col justify-end p-6 sm:p-8 lg:min-h-[300px]">
+              <img src={heroAnime.imageUrl} className="w-full h-full object-cover opacity-60 transition-transform duration-[2s] group-hover:scale-105" alt="hero" referrerPolicy="no-referrer" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+              <div className="absolute bottom-0 left-0 p-5 sm:p-8 w-full">
                   <p className={`text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2 ${theme.accentText}`}>
-                      <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span> Continue Watching
+                      <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span> {heroIsVn ? "Continue Reading" : "Continue Watching"}
                   </p>
-                  <h3 className="mb-5 line-clamp-2 text-3xl font-bold tracking-[-0.03em] text-white sm:text-4xl">{heroAnime.title}</h3>
-                  <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex min-w-0 items-center gap-3">
-                          <span className="text-gray-300 text-sm font-bold">Ep {heroAnime.watchedEpisodes} / {heroAnime.totalEpisodes || "?"}</span>
-                          <div className="h-1.5 w-36 overflow-hidden rounded-full bg-gray-700/50 backdrop-blur-sm sm:w-56">
+                  <h3 className="text-3xl sm:text-4xl font-black text-white mb-4 line-clamp-2 sm:line-clamp-1">{heroAnime.title}</h3>
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex min-w-0 flex-wrap items-center gap-3">
+                          <span className="text-gray-300 text-sm font-bold">{heroIsVn ? Math.min(100, heroProgress) + "% read" : "Ep " + heroProgress + " / " + (heroTotal || "?")}</span>
+                          <div className="w-24 sm:w-48 h-1.5 bg-gray-700/50 rounded-full overflow-hidden backdrop-blur-sm">
                               <motion.div 
                                 initial={{ width: 0 }} 
-                                animate={{ width: `${(heroAnime.watchedEpisodes / (heroAnime.totalEpisodes || 100)) * 100}%` }}
+                                animate={{ width: heroPercent + "%" }}
                                 transition={{ duration: 1, ease: "circOut" }}
                                 className={`h-full ${theme.progressbar}`} 
                               />
@@ -365,55 +379,21 @@ export function HomePage({ db, userId, username, showToast }) {
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
                           onClick={(e) => { e.stopPropagation(); handleQuickIncrement(heroAnime); }}
-                          className="flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-black text-black shadow-lg shadow-white/10 transition-shadow hover:shadow-white/20"
+                          className="bg-white text-black px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-white/10 hover:shadow-white/20 transition-shadow"
                       >
-                          <PlayIcon /> Watch Next
+                          <PlayIcon /> {heroIsVn ? "Read Next" : "Watch Next"}
                       </motion.button>
                   </div>
               </div>
           </motion.div>
       )}
 
-      {!loading && !heroAnime && <div className="rounded-xl border border-dashed border-[#303640] bg-[#111419] px-6 py-16 text-center"><PlayIcon className={`mx-auto h-8 w-8 ${theme.accentText}`} /><h2 className="mt-4 text-2xl font-bold text-white">Start your next story</h2><p className="mt-2 text-sm text-gray-500">Add something to Watching and it will become your launchpad here.</p><button onClick={() => setPage('search')} className="mt-5 rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-black">Find a title</button></div>}
-
-      <div className="flex flex-wrap items-center gap-2 border-b border-[#242830] pb-5"><button onClick={() => setPage('search')} className="rounded-lg border border-[#2a2f38] bg-[#14171c] px-3 py-2 text-xs font-bold text-gray-300 hover:text-white">+ Add title</button><button onClick={() => plannedList.length >= 2 ? setShowDecider(true) : showToast("Add at least two planned titles first.", "error")} className="rounded-lg border border-[#2a2f38] bg-[#14171c] px-3 py-2 text-xs font-bold text-gray-300 hover:text-white">Surprise me</button><span className="ml-auto text-xs text-gray-600">{watchingList.length} active · {plannedList.length} planned</span></div>
-
-      {!loading && watchingList.length > 1 && (
-        <section>
-          <div className="mb-4 flex items-end justify-between">
-            <div>
-              <h3 className="text-xl font-black text-white">Up next</h3>
-              <p className="mt-1 text-xs text-gray-500">Your recently active queue</p>
-            </div>
-            <button onClick={() => setStatusFilter('watching')} className={`text-xs font-bold ${theme.accentText}`}>View all</button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {watchingList.slice(1, 5).map(anime => {
-              const progress = Number(anime.watchedEpisodes || 0);
-              const total = Number(anime.totalEpisodes || 0);
-              return (
-                <button key={anime.id} onClick={() => setSelectedAnimeKitsuId(anime.kitsuId)} className="group flex min-w-0 items-center gap-4 rounded-xl border border-[#262b33] bg-[#12151a] p-3 text-left transition-colors hover:bg-[#191d23]">
-                  <img src={anime.imageUrl} alt="" className="h-20 w-14 shrink-0 rounded-xl object-cover" referrerPolicy="no-referrer" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-black text-white">{anime.title}</span>
-                    <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Episode {progress} {total > 0 ? `/ ${total}` : ''}</span>
-                    <span className="mt-2 block h-1 overflow-hidden rounded-full bg-white/10"><span className={`block h-full ${theme.progressbar}`} style={{ width: `${total > 0 ? Math.min(100, (progress / total) * 100) : 0}%` }} /></span>
-                  </span>
-                  <span onClick={(event) => { event.stopPropagation(); handleQuickIncrement(anime); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-lg font-black text-black transition-transform hover:scale-105">+</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
       <div className="space-y-4">
-        {savedViews.length > 0 && <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-black uppercase tracking-wider text-gray-600">Saved views</span>{savedViews.map(view => <span key={view.id} className="inline-flex overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><button onClick={() => applySavedView(view)} className="px-3 py-2 text-xs font-bold capitalize text-gray-300 hover:bg-white/5 hover:text-white">{view.name}</button><button onClick={() => setSavedViews(current => current.filter(item => item.id !== view.id))} className="border-l border-white/10 px-2 text-gray-600 hover:text-red-400">×</button></span>)}</div>}
-        <div className="flex items-center justify-between border-t border-white/5 pt-8">
-            <div className="flex overflow-x-auto no-scrollbar gap-2 p-2 -mx-2">
+        <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 overflow-x-auto no-scrollbar gap-2 p-2 -mx-2">
                 {statusTabs.map((status) => (
-                <motion.button whileTap={{ scale: 0.95 }} key={status} onClick={() => setStatusFilter(status)} className={`px-5 py-2.5 capitalize font-bold rounded-full text-sm transition-all whitespace-nowrap ${statusFilter === status ? "bg-white text-black shadow-lg" : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"}`}>
-                    {status} <span className={`ml-1 text-[10px] ${statusFilter === status ? 'text-black/50' : 'text-gray-600'}`}>{myList.filter(item => item.status === status).length}</span>
+                <motion.button whileTap={{ scale: 0.95 }} key={status} onClick={() => setStatusFilter(status)} className={`px-6 py-2.5 capitalize font-bold rounded-full text-sm transition-all whitespace-nowrap ${statusFilter === status ? "bg-white text-black shadow-lg scale-105" : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"}`}>
+                    {status}
                 </motion.button>
                 ))}
             </div>
@@ -428,7 +408,8 @@ export function HomePage({ db, userId, username, showToast }) {
                     }
                     setShowDecider(true);
                 }}
-                className={`p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white shadow-lg`}
+                aria-label="Decide what to watch"
+                className={`shrink-0 p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white shadow-lg`}
                 title="Decide what to watch"
             >
                 <DiceIcon />
@@ -436,7 +417,7 @@ export function HomePage({ db, userId, username, showToast }) {
         </div>
 
         {/* Media Filter Segmented Control */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl w-fit">
             {[
                 { id: 'all', label: 'All' },
@@ -452,7 +433,17 @@ export function HomePage({ db, userId, username, showToast }) {
                 </button>
             ))}
         </div>
-        <div className="flex gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
+
+        <details className="max-w-full rounded-xl border border-white/10 bg-white/[0.03] open:w-full">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-gray-400 hover:text-white">
+            Library Tools{collectionFilter !== 'all' || tagFilter !== 'all' || selectionMode ? ' · Active' : ''}
+          </summary>
+          <div className="space-y-3 border-t border-white/5 p-3">
+            <button onClick={() => setPage("search")} title="Add title" className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-gray-300 hover:bg-white/5"><PlusIcon className="h-4 w-4" />Add title</button>
+        {savedViews.length > 0 && <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-black uppercase tracking-wider text-gray-600">Saved views</span>{savedViews.map(view => <span key={view.id} className="inline-flex overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><button onClick={() => applySavedView(view)} className="px-3 py-2 text-xs font-bold capitalize text-gray-300 hover:bg-white/5 hover:text-white">{view.name}</button><button onClick={() => setSavedViews(current => current.filter(item => item.id !== view.id))} className="border-l border-white/10 px-2 text-gray-600 hover:text-red-400">×</button></span>)}</div>}
+
+            <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
             {[{ id: 'all', label: 'Everything' }, { id: 'favorites', label: 'Favorites' }, { id: 'priority', label: 'Priority' }, { id: 'unrated', label: 'Unrated' }, { id: 'stale', label: 'Stale 14d' }].map(tab => (
                 <button key={tab.id} onClick={() => setCollectionFilter(tab.id)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${collectionFilter === tab.id ? 'bg-pink-500/20 text-pink-300' : 'text-gray-500 hover:text-white'}`}>{tab.label}</button>
             ))}
@@ -468,8 +459,13 @@ export function HomePage({ db, userId, username, showToast }) {
 
         {selectionMode && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3"><span className="mr-auto text-xs font-bold text-blue-200">{selectedIds.length} selected</span><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'watching' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Watching</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'completed', completedAt: new Date().toISOString().slice(0, 10) })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Completed</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'planned' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Planned</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ favorite: true })} className="rounded-lg bg-pink-500/15 px-3 py-2 text-xs font-bold text-pink-300 disabled:opacity-30">Favorite</button></div>}
 
-        <div className="flex items-center gap-2">
-            <div className="relative flex-grow group">
+
+          </div>
+        </details>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[160px] flex-grow group">
                  <input 
                     type="text" 
                     value={localQuery} 
@@ -486,13 +482,16 @@ export function HomePage({ db, userId, username, showToast }) {
             </div>
             
             <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 gap-1 backdrop-blur-sm">
-                <button 
-                    onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                    className="px-3 py-1 rounded-lg text-xs font-bold text-gray-500 hover:text-white transition-colors"
-                    title="Toggle View"
-                >
-                    {viewMode === 'grid' ? <ViewListIcon /> : <ViewGridIcon />}
-                </button>
+                {[
+                    { id: 'grid', label: 'Grid', Icon: ViewGridIcon },
+                    { id: 'list', label: 'List', Icon: ViewListIcon },
+                    { id: 'journal', label: 'Journal', Icon: CommentIcon }
+                ].map(({ id, label, Icon }) => (
+                    <button key={id} onClick={() => setViewMode(id)} title={label} aria-label={label} aria-pressed={viewMode === id}
+                        className={`px-2 py-1 rounded-lg transition-colors ${viewMode === id ? "bg-white/10 text-white" : "text-gray-500 hover:text-white"}`}>
+                        <Icon className="h-4 w-4" />
+                    </button>
+                ))}
                 <div className="w-px bg-white/10 mx-1"></div>
                 {[
                     { id: 'updated', label: 'New' },
@@ -511,6 +510,7 @@ export function HomePage({ db, userId, username, showToast }) {
         </div>
       </div>
 
+      {viewMode === 'journal' && !selectionMode && !loading && !error ? <JournalView list={filteredList} /> : (
       <LayoutGroup>
         <AnimatePresence mode="popLayout">
             <motion.div 
@@ -532,17 +532,18 @@ export function HomePage({ db, userId, username, showToast }) {
                     </motion.div>
                 )}
                 {!loading && !error && filteredList.map((anime) => (
-                    <div key={anime.id} className="relative">{selectionMode && <button onClick={() => setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id])} className={`absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-md border text-xs font-black shadow-lg ${selectedIds.includes(anime.id) ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/30 bg-black/70 text-transparent'}`}>✓</button>}<AnimeCard
+                    <div key={anime.id} className="relative">{selectionMode && <button onClick={() => setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id])} aria-label={"Select " + anime.title} aria-pressed={selectedIds.includes(anime.id)} className={`absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-md border text-xs font-black shadow-lg ${selectedIds.includes(anime.id) ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/30 bg-black/70 text-transparent'}`}>✓</button>}<AnimeCard
                         key={anime.id} 
                         anime={anime} 
                         onCardClick={() => selectionMode ? setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id]) : setSelectedAnimeKitsuId(anime.kitsuId)}
                         onQuickIncrement={statusFilter === 'watching' ? () => handleQuickIncrement(anime) : undefined}
-                        viewMode={viewMode}
+                        viewMode={viewMode === 'journal' ? 'list' : viewMode}
                     /></div>
                 ))}
             </motion.div>
         </AnimatePresence>
       </LayoutGroup>
+      )}
 
       {selectedAnimeData && (
         <AnimeDetailsModal 
@@ -704,8 +705,8 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
         <div className="space-y-8">
             <div className="flex justify-between items-center flex-wrap gap-4">
                 <div className="space-y-1">
-                    <h2 className="text-4xl font-black text-white tracking-tight">Search</h2>
-                    <p className="text-sm text-gray-500">Search the complete anime and visual novel catalog</p>
+                    <h2 className="text-4xl font-black text-white tracking-tight">Discover</h2>
+                    <p className="text-sm text-gray-500">Find new stories to experience</p>
                 </div>
                 
                 {searchType === 'anime' && (
@@ -962,7 +963,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
 
             {view === 'feed' && (
                 <div className="space-y-4">
-                    {!readOnly && <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5">
+                    {!readOnly && <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
                         <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
                         {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><select value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} className="min-w-0 rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="">Choose from your library…</option>{[...reviewLibrary].sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''))).map(item => <option key={item.id} value={String(item.kitsuId || item.id)}>{item.mediaType === 'vn' ? 'VN · ' : ''}{item.title}</option>)}</select><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
@@ -973,7 +974,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             key={item.id} 
-                            className="group flex items-center gap-4 rounded-xl border border-[#282d35] bg-[#12151a] p-4 transition-colors hover:bg-[#181c22]"
+                            className="bg-white/5 border border-white/5 p-4 rounded-2xl flex gap-4 items-center hover:bg-white/10 transition-all backdrop-blur-md group"
                         >
                             <div className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-white text-lg shadow-lg border border-white/10 overflow-hidden bg-gradient-to-br ${theme.gradient}`}>
                                 {item.username?.[0]?.toUpperCase() || '?'}
@@ -1328,7 +1329,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="relative flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#0e1014] shadow-2xl md:flex-row"
+                className="bg-[#0a0a0a] w-full max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden relative shadow-2xl flex flex-col md:flex-row border border-white/10"
                 role="dialog"
                 aria-modal="true"
                 aria-label={title || 'Media details'}
@@ -1372,6 +1373,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                             </div>}
                         </div>
 
+                        {(streamingLinks.length > 0 || cast.length > 0 || anilistCharacters.length > 0 || relatedMedia.length > 0 || recommendations.length > 0) && <details className="rounded-2xl border border-white/10 bg-white/5 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Cast, streaming & related</summary><div className="mt-5 space-y-6">
                         {streamingLinks.length > 0 && <div><h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">Watch legally</h4><div className="flex flex-wrap gap-2">{streamingLinks.slice(0, 6).map((link, index) => <a key={`${link.url}-${index}`} href={link.url} target="_blank" rel="noopener noreferrer" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-blue-300 hover:bg-white/10">{link.site || link.title || 'Watch'} ↗</a>)}</div></div>}
 
                         {/* Cast Section */}
@@ -1413,6 +1415,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                         {recommendations.length > 0 && (
                             <div><h4 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">You may also like</h4><div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">{recommendations.map(media => <div key={media.id} className="w-24 shrink-0"><img src={media.attributes.posterImage.medium} alt="" className="aspect-[2/3] w-full rounded-xl object-cover" referrerPolicy="no-referrer" /><p className="mt-2 line-clamp-2 text-[10px] font-bold text-white">{media.attributes.canonicalTitle}</p></div>)}</div></div>
                         )}
+                        </div></details>}
 
                         {readOnly ? (
                             <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-6 text-center">
@@ -1506,6 +1509,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     </div>
                                 </div>
 
+                                <details className="rounded-2xl border border-white/10 bg-black/20 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Tracking details</summary><div className="mt-5 space-y-6">
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <button onClick={() => setFavorite(current => !current)} className={`flex items-center justify-between rounded-xl border p-4 text-left transition-colors ${favorite ? 'border-pink-500/30 bg-pink-500/10 text-pink-300' : 'border-white/10 bg-black/20 text-gray-400 hover:bg-white/5'}`}>
                                         <span><span className="block text-sm font-black">Favorite</span><span className="mt-1 block text-[10px] uppercase tracking-wider opacity-60">Pin to your taste profile</span></span>
@@ -1533,8 +1537,9 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     {personalTags.length > 0 && <div className="flex flex-wrap gap-2">{personalTags.map(tag => <button key={tag} onClick={() => setPersonalTags(current => current.filter(item => item !== tag))} className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-bold text-blue-300">#{tag} ×</button>)}</div>}
                                 </div>
 
+                                </div></details>
                                 <div className="space-y-3">
-                                    <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Journal note</label><label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-500"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500" /> Share update to activity</label></div>
+                                    <div className="flex items-center justify-between gap-4"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label><label className="flex cursor-pointer items-center gap-2 text-[10px] text-gray-500"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500" /> Share update to activity</label></div>
                                     <textarea 
                                         value={notes} 
                                         onChange={(e) => setNotes(e.target.value)}
@@ -1597,9 +1602,14 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
             setLoading(true);
             try {
                 const discovery = await getAniListDiscovery(10);
-                let personalResults = [];
-                let topTasteGenres = [];
+                if (!isMounted) return;
+                setTrending(discovery.trending);
+                setTopAiring(discovery.airing);
+                setUpcoming(discovery.upcoming);
+                setTopRated(discovery.rated);
+                setLoading(false);
                 if (db && userId && !readOnly) {
+                  try {
                     const listSnapshot = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
                     const entries: any[] = listSnapshot.docs.map(entryDoc => ({ ...entryDoc.data(), id: entryDoc.id }));
                     const watchedIds = new Set(entries.map(entry => String(entry.kitsuId || entry.id)));
@@ -1607,18 +1617,12 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
                     entries.forEach(entry => (entry.genres || []).forEach(genre => {
                         genreScores[genre] = (genreScores[genre] || 0) + Math.max(1, Number(entry.score || 5));
                     }));
-                    topTasteGenres = Object.entries(genreScores).sort((a, b) => Number(b[1]) - Number(a[1])).slice(0, 3).map(([genre]) => genre);
-                    personalResults = (await getAniListPersonalized(topTasteGenres, 18)).filter(media => !watchedIds.has(String(media.id)));
-                }
-
-                if (isMounted) {
-                    setTrending(discovery.trending);
-                    setTopAiring(discovery.airing);
-                    setUpcoming(discovery.upcoming);
-                    setTopRated(discovery.rated);
-                    setPersonalized(personalResults);
-                    setTasteGenres(topTasteGenres);
-                    setLoading(false);
+                    const topTasteGenres = Object.entries(genreScores).sort((a, b) => Number(b[1]) - Number(a[1])).slice(0, 3).map(([genre]) => genre);
+                    const personalResults = (await getAniListPersonalized(topTasteGenres, 18)).filter(media => !watchedIds.has(String(media.id)));
+                    if (isMounted) { setPersonalized(personalResults); setTasteGenres(topTasteGenres); }
+                  } catch (error) {
+                    console.error('Personalized discovery unavailable:', error);
+                  }
                 }
             } catch (err) {
                 console.error("Discovery fetch error:", err);
@@ -1634,13 +1638,13 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
     if (loading) return <div className="space-y-12"><AnimeCarouselSkeleton title="Loading Hub..." /><AnimeCarouselSkeleton title="..." /></div>;
 
     return (
-        <div className="mx-auto max-w-7xl space-y-10 pb-20">
+        <div className="space-y-12 pb-20">
             {/* Hero Section - Editorial Style */}
             {heroAnime && (
                 <motion.div 
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="group relative h-[380px] cursor-pointer overflow-hidden rounded-xl border border-[#282d35] bg-[#14171c] shadow-sm"
+                    className="relative h-[60vh] min-h-[400px] rounded-[3rem] overflow-hidden group cursor-pointer shadow-2xl"
                     onClick={() => setSelectedAnime(heroAnime)}
                 >
                     <img 
@@ -1652,19 +1656,19 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
                     <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/40 to-transparent" />
                     <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-transparent to-transparent opacity-60" />
                     
-                    <div className="absolute bottom-0 left-0 max-w-2xl space-y-4 p-6 sm:p-9">
+                    <div className="absolute bottom-0 left-0 p-8 sm:p-12 space-y-4 max-w-2xl">
                         <div className="flex items-center gap-3">
                             <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-[10px] font-black uppercase tracking-widest text-white">#1 Trending</span>
                             <span className="px-3 py-1 bg-blue-500/20 backdrop-blur-md border border-blue-500/30 rounded-full text-[10px] font-black uppercase tracking-widest text-blue-400">Seasonal Pick</span>
                         </div>
-                        <h2 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-5xl">
+                        <h2 className="text-5xl sm:text-7xl font-black text-white tracking-tighter leading-none drop-shadow-2xl break-words">
                             {heroAnime.attributes.canonicalTitle}
                         </h2>
                         <p className="text-gray-300 text-sm sm:text-lg line-clamp-3 max-w-xl font-medium leading-relaxed opacity-80 group-hover:opacity-100 transition-opacity">
                             {heroAnime.attributes.synopsis}
                         </p>
                         <div className="flex items-center gap-4 pt-4">
-                            <button className="rounded-lg bg-white px-5 py-3 text-xs font-bold uppercase tracking-wider text-black transition-colors hover:bg-gray-200">
+                            <button className="px-8 py-4 bg-white text-black rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform shadow-xl shadow-white/10">
                                 View Details
                             </button>
                             <div className="flex items-center gap-2 text-white font-bold">
@@ -1676,7 +1680,6 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
                 </motion.div>
             )}
 
-            {personalized.length > 0 && <div className="rounded-xl border border-[#313041] bg-[#15141c] p-5 sm:p-7"><div className="mb-5"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-purple-400">Recommended for {username}</p><h3 className="mt-2 text-2xl font-bold text-white">Based on your library</h3><p className="mt-1 text-xs text-gray-500">Strongest signals: {tasteGenres.join(', ')} · tracked titles are hidden</p></div><AnimeCarousel title="Personalized Picks" animeList={personalized} onAnimeClick={setSelectedAnime} isKitsuList={true} /></div>}
             <AnimeCarousel title="Trending Now" animeList={trending} onAnimeClick={setSelectedAnime} isKitsuList={true} />
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
@@ -1705,6 +1708,8 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
             </div>
 
             <AnimeCarousel title="All-Time Masterpieces" animeList={topRated} onAnimeClick={setSelectedAnime} isKitsuList={true} />
+
+            {personalized.length > 0 && <section className="space-y-4"><AnimeCarousel title="Personalized Picks" animeList={personalized} onAnimeClick={setSelectedAnime} isKitsuList={true} /><p className={`text-xs ${theme.accentText}`}>{tasteGenres.join(' · ')}</p></section>}
 
             {selectedAnime && (
                 <AnimeDetailsModal 
@@ -1763,12 +1768,12 @@ export function SchedulePage({ db, userId, username, readOnly = false }) {
         return [...groups.entries()];
     }, [visibleSlots]);
 
-    return <div className="mx-auto max-w-6xl space-y-7">
+    return <div className="space-y-8">
         <div className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Seven-day radar</p><h1 className="mt-2 text-3xl font-black text-white sm:text-4xl">Airing schedule</h1><p className="mt-2 max-w-xl text-sm text-gray-500">Release times are shown in your local timezone. Switch to My Schedule to cut through the seasonal noise.</p></div>{!readOnly && <div className="flex rounded-lg border border-white/10 bg-black/20 p-1">{[{ id: true, label: 'My schedule' }, { id: false, label: 'All airing' }].map(option => <button key={String(option.id)} onClick={() => setMineOnly(option.id)} className={`rounded-md px-4 py-2 text-xs font-bold ${mineOnly === option.id ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option.label}</button>)}</div>}</div>
         {loading && <div className="grid gap-3 sm:grid-cols-2"><AnimeCardSkeleton /><AnimeCardSkeleton /></div>}
         {error && <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-sm text-red-300">{error}</div>}
         {!loading && !error && groupedDays.length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-12 text-center"><CalendarIcon className="mx-auto h-7 w-7 text-gray-700" /><p className="mt-3 font-bold text-white">Nothing scheduled here yet</p><p className="mt-1 text-sm text-gray-500">Try All airing, or add currently-airing shows to your library.</p></div>}
-        <div className="space-y-8">{groupedDays.map(([day, daySlots]) => <section key={day}><div className="mb-3 flex items-baseline gap-3"><h2 className="text-lg font-black text-white">{new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}</h2><span className="text-xs text-gray-600">{new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></div><div className="grid gap-2 lg:grid-cols-2">{daySlots.map(slot => { const media = slot.media.attributes; const tracked = myIds.has(String(slot.media.id)); return <button key={slot.id} onClick={() => setSelectedAnime(slot.media)} className="group flex min-w-0 items-center gap-4 rounded-xl border border-[#282d35] bg-[#12151a] p-3 text-left hover:border-white/15 hover:bg-[#171b21]"><img src={media.posterImage.medium || media.posterImage.original} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" referrerPolicy="no-referrer" /><span className="min-w-0 flex-1"><span className="line-clamp-2 text-sm font-bold text-white">{media.canonicalTitle}</span><span className="mt-1 block text-xs text-gray-500">Episode {slot.episode} · {new Date(slot.airingAt * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>{tracked && <span className={`mt-2 inline-block text-[9px] font-black uppercase tracking-wider ${theme.accentText}`}>In your library</span>}</span><ClockIcon className="h-4 w-4 shrink-0 text-gray-700 group-hover:text-gray-400" /></button>})}</div></section>)}</div>
+        <div className="space-y-8">{groupedDays.map(([day, daySlots]) => <section key={day}><div className="mb-3 flex items-baseline gap-3"><h2 className="text-lg font-black text-white">{new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}</h2><span className="text-xs text-gray-600">{new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></div><div className="grid gap-2 lg:grid-cols-2">{daySlots.map(slot => { const media = slot.media.attributes; const tracked = myIds.has(String(slot.media.id)); return <button key={slot.id} onClick={() => setSelectedAnime(slot.media)} className="group flex min-w-0 items-center gap-4 rounded-xl border border-white/10 bg-white/5 backdrop-blur-md p-3 text-left hover:border-white/15 hover:bg-white/10"><img src={media.posterImage.medium || media.posterImage.original} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" referrerPolicy="no-referrer" /><span className="min-w-0 flex-1"><span className="line-clamp-2 text-sm font-bold text-white">{media.canonicalTitle}</span><span className="mt-1 block text-xs text-gray-500">Episode {slot.episode} · {new Date(slot.airingAt * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>{tracked && <span className={`mt-2 inline-block text-[9px] font-black uppercase tracking-wider ${theme.accentText}`}>In your library</span>}</span><ClockIcon className="h-4 w-4 shrink-0 text-gray-700 group-hover:text-gray-400" /></button>})}</div></section>)}</div>
         {selectedAnime && <AnimeDetailsModal anime={selectedAnime} onClose={() => setSelectedAnime(null)} db={db} userId={userId} ownerId={userId} username={username} readOnly={readOnly} />}
     </div>;
 }
@@ -1829,13 +1834,26 @@ export function DecksPage({ db, userId, username, showToast, readOnly = false })
         catch (error) { console.error(error); showToast('Could not delete this deck.', 'error'); }
     };
     const addDeckToLibrary = async deck => {
-        const existing = new Set(library.map(item => String(item.kitsuId || item.id)));
-        const additions = deck.items.filter(item => !existing.has(String(item.kitsuId || item.id)));
-        if (!additions.length) { showToast('Every title in this deck is already in your library.'); return; }
+        if (readOnly || !db || !userId) return;
         try {
-            const batch = writeBatch(db);
-            additions.forEach(item => batch.set(doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList/${item.kitsuId || item.id}`), { ...item, status: 'planned', watchedEpisodes: 0, updatedAt: Date.now() }, { merge: true }));
-            await batch.commit(); showToast(`Added ${additions.length} ${additions.length === 1 ? 'title' : 'titles'} to Planned.`);
+            let added = 0;
+            for (const item of deck.items) {
+                const id = String(item.kitsuId || item.id || '');
+                if (!id || id.includes('/')) continue;
+                const ref = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, id);
+                const created = await runTransaction(db, async transaction => {
+                    const current = await transaction.get(ref);
+                    if (current.exists()) return false;
+                    transaction.set(ref, {
+                        kitsuId: id, title: item.title || 'Unknown', imageUrl: item.imageUrl || '',
+                        mediaType: item.mediaType || 'anime', totalEpisodes: Math.max(0, Number(item.totalEpisodes) || 0),
+                        status: 'planned', watchedEpisodes: 0, score: 0, notes: '', updatedAt: Date.now(),
+                    });
+                    return true;
+                });
+                if (created) added++;
+            }
+            showToast(added ? `Added ${added} ${added === 1 ? 'title' : 'titles'} to Planned.` : 'Every title in this deck is already in your library.');
         } catch (error) { console.error(error); showToast('Could not add this deck.', 'error'); }
     };
     const visibleDecks = (view === 'mine' ? decks.filter(deck => deck.userId === userId) : decks).filter(deck => {
@@ -1843,11 +1861,11 @@ export function DecksPage({ db, userId, username, showToast, readOnly = false })
         return haystack.includes(deckQuery.trim().toLowerCase());
     });
 
-    return <div className="mx-auto max-w-6xl space-y-7"><div className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Community collections</p><h1 className="mt-2 text-3xl font-black text-white sm:text-4xl">Decks</h1><p className="mt-2 max-w-xl text-sm text-gray-500">Publish themed anime and VN collections, share them anywhere, or add someone’s picks to Planned in one tap.</p></div>{!readOnly && <button onClick={() => startEditor()} className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-xs font-black text-white ${theme.button}`}><PlusIcon className="h-4 w-4" /> New deck</button>}</div>
+    return <div className="space-y-8"><div className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between"><div><p className={`text-[10px] font-black uppercase tracking-[0.2em] ${theme.accentText}`}>Community collections</p><h1 className="mt-2 text-3xl font-black text-white sm:text-4xl">Decks</h1><p className="mt-2 max-w-xl text-sm text-gray-500">Publish themed anime and VN collections, share them anywhere, or add someone’s picks to Planned in one tap.</p></div>{!readOnly && <button onClick={() => startEditor()} className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-xs font-black text-white ${theme.button}`}><PlusIcon className="h-4 w-4" /> New deck</button>}</div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">{!readOnly && <div className="flex gap-2">{[{ id: 'mine', label: 'My decks' }, { id: 'browse', label: 'Explore all' }].map(option => <button key={option.id} onClick={() => setView(option.id)} className={`rounded-lg px-4 py-2 text-xs font-bold ${view === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{option.label}</button>)}</div>}<div className="relative sm:ml-auto"><SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" /><input value={deckQuery} onChange={event => setDeckQuery(event.target.value)} placeholder="Search titles, tags, creators…" className="w-full rounded-lg border border-white/10 bg-black/20 py-2.5 pl-9 pr-3 text-xs text-white sm:w-72" /></div></div>
-        {visibleDecks.length ? <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{visibleDecks.map(deck => <article key={deck.id} className="overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a]"><button onClick={() => setSelectedDeck(deck)} className="block w-full text-left"><div className="grid h-36 grid-cols-4 bg-black/30">{deck.items.slice(0, 4).map(item => <img key={item.id} src={item.imageUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />)}</div><div className="p-4"><div className="flex items-start justify-between gap-3"><h2 className="line-clamp-2 font-black text-white">{deck.title}</h2><span className="shrink-0 text-[10px] font-bold text-gray-600">{deck.items.length}</span></div><p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{deck.description || 'A curated AniLog collection.'}</p>{deck.tags?.length > 0 && <div className="mt-3 flex flex-wrap gap-1">{deck.tags.slice(0, 3).map(tag => <span key={tag} className="rounded bg-white/5 px-2 py-1 text-[9px] font-bold text-gray-500">#{tag}</span>)}</div>}<p className="mt-3 text-[10px] font-bold text-gray-600">by {deck.username || 'AniLog user'}</p></div></button><div className="flex border-t border-white/5"><button onClick={() => copyDeck(deck)} className="flex flex-1 items-center justify-center gap-2 p-3 text-[10px] font-bold text-gray-400 hover:bg-white/5 hover:text-white"><CopyIcon className="h-3.5 w-3.5" /> Share</button>{deck.userId === userId && <button onClick={() => startEditor(deck)} className="flex-1 border-l border-white/5 p-3 text-[10px] font-bold text-blue-400 hover:bg-white/5">Edit</button>}</div></article>)}</div> : <div className="rounded-xl border border-dashed border-white/10 p-12 text-center"><DeckIcon className="mx-auto h-7 w-7 text-gray-700" /><p className="mt-3 font-bold text-white">{deckQuery ? 'No decks match that search' : 'No decks here yet'}</p><p className="mt-1 text-sm text-gray-500">{deckQuery ? 'Try a broader title, tag, or creator.' : 'Create the first collection worth sharing.'}</p></div>}
-        {editing && <div className="fixed inset-0 z-[110] grid place-items-center bg-black/80 p-4 backdrop-blur-md" onClick={() => setEditing(null)}><div onClick={event => event.stopPropagation()} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-white/10 bg-[#101318] p-6"><div className="flex items-center justify-between"><h2 className="text-xl font-black text-white">{editing.id ? 'Edit deck' : 'Create a deck'}</h2><button onClick={() => setEditing(null)} className="p-2 text-gray-500">×</button></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><input value={title} onChange={event => setTitle(event.target.value)} maxLength={80} placeholder="Deck title" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><input value={tags} onChange={event => setTags(event.target.value)} placeholder="Tags, comma separated" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={500} placeholder="What makes this collection useful?" className="h-24 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-white sm:col-span-2" /></div><div className="mt-5 flex items-center justify-between"><p className="text-xs font-bold text-gray-400">Choose titles · {selectedIds.length}/40</p><button onClick={() => setSelectedIds([])} className="text-[10px] font-bold text-gray-600">Clear</button></div><div className="mt-3 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">{library.map(item => { const checked = selectedIds.includes(String(item.id)); return <button key={item.id} disabled={!checked && selectedIds.length >= 40} onClick={() => setSelectedIds(current => checked ? current.filter(id => id !== String(item.id)) : [...current, String(item.id)])} className={`flex min-w-0 items-center gap-2 rounded-lg border p-2 text-left ${checked ? 'border-blue-500/50 bg-blue-500/10' : 'border-white/5 bg-black/20 disabled:opacity-30'}`}><img src={item.imageUrl} alt="" className="h-12 w-9 rounded object-cover" /><span className="line-clamp-2 text-[10px] font-bold text-gray-300">{item.title}</span></button>})}</div><div className="mt-5 flex gap-2">{editing.id && <button onClick={removeDeck} className={`rounded-lg border px-4 py-3 text-xs font-black ${deleteArmed ? 'border-red-500 bg-red-500 text-white' : 'border-red-500/20 text-red-400'}`}>{deleteArmed ? 'Confirm delete' : 'Delete'}</button>}<button onClick={saveDeck} disabled={saving || !title.trim() || !selectedIds.length} className={`flex-1 rounded-lg py-3 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{saving ? 'Saving…' : editing.id ? 'Save changes' : 'Publish deck'}</button></div></div></div>}
-        {selectedDeck && <div className="fixed inset-0 z-[110] grid place-items-center bg-black/80 p-4 backdrop-blur-md" onClick={() => setSelectedDeck(null)}><div onClick={event => event.stopPropagation()} className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-white/10 bg-[#101318] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-wider text-blue-400">Deck by {selectedDeck.username}</p><h2 className="mt-2 text-2xl font-black text-white">{selectedDeck.title}</h2><p className="mt-2 max-w-2xl text-sm text-gray-500">{selectedDeck.description}</p></div><button onClick={() => setSelectedDeck(null)} className="p-2 text-gray-500">×</button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5">{selectedDeck.items.map(item => <div key={item.id}><img src={item.imageUrl} alt="" className="aspect-[2/3] w-full rounded-lg object-cover" referrerPolicy="no-referrer" /><p className="mt-2 line-clamp-2 text-[10px] font-bold text-white">{item.title}</p></div>)}</div><div className="mt-6 flex flex-wrap gap-2"><button onClick={() => copyDeck(selectedDeck)} className="rounded-lg border border-white/10 px-4 py-3 text-xs font-bold text-gray-300"><CopyIcon className="mr-2 inline h-4 w-4" />Copy link</button>{!readOnly && <button onClick={() => addDeckToLibrary(selectedDeck)} className={`rounded-lg px-4 py-3 text-xs font-black text-white ${theme.button}`}>Add missing titles to Planned</button>}</div></div></div>}
+        {visibleDecks.length ? <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{visibleDecks.map(deck => <article key={deck.id} className="overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-md"><button onClick={() => setSelectedDeck(deck)} className="block w-full text-left"><div className="grid h-36 grid-cols-4 bg-black/30">{deck.items.slice(0, 4).map(item => <img key={item.id} src={item.imageUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />)}</div><div className="p-4"><div className="flex items-start justify-between gap-3"><h2 className="line-clamp-2 font-black text-white">{deck.title}</h2><span className="shrink-0 text-[10px] font-bold text-gray-600">{deck.items.length}</span></div><p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-500">{deck.description || 'A curated AniLog collection.'}</p>{deck.tags?.length > 0 && <div className="mt-3 flex flex-wrap gap-1">{deck.tags.slice(0, 3).map(tag => <span key={tag} className="rounded bg-white/5 px-2 py-1 text-[9px] font-bold text-gray-500">#{tag}</span>)}</div>}<p className="mt-3 text-[10px] font-bold text-gray-600">by {deck.username || 'AniLog user'}</p></div></button><div className="flex border-t border-white/5"><button onClick={() => copyDeck(deck)} className="flex flex-1 items-center justify-center gap-2 p-3 text-[10px] font-bold text-gray-400 hover:bg-white/5 hover:text-white"><CopyIcon className="h-3.5 w-3.5" /> Share</button>{deck.userId === userId && <button onClick={() => startEditor(deck)} className="flex-1 border-l border-white/5 p-3 text-[10px] font-bold text-blue-400 hover:bg-white/5">Edit</button>}</div></article>)}</div> : <div className="rounded-xl border border-dashed border-white/10 p-12 text-center"><DeckIcon className="mx-auto h-7 w-7 text-gray-700" /><p className="mt-3 font-bold text-white">{deckQuery ? 'No decks match that search' : 'No decks here yet'}</p><p className="mt-1 text-sm text-gray-500">{deckQuery ? 'Try a broader title, tag, or creator.' : 'Create the first collection worth sharing.'}</p></div>}
+        {editing && <div className="fixed inset-0 z-[110] grid place-items-center bg-black/80 p-4 backdrop-blur-md" onClick={() => setEditing(null)}><div onClick={event => event.stopPropagation()} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-white/10 bg-[#0a0a0a] p-6"><div className="flex items-center justify-between"><h2 className="text-xl font-black text-white">{editing.id ? 'Edit deck' : 'Create a deck'}</h2><button onClick={() => setEditing(null)} className="p-2 text-gray-500">×</button></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><input value={title} onChange={event => setTitle(event.target.value)} maxLength={80} placeholder="Deck title" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><input value={tags} onChange={event => setTags(event.target.value)} placeholder="Tags, comma separated" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white" /><textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={500} placeholder="What makes this collection useful?" className="h-24 rounded-lg border border-white/10 bg-black/30 p-4 text-sm text-white sm:col-span-2" /></div><div className="mt-5 flex items-center justify-between"><p className="text-xs font-bold text-gray-400">Choose titles · {selectedIds.length}/40</p><button onClick={() => setSelectedIds([])} className="text-[10px] font-bold text-gray-600">Clear</button></div><div className="mt-3 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">{library.map(item => { const checked = selectedIds.includes(String(item.id)); return <button key={item.id} disabled={!checked && selectedIds.length >= 40} onClick={() => setSelectedIds(current => checked ? current.filter(id => id !== String(item.id)) : [...current, String(item.id)])} className={`flex min-w-0 items-center gap-2 rounded-lg border p-2 text-left ${checked ? 'border-blue-500/50 bg-blue-500/10' : 'border-white/5 bg-black/20 disabled:opacity-30'}`}><img src={item.imageUrl} alt="" className="h-12 w-9 rounded object-cover" /><span className="line-clamp-2 text-[10px] font-bold text-gray-300">{item.title}</span></button>})}</div><div className="mt-5 flex gap-2">{editing.id && <button onClick={removeDeck} className={`rounded-lg border px-4 py-3 text-xs font-black ${deleteArmed ? 'border-red-500 bg-red-500 text-white' : 'border-red-500/20 text-red-400'}`}>{deleteArmed ? 'Confirm delete' : 'Delete'}</button>}<button onClick={saveDeck} disabled={saving || !title.trim() || !selectedIds.length} className={`flex-1 rounded-lg py-3 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{saving ? 'Saving…' : editing.id ? 'Save changes' : 'Publish deck'}</button></div></div></div>}
+        {selectedDeck && <div className="fixed inset-0 z-[110] grid place-items-center bg-black/80 p-4 backdrop-blur-md" onClick={() => setSelectedDeck(null)}><div onClick={event => event.stopPropagation()} className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl border border-white/10 bg-[#0a0a0a] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-wider text-blue-400">Deck by {selectedDeck.username}</p><h2 className="mt-2 text-2xl font-black text-white">{selectedDeck.title}</h2><p className="mt-2 max-w-2xl text-sm text-gray-500">{selectedDeck.description}</p></div><button onClick={() => setSelectedDeck(null)} className="p-2 text-gray-500">×</button></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5">{selectedDeck.items.map(item => <div key={item.id}><img src={item.imageUrl} alt="" className="aspect-[2/3] w-full rounded-lg object-cover" referrerPolicy="no-referrer" /><p className="mt-2 line-clamp-2 text-[10px] font-bold text-white">{item.title}</p></div>)}</div><div className="mt-6 flex flex-wrap gap-2"><button onClick={() => copyDeck(selectedDeck)} className="rounded-lg border border-white/10 px-4 py-3 text-xs font-bold text-gray-300"><CopyIcon className="mr-2 inline h-4 w-4" />Copy link</button>{!readOnly && <button onClick={() => addDeckToLibrary(selectedDeck)} className={`rounded-lg px-4 py-3 text-xs font-black text-white ${theme.button}`}>Add missing titles to Planned</button>}</div></div></div>}
     </div>;
 }
 
@@ -1947,7 +1965,7 @@ export function StatsPage({ db, userId, username }) {
       }
 
       if (isVn) {
-        totalMinutes += Number(anime.vnPlaytimeHours || 0) * 60;
+        totalMinutes += Math.max(0, Number(anime.vnPlaytimeHours) || 0) * 60;
         if (anime.status === 'completed') {
           completedVnsCount++;
           completed.push(anime);
@@ -1956,7 +1974,9 @@ export function StatsPage({ db, userId, username }) {
         }
         if (Number(anime.score || 0) > 0) highestRated.push(anime);
       } else {
-        const eps = anime.status === 'completed' && anime.totalEpisodes > 0 ? anime.totalEpisodes : (anime.watchedEpisodes || 0);
+        const total = Math.max(0, Number(anime.totalEpisodes) || 0);
+        const progress = Math.max(0, Number(anime.watchedEpisodes) || 0);
+        const eps = anime.status === 'completed' && total > 0 ? total : total > 0 ? Math.min(progress, total) : progress;
         totalEpisodesWatched += eps;
         totalMinutes += eps * (Number(anime.durationMinutes) > 0 ? Number(anime.durationMinutes) : AVG_EPISODE_MINUTES);
 
@@ -1989,7 +2009,15 @@ export function StatsPage({ db, userId, username }) {
       dropRate,
       favorites,
       rewatches,
-      recentlyCompleted: [...completed].sort((a, b) => String(b.completedAt || b.updatedAt || '').localeCompare(String(a.completedAt || a.updatedAt || ''))).slice(0, 10),
+      recentlyCompleted: [...completed].sort((a, b) => {
+        const timestamp = item => {
+          const value = item.completedAt || item.updatedAt;
+          if (typeof value === 'number') return value;
+          if (typeof value?.toMillis === 'function') return value.toMillis();
+          return Date.parse(value || '') || 0;
+        };
+        return timestamp(b) - timestamp(a);
+      }).slice(0, 10),
       topRated: [...highestRated].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)).slice(0, 10),
       
       // New distribution stats
@@ -2031,44 +2059,44 @@ export function StatsPage({ db, userId, username }) {
   const fd = stats.formatDistribution;
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col space-y-8">
+    <div className="flex flex-col space-y-8">
       <div className="flex justify-between items-center">
         <div>
-          <p className={`mb-2 text-[10px] font-black uppercase tracking-[0.22em] ${theme.accentText}`}>Library intelligence</p>
-          <h2 className="text-4xl font-black text-white tracking-tight">Insights</h2>
-          <p className="text-sm text-gray-500 mt-1">Patterns, progress, and the personality of your library.</p>
+          <h2 className="text-4xl font-black text-white tracking-tight">Your Stats</h2>
+          <p className="text-sm text-gray-500 mt-1">Detailed metrics of your experience log</p>
         </div>
       </div>
 
       {loading ? <AnimeCarouselSkeleton title="Loading..." /> : error ? <p className="text-red-400">{error}</p> : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Finished', value: `${stats.completionRate}%`, detail: `${sd.completed} of ${myList.length} titles`, tone: 'text-emerald-400' },
-              { label: 'Backlog', value: sd.planning, detail: sd.planning > sd.completed ? 'larger than completed' : 'under control', tone: 'text-purple-400' },
-              { label: 'Average score', value: sc.meanScore, detail: `${sc.ratedCount} ratings recorded`, tone: 'text-blue-400' },
-              { label: 'Unrated', value: Math.max(0, myList.length - sc.ratedCount), detail: `${stats.ratingCoverage}% coverage`, tone: 'text-amber-400' },
-            ].map(signal => <div key={signal.label} className="rounded-xl border border-[#282d35] bg-[#101318] p-4"><p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-600">{signal.label}</p><p className={`mt-2 text-2xl font-black ${signal.tone}`}>{signal.value}</p><p className="mt-1 text-xs text-gray-500">{signal.detail}</p></div>)}
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-3">
-            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Taste headline</p><p className="mt-3 text-lg font-bold text-white">{Object.entries(genres).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Start tagging genres'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">Your strongest genre signal based on tracked titles.</p></div>
-            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Next cleanup</p><p className="mt-3 text-lg font-bold text-white">{myList.length - sc.ratedCount > 0 ? `Rate ${Math.min(5, myList.length - sc.ratedCount)} titles` : 'Ratings complete'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">A smaller concrete task to improve recommendations and insights.</p></div>
-            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-5"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-600">Watch behavior</p><p className="mt-3 text-lg font-bold text-white">{stats.dropRate > 20 ? 'Try shorter commitments' : stats.rewatches > 2 ? 'Comfort rewatcher' : 'Exploration mode'}</p><p className="mt-1 text-xs leading-relaxed text-gray-500">{stats.dropRate}% dropped · {stats.rewatches} rewatches logged.</p></div>
+                { label: "Logged Hours (est.)", val: stats.totalHours, color: theme.gradient },
+                { label: "Completed Anime", val: sd.completed - stats.completedVnsCount, color: theme.gradient },
+                { label: "Episodes", val: stats.totalEpisodes, color: theme.gradient },
+                { label: "Completed VNs", val: stats.completedVnsCount, color: theme.gradient }
+            ].map((stat, i) => (
+                <motion.div whileHover={{ y: -5 }} key={i} className="p-6 bg-white/5 border border-white/5 rounded-2xl text-center shadow-xl backdrop-blur-sm hover:bg-white/10 transition-colors relative overflow-hidden group">
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <span className={`text-4xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br ${stat.color} tracking-tighter relative z-10`}>
+                        {stat.val}
+                    </span>
+                    <p className="text-xs sm:text-sm font-bold text-gray-400 mt-2 uppercase tracking-wider relative z-10">{stat.label}</p>
+                </motion.div>
+            ))}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Radar Taste Profile */}
-              <div className="relative flex min-h-[400px] flex-col items-center justify-center overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-6">
+              <div className="p-6 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-sm flex flex-col items-center justify-center relative overflow-hidden min-h-[400px]">
                    <h3 className="text-xl font-black text-white mb-6 z-10">Taste Profile</h3>
                    <div className="w-full h-full z-10 relative flex items-center justify-center">
                        <GenreRadarChart counts={genres} theme={theme} onSelectGenre={setSelectedGenre} />
                    </div>
-                   <div className={`absolute -bottom-20 -right-20 w-64 h-64 rounded-full blur-[80px] opacity-20 ${theme.accentBg}`}></div>
               </div>
 
               {/* Status and Library distribution */}
-              <div className="relative flex min-h-[400px] flex-col justify-between overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-6">
+              <div className="p-6 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-sm flex flex-col justify-between relative overflow-hidden min-h-[400px]">
                    <div className="z-10">
                        <h3 className="text-xl font-black text-white mb-2">Library Distribution</h3>
                        <p className="text-xs text-gray-500">Current progress and status breakdown</p>
@@ -2163,18 +2191,31 @@ export function StatsPage({ db, userId, username }) {
                            <span>{fd.vnCount} visual novels ({((fd.vnCount / fd.total) * 100).toFixed(0)}%)</span>
                        </div>
                    </div>
-                   <div className={`absolute -top-20 -left-20 w-64 h-64 rounded-full blur-[80px] opacity-10 bg-blue-500`}></div>
               </div>
           </div>
 
           {/* Full-width Score Distribution Section */}
-          <div className="relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-5 sm:p-6">
-               <div className="flex flex-col justify-between gap-3 border-b border-white/5 pb-5 sm:flex-row sm:items-end">
+          <div className="p-8 bg-white/5 border border-white/5 rounded-3xl backdrop-blur-xl relative overflow-hidden">
+               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/5 pb-6 mb-6">
                     <div>
-                        <h3 className="text-lg font-black text-white">How you score</h3>
-                        <p className="text-xs text-gray-500 mt-1">Your rating spread from 1 to 10</p>
+                        <h3 className="text-xl font-black text-white">Score Distribution</h3>
+                        <p className="text-xs text-gray-500 mt-1">Ratings grouped by nearest whole score; mean and median use exact scores</p>
                     </div>
-                    <p className="text-xs font-bold text-gray-400">Mean <span className="text-white">{sc.meanScore}</span> · Median <span className="text-white">{sc.medianScore}</span></p>
+
+                    <div className="flex flex-wrap gap-4">
+                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
+                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Mean Score</p>
+                            <p className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight mt-1`}>{sc.meanScore}</p>
+                        </div>
+                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
+                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Median Score</p>
+                            <p className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight mt-1`}>{sc.medianScore}</p>
+                        </div>
+                        <div className="px-4 py-2 bg-white/[0.02] border border-white/5 rounded-xl text-center">
+                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Total Rated</p>
+                            <p className="text-2xl font-black text-white mt-1">{sc.ratedCount}</p>
+                        </div>
+                    </div>
                </div>
 
                {sc.ratedCount === 0 ? (
@@ -2182,9 +2223,9 @@ export function StatsPage({ db, userId, username }) {
                        <p className="text-sm">No scores rated yet. Click on any anime or visual novel to edit your entry and rate it!</p>
                    </div>
                ) : (
-                   <div className="relative pt-5">
+                   <div className="pt-6 relative">
                        {/* SVG/HTML Bar Columns */}
-                       <div className="flex h-40 w-full items-end justify-between gap-2 px-1 sm:gap-4">
+                       <div className="flex justify-between items-end h-48 w-full gap-2 sm:gap-4 px-2">
                            {sc.counts.map((count, index) => {
                                const scoreLabel = index + 1;
                                const heightPercent = count > 0 ? (count / sc.maxCount) * 100 : 0;
@@ -2202,7 +2243,7 @@ export function StatsPage({ db, userId, username }) {
                                            initial={{ height: 0 }}
                                            animate={{ height: `${heightPercent}%` }}
                                            transition={{ duration: 1, ease: "easeOut", delay: index * 0.05 }}
-                                           className={`w-full max-w-[42px] ${theme.progressbar} rounded-t-md opacity-80 transition-all group-hover:opacity-100`}
+                                           className={`w-full max-w-[40px] bg-gradient-to-t ${theme.gradient} rounded-t-lg transition-all group-hover:brightness-125`}
                                            style={{ minHeight: count > 0 ? '6px' : '2px' }}
                                        />
 
@@ -2219,11 +2260,24 @@ export function StatsPage({ db, userId, username }) {
                        </div>
                    </div>
                )}
-               <div className="absolute -bottom-20 -right-20 w-80 h-80 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
           </div>
 
           <AnimeCarousel title="Recently Completed" animeList={stats.recentlyCompleted} onAnimeClick={(a) => setSelectedAnimeKitsuId(a.kitsuId)} isKitsuList={false} />
-          <AnimeCarousel title="Masterpieces (10/10)" animeList={stats.topRated} onAnimeClick={(a) => setSelectedAnimeKitsuId(a.kitsuId)} isKitsuList={false} />
+          <AnimeCarousel title="Masterpieces (10/10)" animeList={stats.topRated.filter(anime => Number(anime.score) === 10)} onAnimeClick={(a) => setSelectedAnimeKitsuId(a.kitsuId)} isKitsuList={false} />
+          <details className="border-t border-white/10 pt-5">
+            <summary className="cursor-pointer text-sm font-bold text-gray-400 hover:text-white">More Insights</summary>
+            <dl className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-3">
+              {[
+                { label: 'Completion', value: stats.completionRate + '%' },
+                { label: 'Planned titles', value: sd.planning },
+                { label: 'Rating coverage', value: stats.ratingCoverage + '%' },
+                { label: 'Dropped', value: stats.dropRate + '%' },
+                { label: 'Favorites', value: stats.favorites },
+                { label: 'Rewatches logged', value: stats.rewatches }
+              ].map(insight => <div key={insight.label}><dt className="text-xs text-gray-500">{insight.label}</dt><dd className="mt-1 text-xl font-bold text-white">{insight.value}</dd></div>)}
+            </dl>
+            <AnimeCarousel title="Highest Rated" animeList={stats.topRated} onAnimeClick={anime => setSelectedAnimeKitsuId(anime.kitsuId)} isKitsuList={false} />
+          </details>
         </>
       )}
       {selectedAnimeData && <AnimeDetailsModal anime={selectedAnimeData} onClose={() => {setSelectedAnimeData(null); setSelectedAnimeKitsuId(null)}} db={db} userId={userId} ownerId={userId} username={username} />}
@@ -2425,7 +2479,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   };
 
   return (
-    <div className="rounded-xl border border-[#293346] bg-[#121722] p-8 md:col-span-2">
+    <div className="rounded-xl border border-white/10 bg-white/5 backdrop-blur-xl p-8 md:col-span-2">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-400">Move in without starting over</p>
@@ -2603,7 +2657,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
 }
 
 export function ProfilePage({ db, userId, username, setUsername, showToast, openUserProfile }) {
-  const { theme, setThemeId, viewMode, setViewMode, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip } = useContext(ThemeContext);
+  const { theme, setThemeId, viewMode, setViewMode, density, setDensity, showTrail, setShowTrail } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
   const [hallOfFame, setHallOfFame] = useState([]);
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
@@ -2731,7 +2785,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   }, [myList]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 pt-2">
+    <div className="max-w-3xl mx-auto space-y-8 pt-6">
       {/* Profile Header & Tabs */}
       <div className="flex flex-col sm:flex-row justify-between items-end pb-4 border-b border-white/10 gap-4">
            <div>
@@ -2744,7 +2798,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                        <UserIcon size={14} /> Public View
                    </button>
                </div>
-               <p className="text-gray-500 text-xs uppercase font-bold tracking-widest mt-1">Personal profile</p>
+               <p className="text-gray-500 text-xs uppercase font-bold tracking-widest mt-1">Pilot Profile</p>
            </div>
            <div className="flex bg-white/5 p-1 rounded-xl">
                {['overview', 'journal', 'settings'].map(tab => (
@@ -2781,27 +2835,28 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
             </div>
 
             {/* Hall of Fame */}
-            <div className="relative overflow-hidden rounded-xl border border-[#282d35] bg-[#12151a] p-8">
+            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
-                <div className="relative z-10 mb-6 flex items-end justify-between gap-4"><div><h3 className="flex items-center gap-2 text-2xl font-black text-white"><TrophyIcon /> Hall of Fame</h3><p className="mt-1 text-xs text-gray-500">Your ten defining anime and visual novels. Use arrows to reorder.</p></div><span className="text-xs font-bold text-gray-600">{hallOfFame.filter(Boolean).length}/10</span></div>
+                <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
                     {hallOfFame.map((item, i) => (
                         <motion.div
+                            whileHover={{ scale: 1.05, y: -5 }}
                             key={i} 
                             onClick={() => handleSlotClick(i)}
-                            className={`group relative flex aspect-[2/3] cursor-pointer items-center justify-center overflow-hidden rounded-xl border ${item ? 'border-white/10 shadow-lg' : 'border-dashed border-white/10 hover:border-white/30'} bg-black/20 transition-all`}
+                            className={`aspect-[2/3] rounded-xl border-2 border-dashed ${item ? 'border-transparent shadow-lg' : 'border-white/10 hover:border-white/30'} flex items-center justify-center cursor-pointer relative overflow-hidden bg-black/20 group transition-all focus-within:ring-2 focus-within:ring-white/50`}
                         >
                             {item ? (
                                 <>
                                     <img src={item.image || "https://placehold.co/200x300?text=?"} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
-                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/75 p-2 text-center opacity-0 transition-opacity group-hover:opacity-100">
+                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 p-2 text-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                                         <span className="mb-2 rounded bg-white/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-gray-300">{item.mediaType === 'vn' ? 'Visual novel' : 'Anime'}</span><p className="mb-3 line-clamp-3 text-xs font-bold text-white">{item.title}</p>
                                         <div className="flex gap-1"><button title="Move left" disabled={i === 0} onClick={event => { event.stopPropagation(); moveHallItem(i, -1); }} className="rounded bg-white/10 px-2 py-1 text-xs text-white disabled:opacity-25">←</button><button title="Replace" onClick={event => { event.stopPropagation(); handleSlotClick(i); }} className="rounded bg-white px-2 py-1 text-[10px] font-bold text-black">Edit</button><button title="Remove" onClick={event => { event.stopPropagation(); removeHallItem(i); }} className="rounded bg-red-500/20 px-2 py-1 text-xs text-red-300">×</button><button title="Move right" disabled={i === 9} onClick={event => { event.stopPropagation(); moveHallItem(i, 1); }} className="rounded bg-white/10 px-2 py-1 text-xs text-white disabled:opacity-25">→</button></div>
                                     </div>
                                     <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30" />
                                 </>
                             ) : (
-                                <span className="text-center text-[10px] font-black uppercase tracking-widest text-white/30"><span className="mb-1 block text-xl font-light">+</span>Slot {i + 1}</span>
+                                <button type="button" aria-label={`Choose Hall of Fame slot ${i + 1}`} className="absolute inset-0 text-xs font-black text-white/30 uppercase tracking-widest">Slot {i + 1}</button>
                             )}
                         </motion.div>
                     ))}
@@ -2809,7 +2864,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
             </div>
 
             {/* Activity Heatmap */}
-            <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-6">
+            <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
                 <h3 className="text-xl font-black text-white mb-4">Activity Heatmap</h3>
                 <ActivityHeatmap data={activityData} theme={theme} />
             </div>
@@ -2832,7 +2887,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
               })}
               showToast={showToast}
             />
-            <div className="space-y-6 rounded-xl border border-[#282d35] bg-[#12151a] p-6">
+            <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl space-y-6">
                 <div>
                     <h3 className="text-xl font-black text-white mb-4">Themes</h3>
                     <div className="grid grid-cols-2 gap-3">
@@ -2853,17 +2908,22 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                     </div>
                 </div>
                 <div className="border-t border-white/5 pt-5">
-                    <h3 className="mb-4 text-sm font-black text-white">Workspace</h3>
+                    <h3 className="mb-4 text-sm font-black text-white">Display Preferences</h3>
                     <div className="space-y-3">
                         <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Content density</span><span className="grid grid-cols-2 gap-2 rounded-lg bg-black/25 p-1">{['comfortable', 'compact'].map(option => <button type="button" key={option} onClick={() => setDensity(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${density === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
-                        <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Default library view</span><span className="grid grid-cols-2 gap-2 rounded-lg bg-black/25 p-1">{['grid', 'list'].map(option => <button type="button" key={option} onClick={() => setViewMode(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${viewMode === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
-                        {[{ label: 'Collapse sidebar', value: sidebarCollapsed, setter: setSidebarCollapsed }, { label: 'Show sidebar tips', value: showQuickTip, setter: setShowQuickTip }].map(option => <div key={option.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-black/20 px-3 py-3"><span className="text-xs font-bold text-gray-300">{option.label}</span><button type="button" onClick={() => option.setter(!option.value)} className={`relative h-5 w-9 rounded-full transition-colors ${option.value ? theme.accentBg : 'bg-gray-700'}`} aria-pressed={option.value}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${option.value ? 'translate-x-[18px]' : 'translate-x-0.5'}`} /></button></div>)}
+                        <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Default library view</span><span className="grid grid-cols-3 gap-2 rounded-lg bg-black/25 p-1">{['grid', 'list', 'journal'].map(option => <button type="button" key={option} onClick={() => setViewMode(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${viewMode === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
+                        <div className="flex justify-between items-center p-4 bg-black/20 rounded-xl">
+                            <span className="font-bold text-sm text-gray-300">Mouse Trail</span>
+                            <button type="button" onClick={() => setShowTrail(!showTrail)} aria-label="Mouse Trail" aria-pressed={showTrail} className={`w-10 h-5 rounded-full p-0.5 transition-colors ${showTrail ? theme.accentBg : 'bg-gray-700'}`}>
+                                <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform ${showTrail ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div className="space-y-8">
-                <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-8">
+                <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] shadow-2xl">
                     <h3 className="text-xl font-black text-white mb-6 flex items-center gap-3">
                         <UserIcon className="text-blue-400" size={20} />
                         Identity
@@ -2891,7 +2951,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                     </form>
                 </div>
 
-                <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-8">
+                <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] shadow-2xl">
                     <h3 className="text-xl font-black text-white mb-6 flex items-center gap-3">
                         <ShieldIcon className="text-emerald-400" size={20} />
                         Security & Privacy
@@ -2922,7 +2982,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                     </div>
                 </div>
 
-                <div className="rounded-xl border border-[#282d35] bg-[#12151a] p-8">
+                <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] shadow-2xl">
                     <h3 className="text-xl font-black text-white mb-6 flex items-center gap-3">
                         <DownloadIcon className="text-orange-400" size={20} />
                         Data Portability
@@ -3026,14 +3086,30 @@ function HallOfFameSelector({ onClose, onSelect, myList, currentItem, slotNumber
     const selectedImage = selected && (selected.imageUrl || selected.posterImage?.original || selected.posterImage?.large || selected.posterImage?.medium || selected.posterImage?.small);
 
     return createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" onClick={onClose}>
-            <motion.div initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#0e1014] shadow-2xl" onClick={event => event.stopPropagation()}>
-                <div className="flex items-start justify-between border-b border-white/10 p-5"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-yellow-400">Hall of Fame · Slot {slotNumber}</p><h3 className="mt-1 text-xl font-bold text-white">{selected ? 'Confirm your pick' : 'Choose from your library'}</h3><p className="mt-1 text-xs text-gray-500">Anime and visual novels are both supported.</p></div><button onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white"><CloseIcon /></button></div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} role="dialog" aria-modal="true" aria-labelledby="hall-of-fame-title" className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-900 p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+                <div className="mb-4 flex items-center justify-between gap-3"><h3 id="hall-of-fame-title" className="text-xl font-bold text-white">{selected ? 'Confirm Selection' : 'Select Anime or Visual Novel'}</h3><button onClick={onClose} aria-label="Close selector" title="Close" className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><CloseIcon /></button></div>
                 {!selected ? <>
-                    <div className="space-y-3 border-b border-white/5 p-4"><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your library…" className="w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-500" /><div className="flex gap-2">{[{ id: 'all', label: 'All' }, { id: 'anime', label: 'Anime' }, { id: 'vn', label: 'Visual novels' }].map(option => <button key={option.id} onClick={() => setMediaFilter(option.id)} className={`rounded-lg px-3 py-2 text-xs font-bold ${mediaFilter === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{option.label}</button>)}<span className="ml-auto self-center text-xs text-gray-600">{results.length} matches</span></div></div>
-                    <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto p-4 sm:grid-cols-3 md:grid-cols-4">{results.map(item => { const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel' || String(item.kitsuId || item.id).startsWith('v'); const image = item.imageUrl || item.posterImage?.large || item.posterImage?.medium || item.posterImage?.small; return <button key={String(item.kitsuId || item.id)} onClick={() => choose(item)} className="group overflow-hidden rounded-lg border border-white/5 bg-[#15181d] text-left transition-colors hover:border-white/20"><img src={image || 'https://placehold.co/200x300?text=No+Image'} className="aspect-[2/3] w-full object-cover" referrerPolicy="no-referrer" /><span className="block p-2"><span className="line-clamp-2 text-xs font-bold text-white">{item.title || item.canonicalTitle}</span><span className={`mt-1 block text-[9px] font-black uppercase tracking-wider ${isVn ? 'text-purple-400' : 'text-blue-400'}`}>{isVn ? 'Visual novel' : 'Anime'}{item.favorite ? ' · Favorite' : ''}</span></span></button>})}{results.length === 0 && <div className="col-span-full py-16 text-center text-sm text-gray-500">No matching titles in your library.</div>}</div>
-                    {currentItem && <div className="border-t border-white/5 p-4"><button onClick={() => onSelect(null)} className="text-xs font-bold text-red-400 hover:text-red-300">Remove current selection</button></div>}
-                </> : <div className="space-y-5 overflow-y-auto p-5"><div className="flex gap-4 rounded-xl border border-white/5 bg-white/[0.03] p-4"><img src={selectedImage || 'https://placehold.co/100x150?text=No+Image'} className="h-28 w-20 rounded-lg object-cover" referrerPolicy="no-referrer" /><div><span className={`text-[10px] font-black uppercase tracking-wider ${selectedIsVn ? 'text-purple-400' : 'text-blue-400'}`}>{selectedIsVn ? 'Visual novel' : 'Anime'}</span><p className="mt-1 text-lg font-bold text-white">{selected.title || selected.canonicalTitle}</p><p className="mt-2 text-xs text-gray-500">This will replace the current contents of slot {slotNumber}.</p></div></div><label className="block"><span className="mb-2 block text-[10px] font-black uppercase tracking-wider text-gray-500">Display title</span><input value={override} onChange={event => setOverride(event.target.value)} maxLength={100} className="w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-blue-500" /></label><div className="flex gap-3"><button onClick={() => setSelected(null)} className="flex-1 rounded-lg border border-white/10 py-3 text-sm font-bold text-gray-300 hover:bg-white/5">Back</button><button onClick={() => onSelect(selected, override)} className="flex-1 rounded-lg bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-500">Save selection</button></div></div>}
+                    <input autoFocus aria-label="Search your library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your library..." className="mb-4 w-full rounded-xl border border-white/10 bg-black/40 p-3 text-white outline-none focus:border-blue-500" />
+                    <div className="mb-4 flex flex-wrap gap-2">{[{ id: 'all', label: 'All' }, { id: 'anime', label: 'Anime' }, { id: 'vn', label: 'Visual novels' }].map(option => <button key={option.id} onClick={() => setMediaFilter(option.id)} aria-pressed={mediaFilter === option.id} className={`rounded-lg px-3 py-2 text-xs font-bold ${mediaFilter === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-400 hover:text-white'}`}>{option.label}</button>)}</div>
+                    <div className="min-h-0 space-y-2 overflow-y-auto custom-scrollbar pr-2">
+                        {currentItem && <button onClick={() => onSelect(null)} className="w-full rounded-lg p-3 text-left text-red-400 hover:bg-white/5">Remove from slot</button>}
+                        {results.map(item => {
+                            const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel' || String(item.kitsuId || item.id).startsWith('v');
+                            const image = item.imageUrl || item.posterImage?.large || item.posterImage?.medium || item.posterImage?.small;
+                            return <button key={String(item.kitsuId || item.id)} onClick={() => choose(item)} className="group flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-white/5">
+                                <img src={image || 'https://placehold.co/40x56?text=?'} alt="" className="h-14 w-10 shrink-0 rounded border border-white/5 object-cover" referrerPolicy="no-referrer" />
+                                <span className="min-w-0 flex-1"><span className="block break-words font-medium text-white">{item.title || item.canonicalTitle}</span><span className={`text-[10px] font-bold uppercase tracking-wider ${isVn ? 'text-purple-400' : 'text-blue-400'}`}>In Library · {isVn ? 'Visual novel' : 'Anime'}{item.favorite ? ' · Favorite' : ''}</span></span>
+                                <span className="text-white/20 transition-colors group-hover:text-white/50"><PlayIcon size={16} /></span>
+                            </button>;
+                        })}
+                        {results.length === 0 && <p className="py-12 text-center text-sm text-gray-500">No matching titles in your library.</p>}
+                    </div>
+                </> : <div className="space-y-4 overflow-y-auto">
+                    <div className="flex items-center gap-4 rounded-xl bg-white/5 p-4"><img src={selectedImage || 'https://placehold.co/100x150?text=No+Image'} alt="" className="h-16 w-12 shrink-0 rounded object-cover" referrerPolicy="no-referrer" /><div className="min-w-0"><span className="block break-words font-bold text-white">{selected.title || selected.canonicalTitle}</span><span className={`text-[10px] font-bold uppercase ${selectedIsVn ? 'text-purple-400' : 'text-blue-400'}`}>{selectedIsVn ? 'Visual novel' : 'Anime'} · Slot {slotNumber}</span></div></div>
+                    <label className="block"><span className="mb-2 block text-xs font-bold uppercase text-gray-400">Display Title</span><input value={override} onChange={event => setOverride(event.target.value)} maxLength={100} className="w-full rounded-xl border border-white/10 bg-black/40 p-3 text-white outline-none focus:border-blue-500" /></label>
+                    <div className="flex gap-2"><button onClick={() => setSelected(null)} className="flex-1 rounded-lg bg-white/5 py-2 text-white hover:bg-white/10">Back</button><button onClick={() => onSelect(selected, override)} className="flex-1 rounded-lg bg-blue-600 py-2 font-bold text-white hover:bg-blue-500">Confirm</button></div>
+                </div>}
             </motion.div>
         </div>, document.body
     );
@@ -3144,7 +3220,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         let completed = 0;
         let sumScores = 0;
         let ratedCount = 0;
-        const unique = new Set();
         list.forEach(a => {
             const isVn = a.mediaType === 'vn' || a.showType === 'Visual Novel';
             const eps = isVn ? 0 : (a.status === 'completed' && a.totalEpisodes > 0 ? a.totalEpisodes : (a.watchedEpisodes || 0));
@@ -3152,7 +3227,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
             totalHours += isVn ? Number(a.vnPlaytimeHours || 0) * 60 : eps * AVG_EPISODE_MINUTES;
             if(a.status === 'completed') {
                 completed++;
-                unique.add(normalizeTitle(a.title));
             }
             if(a.score > 0) {
                 sumScores += a.score;
@@ -3162,8 +3236,9 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         
         return { 
             hours: Math.round(totalHours / 60),
+            daysConsumed: (totalHours / 60 / 24).toFixed(1),
             eps: totalEps, 
-            completed: unique.size,
+            completed,
             completionRate: list.length ? Math.round((completed / list.length) * 100) : 0,
             meanScore: ratedCount > 0 ? (sumScores / ratedCount).toFixed(1) : 0
         };
@@ -3249,7 +3324,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                 <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Titles</p>
                             </div>
                             <div className="text-center">
-                                <p className="text-3xl font-black text-[#3db4f2] mb-1">{(stats.hours / 24).toFixed(1)}</p>
+                                <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.daysConsumed}</p>
                                 <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Consumed</p>
                             </div>
                             <div className="text-center">
@@ -3265,7 +3340,8 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                         <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
                             {friendHallOfFame.map((item, i) => (
-                                <div 
+                                <motion.div
+                                    whileHover={{ scale: 1.05, y: -5 }}
                                     key={i} 
                                     onClick={() => item && setSelectedAnimeKitsuId(item.id)}
                                     className={`aspect-[2/3] rounded-xl border-2 border-dashed ${item ? 'border-transparent shadow-lg cursor-pointer' : 'border-white/5'} flex items-center justify-center relative overflow-hidden bg-black/20 group transition-all`}
@@ -3280,7 +3356,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                                     ) : (
                                         <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Slot {i + 1}</span>
                                     )}
-                                </div>
+                                </motion.div>
                             ))}
                         </div>
                     </div>
