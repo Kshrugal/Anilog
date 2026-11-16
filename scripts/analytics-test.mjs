@@ -7,7 +7,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import * as icons from 'lucide-react';
 const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.React } }).outputText;
 const source = await readFile(new URL('../services/analytics.ts', import.meta.url), 'utf8');
-const helpers = await import(`data:text/javascript;base64,${Buffer.from(compile(source)).toString('base64')}`);
+const franchiseSource = await readFile(new URL('../services/franchises.ts', import.meta.url), 'utf8');
+const franchiseUrl = `data:text/javascript;base64,${Buffer.from(compile(franchiseSource)).toString('base64')}`;
+const helpers = await import(`data:text/javascript;base64,${Buffer.from(compile(source).replace(/from ['"]\.\/franchises['"]/, `from '${franchiseUrl}'`)).toString('base64')}`);
 const { analyze, timeFor, suggestedGroup, remainingAnime } = helpers;
 const entries = [
   { id: '1', title: 'Story', status: 'completed', totalEpisodes: '12', watchedEpisodes: '99', durationMinutes: 20, score: 8.5, completedAt: '2026-11-01', repeatCount: 2 },
@@ -50,15 +52,21 @@ test('backlog excludes VNs and finished/dropped titles; missing totals stay unkn
   assert.deepEqual(remainingAnime([...entries, { status: 'watching' }]), { minutes: 288, unknown: 1 });
   const empty = analyze([]); assert.equal(empty.mean, 0); assert.equal(empty.median, 0); assert.equal(empty.minutes, 0);
 });
+test('manga context cannot inflate completed anime, episode counts, or anime queue time', () => {
+  const manga = { id: 'anilist:30012', title: 'Bleach', mediaType: 'manga', status: 'completed', watchedEpisodes: 700, totalEpisodes: 700 };
+  const result = analyze([manga]);
+  assert.equal(result.completedAnime, 0); assert.equal(result.completedManga, 1); assert.equal(result.episodes, 0); assert.equal(result.minutes, 0);
+  assert.equal(remainingAnime([{ ...manga, status: 'watching' }]).minutes, 0);
+});
 const dashboardSource = await readFile(new URL('../features/Analytics.tsx', import.meta.url), 'utf8');
 const tree = ts.createSourceFile('Analytics.tsx', dashboardSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = tree.statements.filter(ts.isImportDeclaration).length;
 const body = tree.statements.slice(declarations).map(n => n.getText(tree).replace(/^export /, '')).join('\n');
 function render(tab, format = 'all', data = entries) {
   let index = 0;
-  const state = { 0: tab, 1: format };
+  const state = { 0: tab, 2: format };
   const iconBindings = Object.fromEntries(['ChevronDown', 'Pencil', 'RotateCcw', 'Search', 'X', 'Clock3', 'Layers3', 'Check', 'BookOpen', 'Tv'].map(name => [name, icons[name]]));
-  const binding = { React, ...helpers, ...iconBindings, useMemo: callback => callback(), useState: initial => [Object.hasOwn(state, index) ? state[index++] : (index++, typeof initial === 'function' ? initial() : initial), () => {}], localStorage: { getItem: () => '{}' } };
+  const binding = { React, ...helpers, ...iconBindings, useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false, done: 0, total: data.length }, retry() {} }), useMemo: callback => callback(), useState: initial => [Object.hasOwn(state, index) ? state[index++] : (index++, typeof initial === 'function' ? initial() : initial), () => {}], localStorage: { getItem: () => '{}' } };
   const js = compile(body).replace(/export \{\};?/, '');
   const Dashboard = new Function(...Object.keys(binding), `${js}\nreturn AnalyticsDashboard;`)(...Object.values(binding));
   return renderToStaticMarkup(React.createElement(Dashboard, { entries: data, userId: 'test', onSelect() {} }));

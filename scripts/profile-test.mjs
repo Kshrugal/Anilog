@@ -152,7 +152,7 @@ test('saved selection opens synchronously with target ownership; Hall of Fame us
   open({ id: 'v2', image: 'cover', title: 'Fallback' });
   assert.equal(state.state.setSelectedAnimeData.imageUrl, 'cover');
   assert.equal(state.state.setSelectedAnimeData.mediaType, 'vn');
-  handler('viewAll', state.bindings)('vn');
+  handler('openLibrary', state.bindings)('vn', 'watching');
   assert.equal(state.state.setTab, 'library');
   assert.equal(state.state.setStatus, 'watching');
   assert.equal(state.state.setMediaFilter, 'vn');

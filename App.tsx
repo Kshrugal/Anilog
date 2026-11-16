@@ -1556,7 +1556,7 @@ export default function App() {
         {/* Floating Magnetic Navigation Dock */}
         <div className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-40 max-w-[calc(100%-1rem)]">
           <div className="relative flex items-center gap-2 px-3 py-2 bg-[#0a0a0a]/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl">
-            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social']).map((navItem) => {
+            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 
@@ -1583,6 +1583,7 @@ export default function App() {
                           {navItem === 'search' && <SearchIcon />}
                           {navItem === 'discovery' && <CompassIcon />}
                           {navItem === 'social' && <SocialIcon />}
+                          {navItem === 'stats' && <StatsIcon />}
                       </div>
                   </motion.button>
               )

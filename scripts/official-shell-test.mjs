@@ -39,7 +39,8 @@ assert.doesNotMatch(card, /idNum|% 7/);
 for (const field of ['favorite', 'priority', 'personalTags', 'onQuickIncrement']) assert.ok(card.includes(field));
 
 const app = text('App');
-assert.match(app, /guestMode \? \['search', 'discovery', 'social'\] : \['home', 'search', 'discovery', 'social'\]/);
+assert.match(app, /guestMode \? \['search', 'discovery', 'social'\] : \['home', 'search', 'discovery', 'social', 'stats'\]/);
+assert.match(app, /navItem === 'stats' && <StatsIcon/);
 assert.match(app, /onClick=\{\(\) => setPage\(navItem\)\}/);
 assert.match(app, /<MouseTrail themeId=\{themeId\} active=\{showTrail\}/);
 assert.match(app, /setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip/);

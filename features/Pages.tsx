@@ -72,6 +72,7 @@ import {
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
+import { PublicProfileHeader, PublicProfileOverview, PublicProfileFavorites } from './PublicProfile';
 import { analyze } from '../services/analytics';
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
@@ -2790,153 +2791,30 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
     const { items: filtered, counts } = useMemo(() => profileLibrary(list, mediaFilter, status, searchQuery, sort), [list, mediaFilter, status, searchQuery, sort]);
     const statusLabel = (value) => value === 'watching' ? (mediaFilter === 'vn' ? 'Reading' : mediaFilter === 'anime' ? 'Watching' : 'Watching / Reading') : value === 'all' ? 'All statuses' : value;
-    const viewAll = (media) => { setMediaFilter(media); setStatus('watching'); setSearchQuery(''); setSort('updated'); setTab('library'); };
+    const openLibrary = (media = 'all', nextStatus = 'all') => { setMediaFilter(media); setStatus(nextStatus); setSearchQuery(''); setSort('updated'); setTab('library'); };
 
     if(!targetUser) return null;
     if (loadedTarget?.targetUid !== targetUid || loadedTarget?.currentUserId !== currentUserId || loadedTarget?.readOnly !== readOnly) return <div role="status" className="mx-auto max-w-5xl pt-6 text-gray-500">Loading profile...</div>;
 
     return (
-        <div className="min-w-0 max-w-5xl mx-auto space-y-6 fade-in pt-6">
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end pb-4 border-b border-white/10 gap-4">
-                <div className="w-full min-w-0 lg:flex-1">
-                    <div className="flex items-center gap-3 mb-1 min-w-0">
-                        <button onClick={() => setPage('social')} aria-label="Back to social" title="Back to social" className="shrink-0 p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                        </button>
-                        <h2 className="min-w-0 flex-1 break-words text-3xl font-black text-white">{targetUser.username}</h2>
-                        {targetUid !== currentUserId && currentUserId && !readOnly && (
-                            <button 
-                                onClick={handleFriendAction}
-                                disabled={friendBusy}
-                                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${isFriend ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
-                            >
-                                {isFriend ? 'Following' : 'Follow'}
-                            </button>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap gap-3 text-xs text-gray-400 uppercase font-bold tracking-wider ml-12">
-                        <span>{stats.hours}h Watched</span> • <span>{stats.completed} Completed</span> • <span>{stats.eps} Eps</span> • <span className="text-blue-400">Mean Score: {stats.meanScore}</span>
-                    </div>
-                </div>
-                
-                <div className="max-w-full min-w-0">
-                    <div className="bg-white/5 rounded-xl p-1 flex flex-wrap">
-                        <button onClick={() => setTab("overview")} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tab === 'overview' ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>Overview</button>
-                        <button onClick={() => setTab("library")} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tab === 'library' ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>Library</button>
-                        {targetUid !== currentUserId && currentUserId && !readOnly && (
-                            <button onClick={() => setTab("compare")} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${tab === 'compare' ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}>Compare</button>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            <div className="flex justify-end"><button onClick={() => setRefresh(value => value + 1)} aria-label="Refresh profile" title="Refresh profile" className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><ResetIcon size={16} /></button></div>
-            {loadError && <p role="alert" className="text-red-300">{loadError}</p>}
-            {libraryPrivate && <div className="rounded-lg border border-white/10 bg-white/[0.03] p-8 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-bold text-white">This library is private</p></div>}
-
-            {tab === 'overview' && !libraryPrivate && (
-                <div className="space-y-6">
-                    {loading && <p role="status" className="text-gray-500">Loading library...</p>}
-                    {!loading && !loadError && [{ media: 'anime', title: 'Currently Watching' }, { media: 'vn', title: 'Currently Reading' }].map(section => {
-                        const active = profileLibrary(list, section.media, 'watching').items;
-                        return <section key={section.media} className="border-b border-white/5 pb-6">
-                            <div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-lg font-bold text-white">{section.title} <span className="text-sm text-gray-500">{active.length}</span></h3><button onClick={() => viewAll(section.media)} className="shrink-0 text-xs font-bold text-[#3db4f2] hover:text-white">View all</button></div>
-                            <div className="space-y-2">{active.slice(0, 4).map(entry => <button key={entry.id} onClick={() => openEntry(entry)} className="flex w-full items-center gap-3 rounded-lg bg-white/[0.03] p-2 text-left hover:bg-white/5"><img src={entry.imageUrl || entry.posterImage?.medium || entry.attributes?.posterImage?.medium || 'https://placehold.co/40x56?text=?'} alt="" className="h-14 w-10 shrink-0 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" /><span className="min-w-0 flex-1"><span className="block break-words text-sm font-bold text-white">{entry.title || entry.canonicalTitle || entry.attributes?.canonicalTitle}</span><span className="text-xs text-gray-400">{profileProgress(entry)}</span></span>{Number(entry.score) > 0 && <span className="shrink-0 text-xs text-yellow-400">{entry.score}/10</span>}</button>)}</div>
-                            {!active.length && <p className="py-4 text-sm text-gray-500">No titles in progress.</p>}
-                        </section>;
-                    })}
-                    {/* Stats Panel */}
-                    <div className="bg-[#0f111a] border border-white/5 rounded-xl p-4 sm:p-8 shadow-xl">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:divide-x divide-white/5 [&>div]:min-w-0 [&_p]:break-words">
-                            <div className="text-center">
-                                <p className="text-3xl font-black text-[#3db4f2] mb-1">{list.length}</p>
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Total Titles</p>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.daysConsumed}</p>
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Days Consumed</p>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-3xl font-black text-[#3db4f2] mb-1">{stats.meanScore}</p>
-                                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">Mean Score</p>
-                            </div>
-                        </div>
-                        <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-[#3db4f2]" style={{ width: `${stats.completionRate}%` }} /></div><div className="mt-2 flex justify-between text-[10px] font-bold text-gray-600"><span>{stats.completed} completed</span><span>{stats.completionRate}% of library</span></div>
-                    </div>
-
-                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-4 sm:p-8 shadow-2xl relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
-                        <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
-                            {friendHallOfFame.map((item, i) => (
-                                <motion.div
-                                    whileHover={{ scale: 1.05, y: -5 }}
-                                    key={i} 
-                                    onClick={() => item && openEntry(item)}
-                                    className={`aspect-[2/3] rounded-xl border-2 border-dashed ${item ? 'border-transparent shadow-lg cursor-pointer' : 'border-white/5'} flex items-center justify-center relative overflow-hidden bg-black/20 group transition-all`}
-                                >
-                                    {item ? (
-                                        <>
-                                            <img src={item.image || "https://placehold.co/200x300?text=?"} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
-                                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 z-10">
-                                                <p className="text-xs font-bold text-white mb-1 leading-tight">{item.title}</p>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Slot {i + 1}</span>
-                                    )}
-                                </motion.div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
-                        <h3 className="text-xl font-black text-white mb-4">Activity Heatmap</h3>
-                        {activityLoading ? <p className="text-gray-500">Loading activity...</p> : activityError ? <p className="text-gray-500">{activityError}</p> : <ActivityHeatmap data={activityData} theme={theme} />}
-                    </div>
-
-                    <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
-                        <h3 className="text-xl font-black text-white mb-4">Recent Activity</h3>
-                        <div className="space-y-4">
-                            {activityData.slice(0, 5).map((item, idx) => (
-                                <motion.div 
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: idx * 0.05 }}
-                                    key={idx} 
-                                    className="bg-black/20 border border-white/5 p-4 rounded-2xl flex gap-4 items-center hover:bg-white/5 transition-all group"
-                                >
-                                    <div className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-white text-lg shadow-lg border border-white/10 overflow-hidden bg-gradient-to-br ${theme.gradient}`}>
-                                        {item.username?.[0]?.toUpperCase() || '?'}
-                                    </div>
-                                    <div className="min-w-0 flex-1 break-words">
-                                        <p className="text-gray-300 text-sm leading-relaxed">
-                                            <span className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer">{item.username}</span> 
-                                            <span className="opacity-60 mx-1">{item.context}</span>
-                                            <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
-                                        </p>
-                                        {item.noteContent && !item.spoiler && (
-                                            <div className="mt-2 bg-black/40 border-l-2 border-white/20 p-2 rounded text-xs text-gray-400 italic">
-                                                "{item.noteContent}"
-                                            </div>
-                                        )}
-                                        {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
-                                        <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
-                                    </div>
-                                    {item.animeImageUrl && (
-                                        <img src={item.animeImageUrl} className="w-10 h-14 shrink-0 object-cover rounded-lg shadow-xl border border-white/10 group-hover:scale-105 transition-transform" alt="anime" referrerPolicy="no-referrer" />
-                                    )}
-                                </motion.div>
-                            ))}
-                            {activityData.length === 0 && !activityLoading && (
-                                <div className="text-center py-10 text-gray-500">{activityError || 'No recent activity.'}</div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {tab === "library" && !libraryPrivate && (
+  <div className="min-w-0 max-w-6xl mx-auto space-y-7 pb-8">
+    <PublicProfileHeader name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
+    {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
+    {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}
+    {tab === 'overview' && !libraryPrivate && <div className="space-y-9">
+      {loading ? <p role="status" className="py-12 text-gray-400">Loading profile...</p> : !loadError && <>
+        <PublicProfileOverview entries={list} stats={stats} onSelect={openEntry} onLibrary={openLibrary} onStats={() => setTab('stats')} />
+        <PublicProfileFavorites favorites={friendHallOfFame} onSelect={openEntry} />
+      </>}
+      <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
+        <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Recent activity</h2>
+          {activityLoading ? <p className="text-sm text-gray-500">Loading activity...</p> : activityError ? <p className="text-sm text-gray-500">{activityError}</p> : activityData.slice(0, 5).map((item, index) => <div key={index} className="flex gap-3 py-3 border-b border-white/5 min-w-0">{item.animeImageUrl && <img src={item.animeImageUrl} alt="" loading="lazy" className="w-9 h-12 rounded object-cover shrink-0" />}<div className="min-w-0"><p className="text-sm text-gray-300 break-words">{item.context} <span className="text-white font-medium">{item.animeTitle}</span></p>{item.noteContent && <details className="text-xs text-gray-400 mt-2"><summary className="cursor-pointer">{item.spoiler ? 'Spoiler note' : 'Note'}</summary><p className="mt-2 break-words">{item.noteContent}</p></details>}<p className="text-xs text-gray-500 mt-1">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</p></div></div>)}
+          {!activityLoading && !activityError && !activityData.length && <p className="text-sm text-gray-500">No recent activity.</p>}
+        </section>
+        <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Activity</h2><div className="overflow-x-auto">{!activityLoading && !activityError && <ActivityHeatmap data={activityData} theme={theme} />}</div><p className="text-xs text-gray-500 mt-3">Based on the most recent 20 public activity events.</p></section>
+      </div>
+    </div>}
+    {tab === "library" && !libraryPrivate && (
                 <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-3">
                         <div aria-label="Media type" className="flex rounded-lg bg-white/5 p-1">{[{ id: 'all', label: 'All media' }, { id: 'anime', label: 'Anime' }, { id: 'vn', label: 'Visual novels' }].map(option => <button key={option.id} aria-pressed={mediaFilter === option.id} onClick={() => setMediaFilter(option.id)} className={`rounded px-3 py-2 text-xs font-bold ${mediaFilter === option.id ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}>{option.label}</button>)}</div>
@@ -2956,8 +2834,8 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     </div>
                 </div>
             )}
-
-            {tab === "compare" && !libraryPrivate && !readOnly && currentUserId && targetUid !== currentUserId && (
+    {tab === 'stats' && !libraryPrivate && !loadError && (loading ? <p role="status" className="py-12 text-gray-400">Loading statistics...</p> : <AnalyticsDashboard key={targetUid} entries={list} userId={targetUid} title={`${targetUsername}'s Statistics`} editableGroups={false} onSelect={openEntry} />)}
+    {tab === "compare" && !libraryPrivate && !readOnly && currentUserId && targetUid !== currentUserId && (
                 <div className="space-y-6">
                     {compareLoading && <p role="status" className="text-gray-400">Loading comparison...</p>}
                     {compareError && <p role="alert" className="text-red-300">{compareError}</p>}
@@ -2990,8 +2868,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     </div>
                 </div>
             )}
-
-            {selectedAnimeData && selectedOwnerId === targetUid && !libraryPrivate && (
+    {selectedAnimeData && selectedOwnerId === targetUid && !libraryPrivate && (
                 <AnimeDetailsModal
                     key={selectedAnimeData.kitsuId || selectedAnimeData.id}
                     anime={selectedAnimeData} 
@@ -3003,6 +2880,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     readOnly={readOnly || !currentUserId}
                 />
             )}
-        </div>
-    );
+  </div>
+);
 }
