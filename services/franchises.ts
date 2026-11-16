@@ -32,10 +32,12 @@ const reviewedIds: Record<string, string> = { 'anilist:20': 'naruto', 'anilist:1
 const nodeFamily = (node: CatalogueNode) => families.find(f => f.id === reviewedIds[node.key]) || familyFor([node.title, ...(node.titles || [])]);
 
 export const normalizeIdentity = (title: unknown) => String(title || '').normalize('NFKC').normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase().replace(/['’]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const identityRules = families.map(family => ({ family, aliases: family.aliases.map(normalizeIdentity) }));
 const boundaryMatch = (title: string, alias: string) => title === alias || title.startsWith(`${alias} `) || (/\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}/u.test(alias) && title.startsWith(alias));
 export function familyFor(titles: string[]) {
   if (titles.some(t => /[×✕]|\bvs\.?\s|\bcrossover\b/i.test(t))) return null;
-  for (const family of families) if (titles.some(t => family.aliases.some(a => boundaryMatch(normalizeIdentity(t), normalizeIdentity(a))))) return family;
+  const normalized = titles.map(normalizeIdentity);
+  for (const { family, aliases } of identityRules) if (normalized.some(title => aliases.some(alias => boundaryMatch(title, alias)))) return family;
   return null;
 }
 
@@ -75,9 +77,10 @@ export function resolveMemberships(entries: Record<string, any>[], catalogue: Ca
   }
   const franchise = new Components(), universe = new Components();
   const matched = new Map<string, Family>();
+  const initialFamilies = new Map(Object.values(nodes).map(node => [node.key, nodeFamily(node)]));
   for (const node of Object.values(nodes)) {
-    const family = nodeFamily(node);
-    const familyRelations = (node.relations || []).filter(r => { const target = nodes[identity.get(r.key) || r.key]; return target && family && nodeFamily(target)?.id === family.id; });
+    const family = initialFamilies.get(node.key);
+    const familyRelations = (node.relations || []).filter(r => family && initialFamilies.get(identity.get(r.key) || r.key)?.id === family.id);
     const unofficialDerivative = /^v\d+$/.test(node.key) && familyRelations.length && familyRelations.every(r => r.official === false);
     if (family && (!unofficialDerivative || reviewedIds[node.key])) matched.set(node.key, family);
     franchise.root(node.key); universe.root(node.key);

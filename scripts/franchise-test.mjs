@@ -77,6 +77,14 @@ test('unregistered VN adaptations bridge providers only when exact aliases and o
   const separate = resolveMemberships(entries, catalogue);
   assert.notEqual(separate['anilist:500'].franchiseKey, separate.v500.franchiseKey);
 });
+test('large relation graphs stay bounded and never add context nodes to the user library', () => {
+  const catalogue = Object.fromEntries(Array.from({ length: 1200 }, (_, i) => [`anilist:${i + 10000}`, { key: `anilist:${i + 10000}`, title: i % 4 ? `Unfamiliar Chronicle ${i}` : `Fate/EXTRA Side ${i}`, titles: [`Japanese alias ${i}`, `English alias ${i}`], relations: [{ key: `anilist:${10000 + ((i + 1) % 1200)}`, type: 'SEQUEL' }] }]));
+  const entries = Object.values(catalogue).slice(0, 200).map(node => entry(node.key, node.title));
+  const started = performance.now();
+  const result = resolveMemberships(entries, catalogue);
+  assert.equal(Object.keys(result).length, 200);
+  assert.ok(performance.now() - started < 2000, 'avoid repeated alias normalization across graph edges');
+});
 
 const loaderSource = await readFile(new URL('../services/franchise-catalogue.ts', import.meta.url), 'utf8');
 function loader(fetch, storage = new Map()) {
