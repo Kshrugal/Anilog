@@ -615,7 +615,7 @@ export function AnimeCarouselSkeleton({ title }) {
     )
 }
 
-export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, viewMode = 'grid' }) {
+export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, incrementPending = false, viewMode = 'grid' }) {
     const { theme } = useContext(ThemeContext);
     
     const mouseX = useMotionValue(0);
@@ -735,8 +735,9 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                     <button 
                         type="button"
                         aria-label={incrementLabel}
+                        disabled={incrementPending}
                         onClick={(e) => { e.stopPropagation(); onQuickIncrement(); }}
-                        className={`h-11 w-11 shrink-0 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 ${theme.accentText} z-10`}
+                        className={`h-11 w-11 shrink-0 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50 disabled:cursor-wait ${theme.accentText} z-10`}
                         title={incrementLabel}
                     >
                         <span aria-hidden="true" className="flex items-center gap-0.5"><PlusIcon className="h-4 w-4" /><span className="text-xs font-bold">{isVn ? '5%' : '1'}</span></span>
@@ -792,9 +793,10 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                          <button 
                             type="button"
                             aria-label={incrementLabel}
+                            disabled={incrementPending}
                             title={incrementLabel}
                             onClick={(e) => { e.stopPropagation(); onQuickIncrement(); }}
-                            className={`w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 hover:scale-110 transition-all border border-white/20 shadow-xl ${theme.accentText}`}
+                            className={`w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 hover:scale-110 transition-all border border-white/20 shadow-xl disabled:opacity-50 disabled:cursor-wait ${theme.accentText}`}
                          >
                              <span aria-hidden="true" className="flex items-center gap-0.5"><PlusIcon className="h-4 w-4" /><span className="text-xs font-bold">{isVn ? '5%' : '1'}</span></span>
                          </button>
@@ -1467,7 +1469,7 @@ export default function App() {
     switch (page) {
       case "home": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
-        : <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
+        : <HomePage key={userId} db={db} userId={userId} username={username} showToast={showToast} />;
       case "search": return <SearchPage db={db} userId={userId} username={username} onConfetti={triggerConfetti} showToast={showToast} readOnly={guestMode} />;
       case "discovery": return <DiscoveryPage db={db} userId={userId} username={username} readOnly={guestMode} />;
       case "stats": return guestMode

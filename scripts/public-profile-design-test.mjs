@@ -13,11 +13,14 @@ const franchiseUrl = toUrl(await readFile(new URL('../services/franchises.ts', i
 const analytics = await import(toUrl((await readFile(new URL('../services/analytics.ts', import.meta.url), 'utf8')).replace("from './franchises'", `from '${franchiseUrl}'`)));
 const uiSource = await readFile(new URL('../features/PublicProfile.tsx', import.meta.url), 'utf8');
 const uiTree = ts.createSourceFile('PublicProfile.tsx', uiSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const iconNames = uiTree.statements.filter(ts.isImportDeclaration).find(n => n.moduleSpecifier.text === 'lucide-react').importClause.namedBindings.elements.map(n => n.name.text);
-const iconBindings = Object.fromEntries(iconNames.map(n => [n, icons[n]]));
+const iconNames = uiTree.statements.filter(ts.isImportDeclaration).find(n => n.moduleSpecifier.text === 'lucide-react').importClause.namedBindings.elements;
+const iconBindings = Object.fromEntries(iconNames.map(n => [n.name.text, icons[n.propertyName?.text || n.name.text]]));
 const uiBody = uiTree.statements.filter(n => !ts.isImportDeclaration(n)).map(n => n.getText(uiTree).replace(/^export /, '')).join('\n');
-const bindings = { React, IdentityImage: () => null, useState: initial => [initial, () => {}], ...profile, ...iconBindings, AnimeCard: ({ anime }) => React.createElement('div', { 'data-tile': anime.title }, anime.title) };
-const ui = new Function(...Object.keys(bindings), `${compile(uiBody)};return {PublicProfileHeader,PublicProfileOverview,PublicProfileFavorites};`)(...Object.values(bindings));
+const bioTree = ts.createSourceFile('ProfileBio.tsx', await readFile(new URL('../features/ProfileBio.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const bioBody = bioTree.statements.filter(n => !ts.isImportDeclaration(n)).map(n => n.getText(bioTree).replace(/^export /, '')).join('\n');
+const { ProfileBio } = new Function('React', `${compile(bioBody)};return {ProfileBio};`)(React);
+const bindings = { React, ProfileBio, IdentityImage: () => null, useState: initial => [initial, () => {}], ...profile, ...iconBindings, AnimeCard: ({ anime }) => React.createElement('div', { 'data-tile': anime.title }, anime.title) };
+const ui = new Function(...Object.keys(bindings), `${compile(uiBody)};return {PublicProfileHeader,PublicProfileOverview,PublicProfileFavorites,ProfileOwnerTools,ProfileIntroduction};`)(...Object.values(bindings));
 const entries = [
   { id: '1', kitsuId: '1', title: 'Watching fixture', status: 'watching', totalEpisodes: 12, watchedEpisodes: 3, imageUrl: 'https://example.test/anime.jpg' },
   { id: 'v1', kitsuId: 'v1', title: 'Reading fixture', status: 'watching', watchedEpisodes: 5, imageUrl: 'https://example.test/vn.jpg' },
@@ -37,7 +40,34 @@ test('private profile header never renders library images or counts', () => {
   assert.doesNotMatch(html, /<img|anime\.jpg|vn\.jpg|3 titles/);
   assert.match(html, /Private library/);
 });
+test('bio joins the identity header, respects module order and visibility, and keeps safe formatting', () => {
+  const value = identity.defaultIdentity(); value.bio = '**Profile introduction** ||Hidden ending|| <script>bad</script>';
+  const render = identity => renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, favorites: [], stats, tab: 'overview', identity }));
+  const html = render(value);
+  assert.match(html, /public-profile-avatar/); assert.match(html, /public-profile-intro/);
+  assert.match(html, /<strong>Profile introduction<\/strong>/); assert.doesNotMatch(html, /<script>|<details[^>]*open/);
+  assert.ok(html.indexOf('Profile introduction') < html.indexOf('Overview'));
+  assert.doesNotMatch(render({ ...value, modules: ['progress', 'bio'] }), /Profile introduction/);
+  assert.doesNotMatch(render({ ...value, modules: ['progress'] }), /Profile introduction/);
+  const long = render({ ...value, bio: 'Long introduction '.repeat(40) });
+  assert.match(long, /aria-expanded="false"/); assert.match(long, /Read more/);
+});
 const walk = node => !React.isValidElement(node) ? [] : [node, ...React.Children.toArray(node.props.children).flatMap(walk)];
+test('visitor view is a discreet icon action, with an explicit exit and no owner tools while previewing', () => {
+  let toggled = 0;
+  const props = { busy: false, onPreview: () => toggled++, onCustomize() {}, onAccount() {}, onLogout() {} };
+  const tree = ui.ProfileOwnerTools({ ...props, preview: false });
+  walk(tree).find(node => node.props['aria-label'] === 'View as visitor').props.onClick();
+  assert.equal(toggled, 1);
+  const html = renderToStaticMarkup(tree);
+  assert.doesNotMatch(html, /type="checkbox"/); assert.match(html, /Customize profile/);
+  const preview = ui.ProfileOwnerTools({ ...props, preview: true });
+  const previewHtml = renderToStaticMarkup(preview);
+  assert.match(previewHtml, /Viewing as a visitor/); assert.match(previewHtml, /Exit preview/);
+  assert.doesNotMatch(previewHtml, /Customize profile|Manage account|Sign out/);
+  walk(preview).find(node => node.type === 'button').props.onClick();
+  assert.equal(toggled, 2);
+});
 test('overview controls open complete status/format libraries and statistics', () => {
   const calls = [];
   const tree = ui.PublicProfileOverview({ entries, stats, onLibrary: (...args) => calls.push(args), onStats: () => calls.push('stats') });
@@ -53,7 +83,7 @@ function renderProfile(state, props = {}) {
   const names = component.body.statements.filter(ts.isVariableStatement).flatMap(s => [...s.declarationList.declarations]).filter(n => ts.isArrayBindingPattern(n.name) && n.initializer?.expression?.getText(ast) === 'useState').map(n => n.name.elements[0].name.text);
   let index = 0;
   const values = { loadedTarget: { targetUid: 'friend', currentUserId: 'me', readOnly: false }, list: entries, loading: false, activityLoading: false, ...state };
-  const bound = { React, ...profile, ...analytics, ...identity, ...ui, appId: 'test', IdentityShowcase: () => null, ProfileBio: () => null, useProfileIdentity: () => ({ identity: identity.defaultIdentity(), revision: 0, loading: false, error: '' }), useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
+  const bound = { React, ...profile, ...analytics, ...identity, ...ui, appId: 'test', IdentityShowcase: () => null, ProfileBio, useProfileIdentity: () => ({ identity: state.identity || identity.defaultIdentity(), revision: 0, loading: false, error: '' }), useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
     useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false } }),
     AnalyticsDashboard: props => React.createElement('div', { 'data-public-statistics': props.title, 'data-editable': String(props.editableGroups) }),
     ActivityHeatmap: () => React.createElement('div'), LockIcon: icons.Lock, SettingsIcon: icons.Settings, LogoutIcon: icons.LogOut,
@@ -68,6 +98,13 @@ test('account controls appear only on the signed-in owner profile', () => {
   assert.match(renderProfile(state, props), /aria-label="Sign out"/);
   assert.doesNotMatch(renderProfile({}, { onLogout() {} }), /Manage account|aria-label="Sign out"/);
   assert.doesNotMatch(renderProfile({ loadedTarget: { ...state.loadedTarget, readOnly: true } }, { ...props, readOnly: true }), /Manage account|aria-label="Sign out"/);
+});
+test('default bio renders exactly once and a deliberately reordered bio keeps its position', () => {
+  const value = identity.defaultIdentity(); value.bio = 'Unique introduction fixture';
+  const html = renderProfile({ identity: value });
+  assert.equal(html.split(value.bio).length - 1, 1); assert.ok(html.indexOf(value.bio) < html.indexOf('Overview'));
+  const moved = renderProfile({ identity: { ...value, modules: ['progress', 'bio'] } });
+  assert.equal(moved.split(value.bio).length - 1, 1); assert.ok(moved.indexOf(value.bio) > moved.indexOf('In progress'));
 });
 test('public statistics uses target library, disables grouping writes, and respects privacy/error guards', () => {
   const html = renderProfile({ tab: 'stats' });

@@ -1,7 +1,9 @@
 export function nextProgress(entry: any, now = Date.now()) {
   const isVn = entry.mediaType === 'vn' || entry.showType === 'Visual Novel';
-  const current = Math.max(0, Number(entry.watchedEpisodes) || 0);
-  const limit = isVn ? 100 : Math.max(0, Number(entry.totalEpisodes) || 0);
+  const watched = Number(entry.watchedEpisodes);
+  const total = Number(entry.totalEpisodes || entry.episodeCount || entry.attributes?.episodeCount);
+  const current = Number.isFinite(watched) ? Math.max(0, watched) : 0;
+  const limit = isVn ? 100 : Number.isFinite(total) ? Math.max(0, total) : 0;
   if (limit && current >= limit) return null;
   const progress = limit ? Math.min(limit, current + (isVn ? 5 : 1)) : current + 1;
   const completed = limit > 0 && progress >= limit;

@@ -1,25 +1,51 @@
 import React, { useState } from 'react';
-import { ArrowLeft, RotateCcw, UserPlus, Check, ArrowUpRight, Tv, BookOpen, BarChart3 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, UserPlus, Check, ArrowUpRight, Tv, BookOpen, BarChart3, Eye, ArrowLeft as ReturnIcon, Pencil, Settings, LogOut } from 'lucide-react';
 import { AnimeCard } from '../App';
 import { profileEntry, profileIsVn, profileLibrary, profileProgress } from '../services/profile';
 import { IdentityImage } from './ProfileIdentityVisual';
+import { ProfileBio } from './ProfileBio';
+import './public-profile.css';
 
-export function PublicProfileHeader({ name, entries, favorites, stats, privateLibrary, loading, tab, onTab, onBack, onRefresh, canFollow, following, followBusy, onFollow, canCompare, identity = null }) {
+export function ProfileOwnerTools({ preview, busy, onPreview, onCustomize, onAccount, onLogout }: { preview: boolean; busy: boolean; onPreview: () => void; onCustomize: () => void; onAccount: () => void; onLogout?: () => void }) {
+  return <div className={`profile-owner-tools ${preview ? 'is-visiting' : ''}`}>
+    {preview ? <><span className="profile-visitor-label"><Eye size={15} />Viewing as a visitor</span><button type="button" className="profile-exit-preview" onClick={onPreview}><ReturnIcon size={15} />Exit preview</button></> : <>
+      <button type="button" className="profile-tool-icon" title="View as visitor" aria-label="View as visitor" onClick={onPreview}><Eye size={17} /></button>
+      <button type="button" className="profile-customize" disabled={busy} onClick={onCustomize}><Pencil size={14} />Customize profile</button>
+      <button type="button" className="profile-tool-icon" aria-label="Manage account" title="Manage account" onClick={onAccount}><Settings size={17} /></button>
+      {onLogout && <button type="button" className="profile-tool-icon" aria-label="Sign out" title="Sign out" onClick={onLogout}><LogOut size={17} /></button>}
+    </>}
+  </div>;
+}
+
+export function ProfileIntroduction({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = React.useId();
+  const collapsible = text.length > 320 || text.split('\n').length > 4;
+  return <div className={`public-profile-intro ${collapsible && !expanded ? 'is-collapsed' : ''}`}>
+    <div id={id} className="profile-intro-text"><ProfileBio text={text} /></div>
+    {collapsible && <button type="button" className="profile-intro-expand" aria-controls={id} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Show less' : 'Read more'}</button>}
+  </div>;
+}
+
+export function PublicProfileHeader({ name, entries, favorites, stats, privateLibrary, loading, tab, onTab, onBack, onRefresh, canFollow, following, followBusy, onFollow, canCompare, identity = null, showTabs = true }) {
   const covers = [...(identity ? [...identity.showcases.anime, ...identity.showcases.vn] : []), ...(privateLibrary ? [] : [...favorites.filter(Boolean), ...entries])].map(e => e.imageUrl || e.image || e.attributes?.posterImage?.large).filter((url, index, all) => url && all.indexOf(url) === index).slice(0, 6);
-  return <header className="border-b border-white/15">
-    <div className="relative min-h-60 sm:min-h-72 overflow-hidden flex items-end">
-      {identity?.bannerMode === 'image' && identity.banner.url ? <IdentityImage image={identity.banner} className="absolute inset-0" /> : <div className="absolute inset-0 flex" aria-hidden="true">{covers.map((url, index) => <img key={url} src={url} alt="" className={`w-0 flex-1 h-full min-w-0 min-h-0 object-cover ${index > 2 ? 'hidden sm:block' : ''}`} referrerPolicy="no-referrer" />)}</div>}
-      <div className="absolute inset-0 bg-gradient-to-t from-[#08090f] via-black/60 to-black/35" />
-      <button onClick={onBack} aria-label="Back to community" title="Back to community" className="absolute top-4 left-4 p-2.5 rounded-full bg-black/50 text-white border border-white/15"><ArrowLeft size={18} /></button>
-      <button onClick={onRefresh} disabled={loading} aria-label="Refresh profile" title="Refresh profile" className="absolute top-4 right-4 p-2.5 rounded-full bg-black/50 text-white border border-white/15 disabled:opacity-40"><RotateCcw size={17} /></button>
-      <div className="relative w-full p-5 sm:p-7 flex flex-wrap items-end justify-between gap-5">
-        <div className="min-w-0 max-w-full flex items-center gap-4"><div className="h-14 w-14 sm:h-20 sm:w-20 shrink-0 overflow-hidden border border-white/25 bg-black/40 backdrop-blur-xl rounded-lg grid place-items-center text-2xl font-bold text-cyan-200" aria-hidden="true">{identity?.avatar.url ? <IdentityImage image={identity.avatar} className="w-full h-full" /> : String(name || '?').slice(0, 1).toUpperCase()}</div><div className="min-w-0"><p className="text-xs text-cyan-200 mb-1">AniLog member</p><h1 className="text-3xl sm:text-4xl font-bold break-words text-white">{name}</h1><p className="text-xs text-gray-300 mt-2">{privateLibrary ? 'Private library' : loading ? 'Loading library…' : `${entries.length} titles · ${stats.completed} completed · ${stats.meanScore} mean score`}</p></div></div>
-        {canFollow && <button onClick={onFollow} disabled={followBusy} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-semibold disabled:opacity-50 ${following ? 'border-white/25 bg-black/30 text-white' : 'border-cyan-300/40 bg-cyan-300 text-black'}`}>{following ? <Check size={16} /> : <UserPlus size={16} />}{following ? 'Following' : 'Follow'}</button>}
-      </div>
+  return <header className="public-profile-header">
+    <div className="public-profile-cover">
+      {identity?.bannerMode === 'image' && identity.banner.url ? <IdentityImage image={identity.banner} className="absolute inset-0" /> : <div className="public-profile-cover-art" aria-hidden="true">{covers.map((url, index) => <img key={url} src={url} alt="" className={index > 2 ? 'hidden sm:block' : ''} referrerPolicy="no-referrer" />)}</div>}
+      {onBack && <button type="button" onClick={onBack} aria-label="Back to community" title="Back to community" className="profile-cover-back p-2.5 rounded-full bg-black/50 text-white border border-white/15"><ArrowLeft size={18} /></button>}
+      {onRefresh && <button type="button" onClick={onRefresh} disabled={loading} aria-label="Refresh profile" title="Refresh profile" className="profile-cover-refresh p-2.5 rounded-full bg-black/50 text-white border border-white/15 disabled:opacity-40"><RotateCcw size={17} /></button>}
     </div>
-    <nav aria-label={`${name} profile`} className="flex overflow-x-auto gap-1 px-1 sm:px-4 bg-black/15">
-      {[['overview', 'Overview'], ['library', 'Library'], ['stats', 'Statistics'], ...(canCompare ? [['compare', 'Compare']] : [])].map(([value, label]) => <button key={value} onClick={() => onTab(value)} aria-current={tab === value ? 'page' : undefined} className={`shrink-0 border-b-2 px-4 py-4 text-sm font-semibold transition-colors ${tab === value ? 'border-cyan-300 text-cyan-200' : 'border-transparent text-gray-400 hover:text-white'}`}>{label}</button>)}
-    </nav>
+    <div className="public-profile-summary">
+      <div className="public-profile-avatar" aria-hidden="true">{identity?.avatar.url ? <IdentityImage image={identity.avatar} className="w-full h-full" /> : String(name || '?').slice(0, 1).toUpperCase()}</div>
+      <div className="public-profile-identity"><h1>{name}</h1>
+        <p className="public-profile-metrics">{privateLibrary ? 'Private library' : loading ? 'Loading library...' : `${entries.length} titles · ${stats.completed} completed · ${stats.meanScore} mean score`}</p>
+        {identity?.modules[0] === 'bio' && identity.bio && <ProfileIntroduction key={name} text={identity.bio} />}
+      </div>
+      {canFollow && <button type="button" onClick={onFollow} disabled={followBusy} className={`public-profile-follow flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-semibold disabled:opacity-50 ${following ? 'border-white/25 bg-black/30 text-white' : 'border-cyan-300/40 bg-cyan-300 text-black'}`}>{following ? <Check size={16} /> : <UserPlus size={16} />}{following ? 'Following' : 'Follow'}</button>}
+    </div>
+    {showTabs && <nav aria-label={`${name} profile`} className="flex overflow-x-auto gap-1 px-1 sm:px-4">
+      {[['overview', 'Overview'], ['library', 'Library'], ['stats', 'Statistics'], ...(canCompare ? [['compare', 'Compare']] : [])].map(([value, label]) => <button type="button" key={value} onClick={() => onTab(value)} aria-current={tab === value ? 'page' : undefined} className={`shrink-0 border-b-2 px-4 py-4 text-sm font-semibold transition-colors ${tab === value ? 'border-cyan-300 text-cyan-200' : 'border-transparent text-gray-400 hover:text-white'}`}>{label}</button>)}
+    </nav>}
   </header>;
 }
 

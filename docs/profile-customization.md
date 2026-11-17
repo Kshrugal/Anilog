@@ -6,6 +6,8 @@ Appearance now uses uploads only. The profile-picture and banner buttons choose 
 
 Framing supports dragging, keyboard-accessible horizontal/vertical sliders, zoom and reset. All image choices, crops and profile settings remain a draft until Save profile. Discard confirmation is inline, not a browser dialog. The editor follows the current app theme; the saved public profile accent remains independent.
 
+The first-position bio joins the public identity header beneath the name and library counts. A bio explicitly moved elsewhere keeps its body position; hidden bios remain hidden. Long introductions can expand without opening spoiler tags. The eye icon on the owner toolbar enters a real visitor view with owner actions hidden; Exit preview returns to editing access without changing sharing settings.
+
 Favorites can appear as one Favorite media shelf or separate anime/VN shelves. Character favorites remain separate. In combined mode, Layout treats media as one visible/reorderable section. Selecting artwork/favorites does not change library tracking.
 
 ## Storage setup and release

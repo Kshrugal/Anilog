@@ -7,7 +7,6 @@ import React, {
   useRef,
 } from "react";
 import { createPortal } from "react-dom";
-import { Settings as SettingsIcon, LogOut as LogoutIcon } from 'lucide-react';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -76,13 +75,17 @@ import {
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
-import { PublicProfileHeader, PublicProfileOverview, PublicProfileFavorites } from './PublicProfile';
+import { HomeResume } from './HomeResume';
+import { LibraryGrid } from './LibraryGrid';
+import { resumeQueue, libraryStatusCounts, homeStatusLabel, normalizeSavedViews } from '../services/home-library';
+import { PublicProfileHeader, PublicProfileOverview, PublicProfileFavorites, ProfileOwnerTools } from './PublicProfile';
 import { analyze, runtimeFor, exactTime } from '../services/analytics';
 import { useFranchiseCatalogue } from './useFranchiseCatalogue';
 import { useProfileIdentity } from './useProfileIdentity';
 import { ProfileIdentityEditor } from './ProfileIdentityEditor';
 import { ProfileBio } from './ProfileBio';
 import { ACCENTS } from '../services/profile-identity';
+import { PROFILE_STATUSES, profileEntry, profileLibrary, profileMediaId, profileIsVn, profileProgress } from '../services/profile';
 import { IdentityShowcase } from './ProfileShowcases';
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
@@ -167,7 +170,9 @@ export function HomePage({ db, userId, username, showToast }) {
   const [tagFilter, setTagFilter] = useState("all");
   const [selectedAnimeKitsuId, setSelectedAnimeKitsuId] = useState(null);
   const [selectedAnimeData, setSelectedAnimeData] = useState(null);
-  const [heroAnime, setHeroAnime] = useState(null);
+  const [resumeId, setResumeId] = useState<string | null>(null);
+  const [pendingProgress, setPendingProgress] = useState<string[]>([]);
+  const pendingProgressRef = useRef(new Set<string>());
   
   const [sortBy, setSortBy] = useState("updated");
   const [localQuery, setLocalQuery] = useState("");
@@ -177,10 +182,10 @@ export function HomePage({ db, userId, username, showToast }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [savedViews, setSavedViews] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(`anilog_saved_views_${userId}`) || '[]'); } catch { return []; }
+    try { return normalizeSavedViews(JSON.parse(localStorage.getItem(`anilog_saved_views_${userId}`) || '[]')); } catch { return []; }
   });
 
-  const statusTabs = ["watching", "completed", "planned", "paused", "dropped"];
+  const statusTabs = ["watching", "completed", "planned", "paused", "dropped", "all"];
 
   useEffect(() => {
     if (!db || !userId) return;
@@ -191,18 +196,9 @@ export function HomePage({ db, userId, username, showToast }) {
       listCollectionRef,
       (snapshot) => {
         if (!isMounted) return;
-        const list = snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id } as any));
+        const list = snapshot.docs.map((doc) => profileEntry({ ...doc.data(), id: doc.id }));
         setMyList(list);
         
-        const watching = list
-          .filter(a => a.status === 'watching')
-          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-        if (watching.length > 0) {
-            setHeroAnime(watching[0]);
-        } else {
-            setHeroAnime(null);
-        }
-
         setLoading(false);
       },
       (err) => { 
@@ -225,20 +221,7 @@ export function HomePage({ db, userId, username, showToast }) {
   }, [selectedAnimeKitsuId]);
 
   const filteredList = useMemo(() => {
-    let filtered = myList.filter((item) => item.status === statusFilter);
-    
-    if (mediaFilter !== 'all') {
-        filtered = filtered.filter(item => {
-            const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel';
-            return mediaFilter === 'vn' ? isVn : !isVn;
-        });
-    }
-
-    if (localQuery.trim()) {
-        filtered = filtered.filter(item => 
-            (item.title || "").toLowerCase().includes(localQuery.toLowerCase())
-        );
-    }
+    let filtered = profileLibrary(myList, mediaFilter, statusFilter, localQuery, sortBy).items;
 
     if (collectionFilter === 'favorites') filtered = filtered.filter(item => item.favorite);
     if (collectionFilter === 'priority') filtered = filtered.filter(item => item.priority === 'high');
@@ -246,27 +229,23 @@ export function HomePage({ db, userId, username, showToast }) {
     if (collectionFilter === 'stale') filtered = filtered.filter(item => item.status === 'watching' && (Date.now() - Number(item.updatedAt || 0)) > 14 * 24 * 60 * 60 * 1000);
     if (tagFilter !== 'all') filtered = filtered.filter(item => Array.isArray(item.personalTags) && item.personalTags.includes(tagFilter));
 
-    return filtered.sort((a, b) => {
-        if (sortBy === 'score') {
-            return (b.score || 0) - (a.score || 0);
-        } else if (sortBy === 'title') {
-            return (a.title || "").localeCompare(b.title || "");
-        } else {
-            return (b.updatedAt || 0) - (a.updatedAt || 0);
-        }
-    });
+    return filtered;
   }, [myList, statusFilter, sortBy, localQuery, mediaFilter, collectionFilter, tagFilter]);
 
   const handleQuickIncrement = useCallback(async (anime) => {
     if(!db || !userId) return;
-    const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, anime.id);
-    
+    const entryId = String(anime.id || anime.kitsuId || '');
+    if (!entryId || pendingProgressRef.current.has(entryId)) return;
+    pendingProgressRef.current.add(entryId);
+    setPendingProgress(value => [...value, entryId]);
     try {
+        const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, entryId);
         const result = await runTransaction(db, async transaction => {
           const snapshot = await transaction.get(docRef);
           if (!snapshot.exists()) throw new Error('This library entry no longer exists.');
           const current = snapshot.data();
-          const next = nextProgress(current);
+          if (current.status && !['watching', 'reading'].includes(current.status)) return null;
+          const next = nextProgress({ ...current, mediaType: profileIsVn({ ...current, kitsuId: anime.kitsuId || entryId }) ? 'vn' : 'anime' });
           if (!next) return null;
           transaction.update(docRef, next.changes);
           return { ...next, title: current.title, imageUrl: current.imageUrl };
@@ -278,7 +257,7 @@ export function HomePage({ db, userId, username, showToast }) {
             username, 
             type: 'progress', 
             animeTitle: title,
-            animeKitsuId: anime.id, 
+            animeKitsuId: entryId,
             animeImageUrl: imageUrl,
             context: isVn ? `read ${newEp}% of` : `watched episode ${newEp} of`
         });
@@ -291,16 +270,20 @@ export function HomePage({ db, userId, username, showToast }) {
     } catch(e) {
         console.error("Quick update failed", e);
         showToast("Failed to update", 'error');
+    } finally {
+        pendingProgressRef.current.delete(entryId);
+        setPendingProgress(value => value.filter(id => id !== entryId));
     }
   }, [db, userId, username, showToast]);
 
   useEffect(() => {
-    localStorage.setItem(`anilog_saved_views_${userId}`, JSON.stringify(savedViews));
-  }, [savedViews, userId]);
+    try { localStorage.setItem(`anilog_saved_views_${userId}`, JSON.stringify(savedViews)); }
+    catch { showToast('Saved views could not be stored on this device.', 'error'); }
+  }, [savedViews, userId, showToast]);
 
   const saveCurrentView = () => {
     const config = { statusFilter, mediaFilter, collectionFilter, tagFilter, sortBy, viewMode };
-    if (savedViews.some(view => JSON.stringify(view.config) === JSON.stringify(config))) { showToast('This view is already saved.'); return; }
+    if (savedViews.some(view => Object.entries(config).every(([key, value]) => view.config[key] === value))) { showToast('This view is already saved.'); return; }
     const parts = [statusFilter, mediaFilter !== 'all' ? mediaFilter : null, collectionFilter !== 'all' ? collectionFilter : null, tagFilter !== 'all' ? `#${tagFilter}` : null].filter(Boolean);
     setSavedViews(current => [...current.slice(-4), { id: Date.now(), name: parts.join(' · '), config }]);
     showToast('Library view saved.');
@@ -326,10 +309,11 @@ export function HomePage({ db, userId, username, showToast }) {
                         key={anime.id}
                         anime={anime}
                         onCardClick={() => selectionMode ? setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id]) : setSelectedAnimeKitsuId(anime.kitsuId)}
-                        onQuickIncrement={statusFilter === 'watching' ? () => handleQuickIncrement(anime) : undefined}
+                        onQuickIncrement={anime.status === 'watching' ? () => handleQuickIncrement(anime) : undefined}
+                        incrementPending={pendingProgress.includes(String(anime.id))}
                         viewMode={viewMode === 'journal' ? 'list' : viewMode}
                     /></div>
-                )), [filteredList, selectionMode, selectedIds, statusFilter, viewMode, handleQuickIncrement]);
+                )), [filteredList, selectionMode, selectedIds, viewMode, handleQuickIncrement, pendingProgress]);
 
   const gridVariants = {
     hidden: { opacity: 0 },
@@ -347,66 +331,29 @@ export function HomePage({ db, userId, username, showToast }) {
     const hour = new Date().getHours();
     return hour < 12 ? "Good Morning" : hour < 18 ? "Good Afternoon" : "Good Evening";
   }, []);
-  const heroIsVn = heroAnime?.mediaType === 'vn' || heroAnime?.showType === 'Visual Novel';
-  const heroProgress = Math.max(0, Number(heroAnime?.watchedEpisodes) || 0);
-  const heroTotal = heroIsVn ? 100 : Math.max(0, Number(heroAnime?.totalEpisodes) || 0);
-  const heroPercent = heroTotal > 0 ? Math.min(100, heroProgress / heroTotal * 100) : 0;
+  const resumeEntries = useMemo(() => resumeQueue(myList, mediaFilter), [myList, mediaFilter]);
+  const heroAnime = resumeEntries.find(entry => String(entry.id) === resumeId) || resumeEntries[0];
+  const statusCounts = useMemo(() => libraryStatusCounts(myList, mediaFilter), [myList, mediaFilter]);
   return (
-    <div className="flex flex-col space-y-8">
-      <div className="flex justify-between items-end pb-4 border-b border-white/5">
-        <div>
-          <h2 className="text-4xl font-black text-white tracking-tighter mb-1 flex items-center gap-2">
+    <div className="flex flex-col space-y-6">
+      <div className="flex justify-between items-end gap-4 pb-4 border-b border-white/5">
+        <div className="min-w-0">
+          <h2 className="text-2xl sm:text-3xl font-black text-white mb-1">
               {greeting}
           </h2>
           <p className="text-gray-500 text-sm">Welcome back, {username}.</p>
         </div>
+        <button type="button" onClick={() => setPage('search')} className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2.5 text-xs font-semibold text-gray-200 hover:bg-white/10"><PlusIcon size={15} />Add title</button>
       </div>
 
-      {heroAnime && !loading && (
-          <motion.div 
-              initial={{ opacity: 0, y: 20 }} 
-              animate={{ opacity: 1, y: 0 }} 
-              className="relative w-full h-72 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10"
-              onClick={() => setSelectedAnimeKitsuId(heroAnime.kitsuId)}
-          >
-              <img src={heroAnime.imageUrl} className="w-full h-full object-cover opacity-60 transition-transform duration-[2s] group-hover:scale-105" alt="hero" referrerPolicy="no-referrer" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-              <div className="absolute bottom-0 left-0 p-5 sm:p-8 w-full">
-                  <p className={`text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2 ${theme.accentText}`}>
-                      <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span> {heroIsVn ? "Continue Reading" : "Continue Watching"}
-                  </p>
-                  <h3 className="text-3xl sm:text-4xl font-black text-white mb-4 line-clamp-2 sm:line-clamp-1">{heroAnime.title}</h3>
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div className="flex min-w-0 flex-wrap items-center gap-3">
-                          <span className="text-gray-300 text-sm font-bold">{heroIsVn ? Math.min(100, heroProgress) + "% read" : "Ep " + heroProgress + " / " + (heroTotal || "?")}</span>
-                          <div className="w-24 sm:w-48 h-1.5 bg-gray-700/50 rounded-full overflow-hidden backdrop-blur-sm">
-                              <motion.div 
-                                initial={{ width: 0 }} 
-                                animate={{ width: heroPercent + "%" }}
-                                transition={{ duration: 1, ease: "circOut" }}
-                                className={`h-full ${theme.progressbar}`} 
-                              />
-                          </div>
-                      </div>
-                      <motion.button 
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={(e) => { e.stopPropagation(); handleQuickIncrement(heroAnime); }}
-                          className="bg-white text-black px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-white/10 hover:shadow-white/20 transition-shadow"
-                      >
-                          <PlayIcon /> {heroIsVn ? "Read Next" : "Watch Next"}
-                      </motion.button>
-                  </div>
-              </div>
-          </motion.div>
-      )}
+      {heroAnime && !loading && !error && <HomeResume entries={resumeEntries} selected={heroAnime} theme={theme} pending={pendingProgress.includes(String(heroAnime.id))} onSelect={setResumeId} onOpen={entry => setSelectedAnimeKitsuId(entry.kitsuId || entry.id)} onIncrement={handleQuickIncrement} />}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 overflow-x-auto no-scrollbar gap-2 p-2 -mx-2">
                 {statusTabs.map((status) => (
-                <motion.button whileTap={{ scale: 0.95 }} key={status} onClick={() => setStatusFilter(status)} className={`px-6 py-2.5 capitalize font-bold rounded-full text-sm transition-all whitespace-nowrap ${statusFilter === status ? "bg-white text-black shadow-lg scale-105" : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"}`}>
-                    {status}
+                <motion.button whileTap={{ scale: 0.95 }} key={status} aria-pressed={statusFilter === status} aria-label={`${homeStatusLabel(status, mediaFilter)}: ${loading ? 'loading' : statusCounts[status]} titles`} onClick={() => { setStatusFilter(status); setSelectedIds([]); }} className={`px-6 py-2.5 capitalize font-bold rounded-full text-sm transition-all whitespace-nowrap ${statusFilter === status ? "bg-white text-black shadow-lg scale-105" : "bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white border border-white/5"}`}>
+                    {homeStatusLabel(status, mediaFilter)}<span className="home-status-count">{loading ? '--' : statusCounts[status]}</span>
                 </motion.button>
                 ))}
             </div>
@@ -430,7 +377,7 @@ export function HomePage({ db, userId, username, showToast }) {
         </div>
 
         {/* Media Filter Segmented Control */}
-        <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="home-library-toolbar">
         <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl w-fit">
             {[
                 { id: 'all', label: 'All' },
@@ -439,7 +386,8 @@ export function HomePage({ db, userId, username, showToast }) {
             ].map(tab => (
                 <button
                     key={tab.id}
-                    onClick={() => setMediaFilter(tab.id)}
+                    aria-pressed={mediaFilter === tab.id}
+                    onClick={() => { setMediaFilter(tab.id); setSelectedIds([]); }}
                     className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${mediaFilter === tab.id ? 'bg-white text-black shadow' : 'text-gray-400 hover:text-white'}`}
                 >
                     {tab.label}
@@ -447,48 +395,18 @@ export function HomePage({ db, userId, username, showToast }) {
             ))}
         </div>
 
-        <details className="max-w-full rounded-xl border border-white/10 bg-white/[0.03] open:w-full">
-          <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-gray-400 hover:text-white">
-            Library Tools{collectionFilter !== 'all' || tagFilter !== 'all' || selectionMode ? ' · Active' : ''}
-          </summary>
-          <div className="space-y-3 border-t border-white/5 p-3">
-            <button onClick={() => setPage("search")} title="Add title" className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-gray-300 hover:bg-white/5"><PlusIcon className="h-4 w-4" />Add title</button>
-        {savedViews.length > 0 && <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-black uppercase tracking-wider text-gray-600">Saved views</span>{savedViews.map(view => <span key={view.id} className="inline-flex overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><button onClick={() => applySavedView(view)} className="px-3 py-2 text-xs font-bold capitalize text-gray-300 hover:bg-white/5 hover:text-white">{view.name}</button><button onClick={() => setSavedViews(current => current.filter(item => item.id !== view.id))} className="border-l border-white/10 px-2 text-gray-600 hover:text-red-400">×</button></span>)}</div>}
-
-            <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
-            {[{ id: 'all', label: 'Everything' }, { id: 'favorites', label: 'Favorites' }, { id: 'priority', label: 'Priority' }, { id: 'unrated', label: 'Unrated' }, { id: 'stale', label: 'Stale 14d' }].map(tab => (
-                <button key={tab.id} onClick={() => setCollectionFilter(tab.id)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${collectionFilter === tab.id ? 'bg-pink-500/20 text-pink-300' : 'text-gray-500 hover:text-white'}`}>{tab.label}</button>
-            ))}
-        </div>
-        {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-3 py-2 text-xs font-bold text-gray-300"><option value="all">All tags</option>{availableTags.map(tag => <option key={tag} value={tag}>#{tag}</option>)}</select>}
-        <span className="ml-auto text-xs font-semibold text-gray-600">{filteredList.length} {filteredList.length === 1 ? 'title' : 'titles'}</span>
-        {(mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' || localQuery) && (
-          <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="rounded-lg px-2 py-1 text-xs font-semibold text-gray-500 transition-colors hover:bg-white/5 hover:text-white">Clear filters</button>
-        )}
-        <button onClick={saveCurrentView} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:bg-white/5 hover:text-white">Save view</button>
-        <button onClick={() => { setSelectionMode(value => !value); setSelectedIds([]); }} className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${selectionMode ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-white/10 text-gray-500 hover:bg-white/5 hover:text-white'}`}>{selectionMode ? 'Cancel select' : 'Select multiple'}</button>
-        </div>
-
-        {selectionMode && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3"><span className="mr-auto text-xs font-bold text-blue-200">{selectedIds.length} selected</span><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'watching' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Watching</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'completed', completedAt: new Date().toISOString().slice(0, 10) })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Completed</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'planned' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Planned</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ favorite: true })} className="rounded-lg bg-pink-500/15 px-3 py-2 text-xs font-bold text-pink-300 disabled:opacity-30">Favorite</button></div>}
-
-
-          </div>
-        </details>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[160px] flex-grow group">
                  <input 
                     type="text" 
+                    aria-label="Search library"
                     value={localQuery} 
                     onChange={(e) => setLocalQuery(e.target.value)}
-                    placeholder={`Search in ${statusFilter}...`}
+                    placeholder={`Search ${homeStatusLabel(statusFilter, mediaFilter).toLowerCase()}...`}
                     className={`w-full pl-10 pr-10 py-3 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all backdrop-blur-sm focus:${theme.accentBorder.replace('border-', 'ring-')}`}
                  />
                  <div className={`absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:${theme.accentText}`}><SearchIcon /></div>
                  {localQuery && (
-                    <button onClick={() => setLocalQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1">
+                    <button aria-label="Clear search" title="Clear search" onClick={() => setLocalQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1">
                         <CloseIcon />
                     </button>
                  )}
@@ -512,7 +430,8 @@ export function HomePage({ db, userId, username, showToast }) {
                     { id: 'title', label: 'A-Z' }
                 ].map(opt => (
                     <button 
-                        key={opt.id} 
+                        key={opt.id}
+                        aria-pressed={sortBy === opt.id}
                         onClick={() => setSortBy(opt.id)}
                         className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${sortBy === opt.id ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}
                     >
@@ -520,18 +439,47 @@ export function HomePage({ db, userId, username, showToast }) {
                     </button>
                 ))}
             </div>
+        <details className="max-w-full rounded-xl border border-white/10 bg-white/[0.03] open:w-full">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-gray-400 hover:text-white">
+            Library Tools{collectionFilter !== 'all' || tagFilter !== 'all' || selectionMode ? ' · Active' : ''}
+          </summary>
+          <div className="space-y-3 border-t border-white/5 p-3">
+        {savedViews.length > 0 && <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-black uppercase tracking-wider text-gray-600">Saved views</span>{savedViews.map(view => <span key={view.id} className="inline-flex overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"><button onClick={() => applySavedView(view)} className="px-3 py-2 text-xs font-bold capitalize text-gray-300 hover:bg-white/5 hover:text-white">{view.name}</button><button aria-label={`Remove saved view ${view.name}`} title={`Remove saved view ${view.name}`} onClick={() => setSavedViews(current => current.filter(item => item.id !== view.id))} className="border-l border-white/10 px-2 text-gray-600 hover:text-red-400"><CloseIcon size={13} /></button></span>)}</div>}
+
+            <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
+            {[{ id: 'all', label: 'Everything' }, { id: 'favorites', label: 'Favorites' }, { id: 'priority', label: 'Priority' }, { id: 'unrated', label: 'Unrated' }, { id: 'stale', label: 'Stale 14d' }].map(tab => (
+                <button key={tab.id} aria-pressed={collectionFilter === tab.id} onClick={() => setCollectionFilter(tab.id)} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${collectionFilter === tab.id ? 'bg-pink-500/20 text-pink-300' : 'text-gray-500 hover:text-white'}`}>{tab.label}</button>
+            ))}
         </div>
+        {availableTags.length > 0 && <select aria-label="Filter library by tag" value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-3 py-2 text-xs font-bold text-gray-300"><option value="all">All tags</option>{availableTags.map(tag => <option key={tag} value={tag}>#{tag}</option>)}</select>}
+        <span className="ml-auto text-xs font-semibold text-gray-600">{filteredList.length} {filteredList.length === 1 ? 'title' : 'titles'}</span>
+        {(mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' || localQuery) && (
+          <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="rounded-lg px-2 py-1 text-xs font-semibold text-gray-500 transition-colors hover:bg-white/5 hover:text-white">Clear filters</button>
+        )}
+        <button onClick={saveCurrentView} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:bg-white/5 hover:text-white">Save view</button>
+        <button onClick={() => { setSelectionMode(value => !value); setSelectedIds([]); }} className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${selectionMode ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-white/10 text-gray-500 hover:bg-white/5 hover:text-white'}`}>{selectionMode ? 'Cancel select' : 'Select multiple'}</button>
+        </div>
+
+        {selectionMode && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3"><span className="mr-auto text-xs font-bold text-blue-200">{selectedIds.length} selected</span><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'watching' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Watching</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'completed', completedAt: new Date().toISOString().slice(0, 10) })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Completed</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ status: 'planned' })} className="rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-30">Planned</button><button disabled={!selectedIds.length} onClick={() => runBulkUpdate({ favorite: true })} className="rounded-lg bg-pink-500/15 px-3 py-2 text-xs font-bold text-pink-300 disabled:opacity-30">Favorite</button></div>}
+
+
+          </div>
+        </details>
+        </div>
+      </div>
+
+      <div className="home-results-bar" aria-live="polite"><span>{loading ? 'Loading library...' : `${filteredList.length} ${filteredList.length === 1 ? 'title' : 'titles'}`}<span className="ml-2 text-gray-600">{homeStatusLabel(statusFilter, mediaFilter)}</span></span>
+        {collectionFilter !== 'all' && <button type="button" className="home-filter-chip" title="Clear collection filter" onClick={() => setCollectionFilter('all')}>{collectionFilter}<CloseIcon size={12} /></button>}
+        {tagFilter !== 'all' && <button type="button" className="home-filter-chip" title="Clear tag filter" onClick={() => setTagFilter('all')}>#{tagFilter}<CloseIcon size={12} /></button>}
       </div>
 
       {viewMode === 'journal' && !selectionMode && !loading && !error ? <JournalView list={filteredList} /> : (
       <LayoutGroup>
         <AnimatePresence mode="popLayout">
-            <motion.div 
+            <LibraryGrid
                 key={`${statusFilter}-${viewMode}`}
                 variants={gridVariants}
-                initial="hidden"
-                animate="show"
-                exit={{ opacity: 0, scale: 0.95 }}
                 className={viewMode === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6" : "flex flex-col gap-3"}
             >
                 {loading && Array.from({ length: 10 }).map((_, index) => <AnimeCardSkeleton key={index} />)}
@@ -540,12 +488,12 @@ export function HomePage({ db, userId, username, showToast }) {
                 {!loading && !error && filteredList.length === 0 && (
                     <motion.div initial={{opacity: 0}} animate={{opacity: 1}} className="col-span-full flex flex-col items-center justify-center py-20 text-gray-600">
                         <div className="text-7xl mb-4 opacity-50 grayscale">📺</div>
-                        <p className="text-lg font-medium">{localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' ? 'Nothing matches these filters.' : `Your "${statusFilter}" list is empty.`}</p>
-                        {localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' ? <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="mt-3 rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 transition-colors hover:bg-white/10 hover:text-white">Clear filters</button> : <p className="text-sm mt-2">Go to Search to find something to watch!</p>}
+                        <p className="text-lg font-medium">{localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' ? 'Nothing matches these filters.' : statusFilter === 'all' ? 'Your library is empty.' : `No ${homeStatusLabel(statusFilter, mediaFilter).toLowerCase()} titles.`}</p>
+                        {(localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all') && <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="mt-3 rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 transition-colors hover:bg-white/10 hover:text-white">Clear filters</button>}
                     </motion.div>
                 )}
                 {!loading && !error && libraryCards}
-            </motion.div>
+            </LibraryGrid>
         </AnimatePresence>
       </LayoutGroup>
       )}
@@ -2652,7 +2600,6 @@ function HallOfFameSelector({ onClose, onSelect, myList, currentItem, slotNumber
     );
 }
 
-import { PROFILE_STATUSES, profileEntry, profileLibrary, profileMediaId, profileIsVn, profileProgress } from '../services/profile';
 
 export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, onLogout = undefined, readOnly = false }) {
     const targetUid = targetUser?.uid;
@@ -2847,16 +2794,15 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
     return (
   <div className="profile-identity min-w-0 max-w-6xl mx-auto space-y-7 pb-8" style={{ '--profile-accent': ACCENTS[identity.accent] } as React.CSSProperties}>
-    <style>{`.profile-identity .text-cyan-200,.profile-identity .text-cyan-300{color:var(--profile-accent)}.profile-identity .border-cyan-300{border-color:var(--profile-accent)}`}</style>
     {identityState.error && <p role="alert" className="text-amber-300">{identityState.error}</p>}
-    {targetUid === currentUserId && !readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3"><label className="text-xs text-gray-400 inline-flex items-center gap-2.5 py-2"><input type="checkbox" className="h-3.5 w-3.5" style={{ accentColor: ACCENTS[identity.accent] }} checked={visitorPreview} onChange={e => setVisitorPreview(e.target.checked)} />Visitor preview</label>{!visitorPreview && <div className="flex flex-wrap items-center gap-3"><button disabled={loading || identityState.loading || !!identityState.error} onClick={() => setEditingIdentity(true)} className="inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10 disabled:opacity-40"><SettingsIcon size={14} />Customize profile</button><button onClick={() => setPage('profile')} className="inline-flex items-center gap-2 py-2 text-xs text-gray-400 hover:text-white">Manage account</button>{onLogout && <button onClick={onLogout} title="Sign out" aria-label="Sign out" className="p-2 text-gray-400 hover:text-red-300"><LogoutIcon size={17} /></button>}</div>}</div>}
+    {targetUid === currentUserId && !readOnly && <ProfileOwnerTools preview={visitorPreview} busy={loading || identityState.loading || !!identityState.error} onPreview={() => setVisitorPreview(value => !value)} onCustomize={() => setEditingIdentity(true)} onAccount={() => setPage('profile')} onLogout={onLogout} />}
     {editingIdentity && !visitor && <ProfileIdentityEditor db={db} appId={appId} uid={currentUserId} name={targetUsername} initial={identity} revision={identityState.revision} entries={list} libraryPublic={targetLibraryPublic} onClose={() => setEditingIdentity(false)} onSaved={result => { setEditingIdentity(false); showToast(result.cleanupPending ? 'Profile saved. Image cleanup will retry next time.' : 'Profile saved.'); }} />}
     <PublicProfileHeader identity={identity} name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
     {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
     {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}
     {tab === 'overview' && <div className="flex flex-col gap-9">
       {identity.modules.map(module => <React.Fragment key={module}>
-      {module === 'bio' && identity.bio && <section><h2 className="text-lg font-semibold mb-3">About</h2><ProfileBio text={identity.bio} /></section>}
+      {module === 'bio' && identity.modules[0] !== 'bio' && identity.bio && <section className="profile-reordered-bio"><h2 className="text-lg font-semibold mb-3">About</h2><ProfileBio text={identity.bio} /></section>}
       {module === 'progress' && (loading ? <p role="status" className="py-12 text-gray-400">Loading profile...</p> : !loadError && !libraryPrivate && <PublicProfileOverview entries={list} stats={stats} onSelect={openEntry} onLibrary={openLibrary} onStats={() => setTab('stats')} />)}
       {(['anime', 'vn', 'characters']).includes(module) && <IdentityShowcase kind={module as 'anime' | 'vn' | 'characters'} identity={identity} />}
       {!libraryPrivate && module === 'activity' && <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">

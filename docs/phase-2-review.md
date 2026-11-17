@@ -6,11 +6,11 @@ The owner approved a coordinated release using the existing preview URL, account
 
 The original official frontend received compatibility-only public-library reads and projection sync. The audited backfill completed with original library records unchanged. Four older public metadata fields (`lastLogin`, `bannerUrl`, `top10`, `streak`) are preserved but frozen against new client writes. The temporary Cloud Datastore User role used for the backfill was removed afterwards. The one-time backfill is no longer part of regular main deployments.
 
-Firestore rules can deploy independently. Firebase Storage is not enabled on the database project's Spark plan; file uploads require the owner to complete Firebase billing/Storage setup, followed by the optional Storage-rules deployment. Catalogue artwork, cover collages, bios and favorites do not require that upgrade. Do not claim hosted file uploads are working before that setup is verified.
+The shared compatibility migration is complete. Firebase is now on Blaze, with default bucket `anilog-10335.firebasestorage.app` in `US-CENTRAL1`. Both rulesets were published and read back using the existing Rules Admin account. Upload permissions were additionally checked in Firebase's rules simulator, without changing the owner's profile. Appearance now uses uploads only; existing saved artwork remains readable, while catalogue search remains in Favorites. See `profile-customization.md` for the current upload implementation.
 
 ## Included
 
-- Public avatar/banner identity with image uploads, nondestructive focal positioning and zoom, catalogue artwork, or a cover collage.
+- Public avatar/banner identity with image uploads, nondestructive focal positioning and zoom, and compatibility with previously saved catalogue artwork or cover collages.
 - Safe text-only bio formatting (bold, italic and closed-by-default spoilers), five independent profile accents, and overview visibility/order.
 - Separate anime, visual novel and character showcases, up to eight items each. AniList and VNDB search, duplicate prevention, accessible ordering/removal, and direct catalogue links. Selecting a showcase never adds or changes a library entry.
 - Desktop/mobile editor previews and a visitor mode that reads the public library projection, respects explicit library visibility, and hides owner actions.
@@ -72,9 +72,9 @@ Run the security command with the review emulators stopped, since it starts its 
 
 Browser review covers real uploads and deletion, keyboard crop adjustments, saved/reopened bio and favorites, both character providers, module ordering/visibility, visitor controls, and 390px mobile layout. No real user data is used.
 
-## Deployment gate
+## Original migration checklist
 
-**Do not deploy these rules to the currently shared preview/production Firebase project on their own.** The old production frontend still reads other users' original library documents, which these rules correctly deny. Cloud Run preview and production sharing a Firebase backend is not a security-isolated staging environment.
+The following gate was recorded before the coordinated compatibility release. The owner subsequently approved the shared-backend migration; the backfill, privacy audit, compatible official frontend, and rules deployment have completed. Do not rerun the one-time migration during normal deployments. Cloud Run preview and production still share Firebase and are not security-isolated staging environments.
 
 Before a hosted release:
 
@@ -84,4 +84,4 @@ Before a hosted release:
 4. Coordinate the compatible frontend and rules rollout. Existing old tabs cannot maintain the new projection; prompt/reload old clients during rollout. Never restore public access to original journal-bearing documents as a compatibility workaround.
 5. Recheck real-account sign-in, privacy toggles, uploads, replacement cleanup, public profile/library/statistics and a stale-tab save conflict in staging before production approval.
 
-This phase does not deploy infrastructure, publish to production, or implement the later home/settings redesign.
+The initial phase did not promote the new profile frontend to production. The follow-up homepage work is recorded in `phase-3-home.md`; settings remain separate.
