@@ -182,7 +182,6 @@ function resetBindings(downloadBackup) {
     db: {}, userId: 'me', username: 'Me', appId: 'app', myList: [{ title: 'stale' }],
     setIsResetting: quiet, setConfirmation: quiet, setIsOpen: quiet, onReset: quiet, showToast: quiet,
     doc: (_db, path) => path, collection: (_db, path) => path, query: ref => ref, where: quiet,
-    getDocFromServer: async () => snapshot({ hallOfFame: ['favorite'] }),
     getDocsFromServer: async path => path.endsWith('animeList')
       ? querySnapshot([['fresh', { notes: 'private', watchedEpisodes: 10 }]])
       : path === 'interactions' ? querySnapshot([['reply', { text: 'reply' }]])
@@ -191,30 +190,28 @@ function resetBindings(downloadBackup) {
     snapshotEqual: (left, right) => JSON.stringify(left.data()) === JSON.stringify(right.data()),
     runTransaction: async (_db, callback) => {
       const pendingDeletes = [];
-      let clearHall = false;
       const result = await callback({
-        get: async ref => snapshot(records.has(ref) ? records.get(ref) : { hallOfFame: ['favorite'] }, ref),
-        delete: ref => pendingDeletes.push(ref), update: () => { clearHall = true; },
+        get: async ref => snapshot(records.get(ref), ref),
+        delete: ref => pendingDeletes.push(ref), update: () => assert.fail('Library reset must not mutate the profile'),
       });
       deleted.push(...pendingDeletes);
       if (pendingDeletes.length) events.push('delete');
-      if (clearHall) events.push('clearHall');
       return result;
     }, console: { error: quiet },
   };
   return { bindings, deleted, events, records };
 }
 
-test('actual reset backs up fresh records, private fields, IDs, replies and Hall of Fame before deleting', async () => {
+test('actual reset backs up fresh records, private fields, IDs and replies before deleting', async () => {
   let backup;
   const { bindings, deleted, events } = resetBindings(payload => { backup = payload; });
   await handler('LibraryResetPanel', 'resetLibrary', bindings)();
   assert.deepEqual(backup.animeList, [{ id: 'fresh', notes: 'private', watchedEpisodes: 10 }]);
-  assert.deepEqual(backup.hallOfFame, ['favorite']);
+  assert.deepEqual(Object.keys(backup).sort(), ['activity', 'animeList', 'exportedAt', 'username']);
   assert.equal(backup.activity[0].id, 'activity');
   assert.equal(backup.activity[0].interactions[0].text, 'reply');
   assert.deepEqual(deleted, ['fresh', 'activity']);
-  assert.deepEqual(events, ['backup', 'delete', 'clearHall']);
+  assert.deepEqual(events, ['backup', 'delete']);
 });
 
 test('reset never deletes after backup creation or fresh-read failure', async () => {

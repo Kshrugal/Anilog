@@ -142,7 +142,7 @@ test('comparison loads own library only when requested; canceled target fetch ca
   for (const effect of effects) assert.equal(effect.expression.arguments[1].getText(pages).includes('targetUser,'), false);
 });
 
-test('saved selection opens synchronously with target ownership; Hall of Fame uses immediate fallback', () => {
+test('saved selection opens synchronously with target ownership; catalogue-only entries uses immediate fallback', () => {
   const saved = { id: 'v1', kitsuId: 'v1', title: 'Saved title', score: 8 };
   const state = boundary({ list: [saved] });
   const open = handler('openEntry', state.bindings);
@@ -172,7 +172,7 @@ test('follow transaction preserves other concurrent follows and removes legacy s
   assert.equal(state.state.setIsFriend, false);
 });
 
-test('saved provider IDs and Hall of Fame fallbacks keep the unified hydration routing', () => {
+test('saved provider IDs and catalogue-only entries fallbacks keep the unified hydration routing', () => {
   for (const [entry, id] of [
     [{ id: '123', title: 'Kitsu saved' }, '123'],
     [{ id: '123', provider: 'anilist', title: 'AniList saved' }, 'anilist:123'],

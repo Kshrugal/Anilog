@@ -20,7 +20,7 @@ const bioTree = ts.createSourceFile('ProfileBio.tsx', await readFile(new URL('..
 const bioBody = bioTree.statements.filter(n => !ts.isImportDeclaration(n)).map(n => n.getText(bioTree).replace(/^export /, '')).join('\n');
 const { ProfileBio } = new Function('React', `${compile(bioBody)};return {ProfileBio};`)(React);
 const bindings = { React, ProfileBio, IdentityImage: () => null, useState: initial => [initial, () => {}], ...profile, ...iconBindings, AnimeCard: ({ anime }) => React.createElement('div', { 'data-tile': anime.title }, anime.title) };
-const ui = new Function(...Object.keys(bindings), `${compile(uiBody)};return {PublicProfileHeader,PublicProfileOverview,PublicProfileFavorites,ProfileOwnerTools,ProfileIntroduction};`)(...Object.values(bindings));
+const ui = new Function(...Object.keys(bindings), `${compile(uiBody)};return {PublicProfileHeader,PublicProfileOverview,ProfileOwnerTools,ProfileIntroduction};`)(...Object.values(bindings));
 const entries = [
   { id: '1', kitsuId: '1', title: 'Watching fixture', status: 'watching', totalEpisodes: 12, watchedEpisodes: 3, imageUrl: 'https://example.test/anime.jpg' },
   { id: 'v1', kitsuId: 'v1', title: 'Reading fixture', status: 'watching', watchedEpisodes: 5, imageUrl: 'https://example.test/vn.jpg' },
@@ -28,7 +28,7 @@ const entries = [
 ].map(profile.profileEntry);
 const stats = { completed: 1, meanScore: '8.5', hours: 14, eps: 3, daysConsumed: '0.6' };
 test('immersive profile has real library media, tabs and follow actions without nested overview cards', () => {
-  const html = renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, favorites: [], stats, tab: 'overview', canFollow: true }));
+  const html = renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, stats, tab: 'overview', canFollow: true }));
   assert.match(html, /anime\.jpg/); assert.match(html, /vn\.jpg/); assert.match(html, /Statistics/); assert.match(html, /Library/); assert.match(html, /Follow/);
   const overview = renderToStaticMarkup(React.createElement(ui.PublicProfileOverview, { entries, stats }));
   assert.match(overview, /Watching fixture/); assert.match(overview, /Reading fixture/);
@@ -36,13 +36,13 @@ test('immersive profile has real library media, tabs and follow actions without 
   assert.match(overview, /Open entire library/);
 });
 test('private profile header never renders library images or counts', () => {
-  const html = renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, favorites: entries, stats, privateLibrary: true }));
+  const html = renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, stats, privateLibrary: true }));
   assert.doesNotMatch(html, /<img|anime\.jpg|vn\.jpg|3 titles/);
   assert.match(html, /Private library/);
 });
 test('bio joins the identity header, respects module order and visibility, and keeps safe formatting', () => {
   const value = identity.defaultIdentity(); value.bio = '**Profile introduction** ||Hidden ending|| <script>bad</script>';
-  const render = identity => renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, favorites: [], stats, tab: 'overview', identity }));
+  const render = identity => renderToStaticMarkup(React.createElement(ui.PublicProfileHeader, { name: 'Friend', entries, stats, tab: 'overview', identity }));
   const html = render(value);
   assert.match(html, /public-profile-avatar/); assert.match(html, /public-profile-intro/);
   assert.match(html, /<strong>Profile introduction<\/strong>/); assert.doesNotMatch(html, /<script>|<details[^>]*open/);

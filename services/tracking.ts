@@ -56,6 +56,6 @@ export function importPayload(entry: any, existing?: any) {
   return payload;
 }
 
-export function resetBackup(username: string, animeList: any[], activity: any[], hallOfFame: any[], exportedAt = new Date().toISOString()) {
-  return { exportedAt, username, animeList, activity, hallOfFame };
+export function resetBackup(username: string, animeList: any[], activity: any[], exportedAt = new Date().toISOString()) {
+  return { exportedAt, username, animeList, activity };
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, RotateCcw, UserPlus, Check, ArrowUpRight, Tv, BookOpen, BarChart3, Eye, ArrowLeft as ReturnIcon, Pencil, Settings, LogOut } from 'lucide-react';
 import { AnimeCard } from '../App';
-import { profileEntry, profileIsVn, profileLibrary, profileProgress } from '../services/profile';
+import { profileIsVn, profileLibrary, profileProgress } from '../services/profile';
 import { IdentityImage } from './ProfileIdentityVisual';
 import { ProfileBio } from './ProfileBio';
 import './public-profile.css';
@@ -16,7 +16,6 @@ export function ProfileOwnerTools({ preview, busy, onPreview, onCustomize, onAcc
     </>}
   </div>;
 }
-
 export function ProfileIntroduction({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   const id = React.useId();
@@ -27,8 +26,8 @@ export function ProfileIntroduction({ text }: { text: string }) {
   </div>;
 }
 
-export function PublicProfileHeader({ name, entries, favorites, stats, privateLibrary, loading, tab, onTab, onBack, onRefresh, canFollow, following, followBusy, onFollow, canCompare, identity = null, showTabs = true }) {
-  const covers = [...(identity ? [...identity.showcases.anime, ...identity.showcases.vn] : []), ...(privateLibrary ? [] : [...favorites.filter(Boolean), ...entries])].map(e => e.imageUrl || e.image || e.attributes?.posterImage?.large).filter((url, index, all) => url && all.indexOf(url) === index).slice(0, 6);
+export function PublicProfileHeader({ name, entries, stats, privateLibrary, loading, tab, onTab, onBack, onRefresh, canFollow, following, followBusy, onFollow, canCompare, identity = null, showTabs = true }) {
+  const covers = [...(identity ? [...identity.showcases.anime, ...identity.showcases.vn] : []), ...(privateLibrary ? [] : entries)].map(e => e.imageUrl || e.image || e.attributes?.posterImage?.large).filter((url, index, all) => url && all.indexOf(url) === index).slice(0, 6);
   return <header className="public-profile-header">
     <div className="public-profile-cover">
       {identity?.bannerMode === 'image' && identity.banner.url ? <IdentityImage image={identity.banner} className="absolute inset-0" /> : <div className="public-profile-cover-art" aria-hidden="true">{covers.map((url, index) => <img key={url} src={url} alt="" className={index > 2 ? 'hidden sm:block' : ''} referrerPolicy="no-referrer" />)}</div>}
@@ -69,10 +68,4 @@ export function PublicProfileOverview({ entries, stats, onSelect, onLibrary, onS
       <button onClick={onStats} className="border-t border-white/10 mt-5 pt-5 w-full text-left group"><span className="flex justify-between items-center text-sm font-semibold text-white"><span className="flex items-center gap-2"><BarChart3 size={16} />Statistics</span><ArrowUpRight size={15} className="text-cyan-300" /></span><span className="block mt-3 text-2xl text-cyan-200 tabular-nums">{stats.timePending ? 'Updating…' : stats.hours.toLocaleString()}<span className="text-xs text-gray-500 ml-2">known hours</span></span><span className="block text-xs text-gray-500 mt-2">{stats.eps.toLocaleString()} episodes · {stats.timePending ? '…' : stats.daysConsumed} days</span></button>
     </aside>
   </div>;
-}
-
-export function PublicProfileFavorites({ favorites, onSelect }) {
-  const entries = favorites.filter(Boolean).map(profileEntry);
-  if (!entries.length) return null;
-  return <section className="border-t border-white/10 pt-7"><h2 className="text-xl font-semibold mb-5">Hall of Fame</h2><div className="flex gap-4 overflow-x-auto pb-4 snap-x">{entries.map((entry, index) => <div key={`${entry.kitsuId}:${index}`} className="w-32 sm:w-40 shrink-0 snap-start"><AnimeCard anime={entry} onCardClick={() => onSelect(entry)} viewMode="grid" /></div>)}</div></section>;
 }

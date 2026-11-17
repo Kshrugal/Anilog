@@ -1498,7 +1498,7 @@ export default function App() {
       case "decks": return <DecksPage db={db} userId={userId} username={username} showToast={showToast} readOnly={guestMode} />;
       case "profile": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
-        : <ProfilePage db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
+        : <ProfilePage key={userId} db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
       case "user_profile": return viewTargetUser && viewTargetUser.uid === targetProfileUid
         ? <UserProfilePage key={targetProfileUid} db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} onLogout={handleLogout} readOnly={guestMode} />
         : <div className="py-24 text-center text-gray-500">Loading profile…</div>;

@@ -14,7 +14,7 @@ The shared compatibility migration is complete. Firebase is now on Blaze, with d
 - Safe text-only bio formatting (bold, italic and closed-by-default spoilers), five independent profile accents, and overview visibility/order.
 - Separate anime, visual novel and character showcases, up to eight items each. AniList and VNDB search, duplicate prevention, accessible ordering/removal, and direct catalogue links. Selecting a showcase never adds or changes a library entry.
 - Desktop/mobile editor previews and a visitor mode that reads the public library projection, respects explicit library visibility, and hides owner actions.
-- Existing Hall of Fame remains available as a fallback when no anime/VN showcases are selected; its original records are not deleted.
+- Hall of Fame was retired from the preview in the data portability phase. Existing legacy records are not deleted, and Favorites are the only profile showcases on preview.
 - Creator/support footer removed.
 
 ## Data boundaries

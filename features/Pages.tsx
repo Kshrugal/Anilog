@@ -44,7 +44,6 @@ import {
   Play as PlayIcon,
   LayoutGrid as ViewGridIcon,
   List as ViewListIcon,
-  Trophy as TrophyIcon,
   Calendar as CalendarIcon,
   Dices as DiceIcon,
   Heart as HeartIcon,
@@ -76,11 +75,12 @@ import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, 
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
+import { loadAccountExport } from '../services/account-export';
 import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
 import { HomeResume } from './HomeResume';
 import { LibraryGrid } from './LibraryGrid';
 import { resumeQueue, libraryStatusCounts, homeStatusLabel, normalizeSavedViews } from '../services/home-library';
-import { PublicProfileHeader, PublicProfileOverview, PublicProfileFavorites, ProfileOwnerTools } from './PublicProfile';
+import { PublicProfileHeader, PublicProfileOverview, ProfileOwnerTools } from './PublicProfile';
 import { analyze, runtimeFor, exactTime } from '../services/analytics';
 import { useFranchiseCatalogue } from './useFranchiseCatalogue';
 import { useProfileIdentity } from './useProfileIdentity';
@@ -1987,7 +1987,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
   );
 }
 
-function LibraryResetPanel({ db, userId, username, myList, activityData: _activityData, onReset, showToast }) {
+function LibraryResetPanel({ db, userId, username, onReset, showToast }) {
   const confirmationPhrase = 'DELETE MY LIBRARY';
   const [isOpen, setIsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
@@ -2010,20 +2010,17 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
     if (confirmation !== confirmationPhrase || isResetting) return;
     setIsResetting(true);
     try {
-      const profileRef = doc(db, `artifacts/${appId}/public/data/users/${userId}`);
-      const [listSnapshot, activitySnapshot, profileSnapshot] = await Promise.all([
+      const [listSnapshot, activitySnapshot] = await Promise.all([
         getDocsFromServer(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`)),
         getDocsFromServer(query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', userId))),
-        getDocFromServer(profileRef),
       ]);
-      if (!profileSnapshot.exists()) throw new Error('Profile no longer exists.');
       if (backupReady) {
         const fullActivity = await Promise.all(activitySnapshot.docs.map(async activityDoc => {
           const interactions = await getDocsFromServer(collection(activityDoc.ref, 'interactions'));
           return { ...activityDoc.data(), id: activityDoc.id, interactions: interactions.docs.map(item => ({ ...item.data(), id: item.id })) };
         }));
         const fullList = listSnapshot.docs.map(item => ({ ...item.data(), id: item.id }));
-        downloadBackup(resetBackup(username, fullList, fullActivity, profileSnapshot.data().hallOfFame || []));
+        downloadBackup(resetBackup(username, fullList, fullActivity));
       }
 
       const records = [...listSnapshot.docs, ...activitySnapshot.docs];
@@ -2037,11 +2034,6 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
           current.forEach(record => { if (record.exists()) transaction.delete(record.ref); });
         });
       }
-      await runTransaction(db, async transaction => {
-        const current = await transaction.get(profileRef);
-        if (!snapshotEqual(current, profileSnapshot)) throw new Error('Profile changed during reset. Please try again.');
-        transaction.update(profileRef, { hallOfFame: Array(10).fill(null) });
-      });
       onReset();
       setConfirmation('');
       setIsOpen(false);
@@ -2060,8 +2052,8 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
         <TrashIcon className="text-red-400" size={20} />
         Reset Library
       </h3>
-      <p className="text-xs text-gray-400 leading-relaxed font-medium">Remove your anime list, tracking activity, and Hall of Fame while keeping your account, username, and friends. Useful before a clean AniList re-import.</p>
-      <button onClick={() => setIsOpen(true)} disabled={myList.length === 0} className="mt-6 w-full py-4 flex items-center justify-center gap-3 bg-red-500/10 border border-red-500/25 rounded-2xl text-sm font-black text-red-300 uppercase tracking-widest transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
+      <p className="text-xs text-gray-400 leading-relaxed font-medium">Remove your library and tracking activity while keeping your account, profile favorites, and follows. Useful before a clean AniList re-import.</p>
+      <button onClick={() => setIsOpen(true)} className="mt-6 w-full py-4 flex items-center justify-center gap-3 bg-red-500/10 border border-red-500/25 rounded-2xl text-sm font-black text-red-300 uppercase tracking-widest transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
         <ResetIcon size={18} /> Reset Tracking Data
       </button>
 
@@ -2072,7 +2064,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
               <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-red-500/10 text-red-400"><AlertTriangleIcon /></div>
               <div>
                 <h4 className="text-2xl font-black text-white">Start with a clean library?</h4>
-                <p className="mt-2 text-sm leading-relaxed text-gray-400">This permanently removes <strong className="text-white">{myList.length} library entries</strong>, your tracking activity, and Hall of Fame. Your account and social connections stay intact.</p>
+                <p className="mt-2 text-sm leading-relaxed text-gray-400">This permanently removes your library entries and activity. Your profile favorites and social connections stay intact.</p>
               </div>
             </div>
 
@@ -2101,12 +2093,12 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
 export function ProfilePage({ db, userId, username, setUsername, showToast, openUserProfile }) {
   const { theme, setThemeId, viewMode, setViewMode, density, setDensity, showTrail, setShowTrail, showAmbient, setShowAmbient, backdrop, setBackdrop } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
-  const [hallOfFame, setHallOfFame] = useState([]);
-  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
-  const [activeSlotIndex, setActiveSlotIndex] = useState(null);
   const [activityData, setActivityData] = useState([]); 
   const [myList, setMyList] = useState([]);
-  const [myDecks, setMyDecks] = useState([]);
+  const [exporting, setExporting] = useState(false);
+  const exportPending = useRef(false);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountDataError, setAccountDataError] = useState('');
   const [libraryPublic, setLibraryPublic] = useState(false);
   const [privacySaving, setPrivacySaving] = useState(false);
   
@@ -2116,33 +2108,44 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   useEffect(() => {
       if(!db || !userId) return;
       const unsub = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), (doc) => {
-          if(doc.exists()) {
-              const stored = Array.isArray(doc.data().hallOfFame) ? doc.data().hallOfFame.slice(0, 10) : [];
-              setHallOfFame([...stored, ...Array(Math.max(0, 10 - stored.length)).fill(null)]);
-              setLibraryPublic(doc.data().libraryPublic === true);
-          } else {
-              setHallOfFame(Array(10).fill(null));
-          }
+          setLibraryPublic(doc.data()?.libraryPublic === true);
       });
       return () => unsub();
   }, [db, userId]);
 
   useEffect(() => {
-      if(!db || !userId) return;
-      // Get Activities
-      const q = query(collection(db, `artifacts/${appId}/public/data/activity`), where("userId", "==", userId), limit(100));
-      getDocs(q).then(snap => {
-          setActivityData(snap.docs.map(d => d.data()));
-      });
-      // Get Full List for Export/Journal
-      const listQ = collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`);
-      getDocs(listQ).then(snap => {
-          setMyList(snap.docs.map(d => d.data()));
-      });
-      getDocs(collection(db, `artifacts/${appId}/public/data/grids`)).then(snap => {
-          setMyDecks(snap.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(deck => deck.type === 'deck' && deck.userId === userId));
-      });
-  }, [db, userId]);
+    if (!db || !userId || activeTab === 'settings') return;
+    let active = true;
+    setAccountLoading(true);
+    setAccountDataError('');
+    const library = getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
+    const activity = activeTab === 'overview'
+      ? getDocs(query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', userId), limit(100)))
+      : Promise.resolve(null);
+    Promise.all([library, activity]).then(([entries, history]) => {
+      if (!active) return;
+      setMyList(entries.docs.map(entry => ({ ...entry.data(), id: entry.id })));
+      if (history) setActivityData(history.docs.map(entry => entry.data()));
+    }).catch(() => { if (active) setAccountDataError('Could not load your account data.'); })
+      .finally(() => { if (active) setAccountLoading(false); });
+    return () => { active = false; };
+  }, [db, userId, activeTab]);
+
+  const handleExport = async () => {
+    if (exportPending.current) return;
+    exportPending.current = true;
+    setExporting(true);
+    try {
+      const { library, activity, decks, profile } = await loadAccountExport(db, appId, userId);
+      exportUserData(library, username, activity, { decks, profile, preferences: { libraryPublic, theme: theme.id, viewMode, density, backdrop, showAmbient, showTrail } });
+      showToast('Account export prepared.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not export your data.', 'error');
+    } finally {
+      exportPending.current = false;
+      setExporting(false);
+    }
+  };
 
   const handleUpdate = async (e) => {
     e.preventDefault();
@@ -2154,53 +2157,9 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
     showToast("Profile Updated!", 'success');
   };
 
-  const handleSlotClick = (index) => {
-      setActiveSlotIndex(index);
-      setIsSelectorOpen(true);
-  };
-
-  const updateHallOfFame = async (anime, overrideTitle = null) => {
-      if (activeSlotIndex === null) return;
-      const newHall = [...hallOfFame];
-      if(anime === null) {
-          newHall[activeSlotIndex] = null;
-      } else {
-          const imageSrc = anime.imageUrl || anime.posterImage?.original || anime.posterImage?.large || anime.posterImage?.medium || anime.posterImage?.small || "https://placehold.co/200x300?text=No+Image";
-          const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || String(anime.kitsuId || anime.id).startsWith('v');
-          newHall[activeSlotIndex] = {
-              id: anime.kitsuId || anime.id,
-              title: overrideTitle?.trim() || anime.title || anime.canonicalTitle || 'Untitled',
-              image: imageSrc,
-              mediaType: isVn ? 'vn' : 'anime',
-          };
-      }
-      setHallOfFame(newHall);
-      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: newHall });
-      setIsSelectorOpen(false);
-      setActiveSlotIndex(null);
-      showToast(anime === null ? 'Hall of Fame slot cleared.' : 'Hall of Fame updated.');
-  };
-
-  const moveHallItem = async (index, direction) => {
-      const target = index + direction;
-      if (target < 0 || target >= hallOfFame.length) return;
-      const newHof = [...hallOfFame];
-      [newHof[index], newHof[target]] = [newHof[target], newHof[index]];
-      setHallOfFame(newHof);
-      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: newHof });
-  };
-
-  const removeHallItem = async (index) => {
-      const newHof = [...hallOfFame];
-      newHof[index] = null;
-      setHallOfFame(newHof);
-      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { hallOfFame: newHof });
-      showToast('Hall of Fame slot cleared.');
-  };
-
-  const { catalogue, state: runtimeState } = useFranchiseCatalogue(myList);
+  const { catalogue, state: runtimeState } = useFranchiseCatalogue(activeTab === 'overview' ? myList : []);
   const stats = useMemo(() => {
-      const summary = analyze(myList, {}, false, { catalogue });
+      const summary = analyze(activeTab === 'overview' ? myList : [], {}, false, { catalogue });
       const completed = summary.statuses.completed;
       return { 
           total: myList.length,
@@ -2210,7 +2169,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
           completed,
           completionRate: myList.length ? Math.round((completed / myList.length) * 100) : 0
       };
-  }, [myList, catalogue, runtimeState.loading]);
+  }, [activeTab, myList, catalogue, runtimeState.loading]);
 
   const handleLibraryPrivacyToggle = async () => {
       if (!db || !userId || privacySaving) return;
@@ -2248,16 +2207,18 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                     onClick={() => setActiveTab(tab)}
                     className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${activeTab === tab ? 'bg-white text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                    >
-                       {tab === 'overview' ? 'Favorites' : tab === 'journal' ? 'Private journal' : tab}
+                       {tab === 'overview' ? 'Library overview' : tab === 'journal' ? 'Private journal' : tab}
                    </button>
                ))}
            </div>
       </div>
-      {activeTab === 'statistics' && <AnalyticsDashboard entries={myList} userId={userId} onSelect={setProfileSelection} />}
+      {activeTab !== 'settings' && accountDataError && <p role="alert" className="text-sm text-rose-300">{accountDataError}</p>}
+      {activeTab !== 'settings' && accountLoading && <p role="status" className="text-sm text-gray-400">Loading account data…</p>}
+      {activeTab === 'statistics' && !accountLoading && !accountDataError && <AnalyticsDashboard entries={myList} userId={userId} onSelect={setProfileSelection} />}
       {profileSelection && <AnimeDetailsModal key={profileSelection.kitsuId || profileSelection.id} anime={profileSelection} onClose={() => setProfileSelection(null)} db={db} userId={userId} ownerId={userId} username={username} />}
-      {activeTab === 'overview' && <section className="border-b border-white/10 pb-6"><div className="flex items-center justify-between gap-4 mb-4"><h3 className="text-lg font-semibold">Library activity</h3><button onClick={() => setActiveTab('statistics')} className="text-sm text-cyan-200 hover:text-white">View statistics</button></div><div className="grid grid-cols-2 sm:grid-cols-5 gap-3">{Object.entries(analyze(myList, {}, false, { catalogue }).statuses).map(([status, count]) => <div key={status} className="border-l-2 border-cyan-300/40 pl-3"><p className="text-2xl font-semibold">{count}</p><p className="text-xs text-gray-400 capitalize">{status === 'watching' ? 'Watching / reading' : status}</p></div>)}</div><div className="mt-5 flex flex-wrap gap-3">{myList.filter(entry => entry.status === 'watching').map(entry => <button key={entry.kitsuId || entry.id} onClick={() => setProfileSelection(entry)} className="flex items-center gap-3 text-left min-w-0 max-w-full"><img src={entry.imageUrl} alt="" className="w-10 h-14 object-cover rounded" /><span className="text-sm break-words">{entry.title}</span></button>)}</div></section>}
+      {activeTab === 'overview' && !accountLoading && !accountDataError && <section className="border-b border-white/10 pb-6"><div className="flex items-center justify-between gap-4 mb-4"><h3 className="text-lg font-semibold">Library activity</h3><button onClick={() => setActiveTab('statistics')} className="text-sm text-cyan-200 hover:text-white">View statistics</button></div><div className="grid grid-cols-2 sm:grid-cols-5 gap-3">{Object.entries(analyze(myList, {}, false, { catalogue }).statuses).map(([status, count]) => <div key={status} className="border-l-2 border-cyan-300/40 pl-3"><p className="text-2xl font-semibold">{count}</p><p className="text-xs text-gray-400 capitalize">{status === 'watching' ? 'Watching / reading' : status}</p></div>)}</div><div className="mt-5 flex flex-wrap gap-3">{myList.filter(entry => entry.status === 'watching').map(entry => <button key={entry.kitsuId || entry.id} onClick={() => setProfileSelection(entry)} className="flex items-center gap-3 text-left min-w-0 max-w-full"><img src={entry.imageUrl} alt="" className="w-10 h-14 object-cover rounded" /><span className="text-sm break-words">{entry.title}</span></button>)}</div></section>}
       
-      {activeTab === 'overview' && (
+      {activeTab === 'overview' && !accountLoading && !accountDataError && (
           <>
             {/* Stats Panel */}
             <div className="bg-[#0f111a] border border-white/5 rounded-xl p-8 shadow-xl">
@@ -2278,35 +2239,6 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                 <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-[#3db4f2]" style={{ width: `${stats.completionRate}%` }} /></div><div className="mt-2 flex justify-between text-[10px] font-bold text-gray-600"><span>{stats.completed} completed</span><span>{stats.completionRate}% of library</span></div>
             </div>
 
-            {/* Hall of Fame */}
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-yellow-500/10 rounded-full blur-[100px] pointer-events-none" />
-                <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-2 relative z-10"><TrophyIcon /> Hall of Fame</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 relative z-10">
-                    {hallOfFame.map((item, i) => (
-                        <motion.div
-                            whileHover={{ scale: 1.05, y: -5 }}
-                            key={i} 
-                            onClick={() => handleSlotClick(i)}
-                            className={`aspect-[2/3] rounded-xl border-2 border-dashed ${item ? 'border-transparent shadow-lg' : 'border-white/10 hover:border-white/30'} flex items-center justify-center cursor-pointer relative overflow-hidden bg-black/20 group transition-all focus-within:ring-2 focus-within:ring-white/50`}
-                        >
-                            {item ? (
-                                <>
-                                    <img src={item.image || "https://placehold.co/200x300?text=?"} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
-                                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 p-2 text-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                                        <span className="mb-2 rounded bg-white/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-gray-300">{item.mediaType === 'vn' ? 'Visual novel' : 'Anime'}</span><p className="mb-3 line-clamp-3 text-xs font-bold text-white">{item.title}</p>
-                                        <div className="flex gap-1"><button title="Move left" disabled={i === 0} onClick={event => { event.stopPropagation(); moveHallItem(i, -1); }} className="rounded bg-white/10 px-2 py-1 text-xs text-white disabled:opacity-25">←</button><button title="Replace" onClick={event => { event.stopPropagation(); handleSlotClick(i); }} className="rounded bg-white px-2 py-1 text-[10px] font-bold text-black">Edit</button><button title="Remove" onClick={event => { event.stopPropagation(); removeHallItem(i); }} className="rounded bg-red-500/20 px-2 py-1 text-xs text-red-300">×</button><button title="Move right" disabled={i === 9} onClick={event => { event.stopPropagation(); moveHallItem(i, 1); }} className="rounded bg-white/10 px-2 py-1 text-xs text-white disabled:opacity-25">→</button></div>
-                                    </div>
-                                    <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30" />
-                                </>
-                            ) : (
-                                <button type="button" aria-label={`Choose Hall of Fame slot ${i + 1}`} className="absolute inset-0 text-xs font-black text-white/30 uppercase tracking-widest">Slot {i + 1}</button>
-                            )}
-                        </motion.div>
-                    ))}
-                </div>
-            </div>
-
             {/* Activity Heatmap */}
             <div className="p-6 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
                 <h3 className="text-xl font-black text-white mb-4">Activity Heatmap</h3>
@@ -2315,7 +2247,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
           </>
       )}
 
-      {activeTab === 'journal' && (
+      {activeTab === 'journal' && !accountLoading && !accountDataError && (
            <JournalView list={myList} />
       )}
 
@@ -2433,16 +2365,18 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                         Data Portability
                     </h3>
                     <p className="text-xs text-gray-400 mb-6 leading-relaxed font-medium">
-                        You own your data. Export your entire anime list and activity history as a standard JSON file at any time.
+                        Download your anime and VN library, including private notes, plus your activity, decks, profile customization, and current display preferences. Keep the file private.
                     </p>
                     <motion.button 
                         whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.1)' }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => exportUserData(myList, username, activityData, { decks: myDecks, hallOfFame, preferences: { libraryPublic, theme: theme.id, viewMode, density } })}
+                        onClick={handleExport}
+                        disabled={exporting}
+                        aria-busy={exporting}
                         className="w-full py-4 flex items-center justify-center gap-3 bg-white/5 border border-white/10 rounded-2xl text-sm font-black text-white uppercase tracking-widest transition-all"
                     >
                         <DownloadIcon size={18} />
-                        Export My Data
+                        {exporting ? 'Preparing export…' : 'Export my data'}
                     </motion.button>
                 </div>
 
@@ -2450,12 +2384,9 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                     db={db}
                     userId={userId}
                     username={username}
-                    myList={myList}
-                    activityData={activityData}
                     onReset={() => {
                         setMyList([]);
                         setActivityData([]);
-                        setHallOfFame(Array(10).fill(null));
                     }}
                     showToast={showToast}
                 />
@@ -2463,7 +2394,6 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
         </div>
       )}
       
-      {isSelectorOpen && <HallOfFameSelector onClose={() => { setIsSelectorOpen(false); setActiveSlotIndex(null); }} onSelect={updateHallOfFame} myList={myList} currentItem={activeSlotIndex === null ? null : hallOfFame[activeSlotIndex]} slotNumber={activeSlotIndex === null ? null : activeSlotIndex + 1} />}
     </div>
   );
 }
@@ -2511,56 +2441,6 @@ function ActivityHeatmap({ data, theme }) {
     )
 }
 
-function HallOfFameSelector({ onClose, onSelect, myList, currentItem, slotNumber }) {
-    const [query, setQuery] = useState("");
-    const [mediaFilter, setMediaFilter] = useState("all");
-    const [override, setOverride] = useState(currentItem?.title || "");
-    const [selected, setSelected] = useState(null);
-    const results = useMemo(() => (myList || []).filter(item => {
-        const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel' || String(item.kitsuId || item.id).startsWith('v');
-        const matchesType = mediaFilter === 'all' || (mediaFilter === 'vn' ? isVn : !isVn);
-        const matchesQuery = !query.trim() || String(item.title || item.canonicalTitle || '').toLowerCase().includes(query.trim().toLowerCase());
-        return matchesType && matchesQuery;
-    }).sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || String(a.title || '').localeCompare(String(b.title || ''))), [mediaFilter, myList, query]);
-
-    const choose = (item) => {
-        setSelected(item);
-        setOverride(item.title || item.canonicalTitle || '');
-    };
-    const selectedIsVn = selected && (selected.mediaType === 'vn' || selected.showType === 'Visual Novel' || String(selected.kitsuId || selected.id).startsWith('v'));
-    const selectedImage = selected && (selected.imageUrl || selected.posterImage?.original || selected.posterImage?.large || selected.posterImage?.medium || selected.posterImage?.small);
-
-    return createPortal(
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} role="dialog" aria-modal="true" aria-labelledby="hall-of-fame-title" className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-gray-900 p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
-                <div className="mb-4 flex items-center justify-between gap-3"><h3 id="hall-of-fame-title" className="text-xl font-bold text-white">{selected ? 'Confirm Selection' : 'Select Anime or Visual Novel'}</h3><button onClick={onClose} aria-label="Close selector" title="Close" className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><CloseIcon /></button></div>
-                {!selected ? <>
-                    <input autoFocus aria-label="Search your library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your library..." className="mb-4 w-full rounded-xl border border-white/10 bg-black/40 p-3 text-white outline-none focus:border-blue-500" />
-                    <div className="mb-4 flex flex-wrap gap-2">{[{ id: 'all', label: 'All' }, { id: 'anime', label: 'Anime' }, { id: 'vn', label: 'Visual novels' }].map(option => <button key={option.id} onClick={() => setMediaFilter(option.id)} aria-pressed={mediaFilter === option.id} className={`rounded-lg px-3 py-2 text-xs font-bold ${mediaFilter === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-400 hover:text-white'}`}>{option.label}</button>)}</div>
-                    <div className="min-h-0 space-y-2 overflow-y-auto custom-scrollbar pr-2">
-                        {currentItem && <button onClick={() => onSelect(null)} className="w-full rounded-lg p-3 text-left text-red-400 hover:bg-white/5">Remove from slot</button>}
-                        {results.map(item => {
-                            const isVn = item.mediaType === 'vn' || item.showType === 'Visual Novel' || String(item.kitsuId || item.id).startsWith('v');
-                            const image = item.imageUrl || item.posterImage?.large || item.posterImage?.medium || item.posterImage?.small;
-                            return <button key={String(item.kitsuId || item.id)} onClick={() => choose(item)} className="group flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-white/5">
-                                <img src={image || 'https://placehold.co/40x56?text=?'} alt="" className="h-14 w-10 shrink-0 rounded border border-white/5 object-cover" referrerPolicy="no-referrer" />
-                                <span className="min-w-0 flex-1"><span className="block break-words font-medium text-white">{item.title || item.canonicalTitle}</span><span className={`text-[10px] font-bold uppercase tracking-wider ${isVn ? 'text-purple-400' : 'text-blue-400'}`}>In Library · {isVn ? 'Visual novel' : 'Anime'}{item.favorite ? ' · Favorite' : ''}</span></span>
-                                <span className="text-white/20 transition-colors group-hover:text-white/50"><PlayIcon size={16} /></span>
-                            </button>;
-                        })}
-                        {results.length === 0 && <p className="py-12 text-center text-sm text-gray-500">No matching titles in your library.</p>}
-                    </div>
-                </> : <div className="space-y-4 overflow-y-auto">
-                    <div className="flex items-center gap-4 rounded-xl bg-white/5 p-4"><img src={selectedImage || 'https://placehold.co/100x150?text=No+Image'} alt="" className="h-16 w-12 shrink-0 rounded object-cover" referrerPolicy="no-referrer" /><div className="min-w-0"><span className="block break-words font-bold text-white">{selected.title || selected.canonicalTitle}</span><span className={`text-[10px] font-bold uppercase ${selectedIsVn ? 'text-purple-400' : 'text-blue-400'}`}>{selectedIsVn ? 'Visual novel' : 'Anime'} · Slot {slotNumber}</span></div></div>
-                    <label className="block"><span className="mb-2 block text-xs font-bold uppercase text-gray-400">Display Title</span><input value={override} onChange={event => setOverride(event.target.value)} maxLength={100} className="w-full rounded-xl border border-white/10 bg-black/40 p-3 text-white outline-none focus:border-blue-500" /></label>
-                    <div className="flex gap-2"><button onClick={() => setSelected(null)} className="flex-1 rounded-lg bg-white/5 py-2 text-white hover:bg-white/10">Back</button><button onClick={() => onSelect(selected, override)} className="flex-1 rounded-lg bg-blue-600 py-2 font-bold text-white hover:bg-blue-500">Confirm</button></div>
-                </div>}
-            </motion.div>
-        </div>, document.body
-    );
-}
-
-
 export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, onLogout = undefined, readOnly = false }) {
     const targetUid = targetUser?.uid;
     const targetUsername = targetUser?.username;
@@ -2589,7 +2469,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     const [friendBusy, setFriendBusy] = useState(false);
     const [searchQuery, setSearchQuery] = useState(""); 
     const { theme } = useContext(ThemeContext);
-    const [friendHallOfFame, setFriendHallOfFame] = useState([]);
     const [isFriend, setIsFriend] = useState(false);
     const [activityData, setActivityData] = useState([]);
     const [libraryPrivate, setLibraryPrivate] = useState(false);
@@ -2605,7 +2484,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         setActivityData([]);
         setActivityLoading(true);
         setActivityError('');
-        setFriendHallOfFame([]);
         setLibraryPrivate(false);
         setTargetLibraryPublic(false);
         setIsFriend(false);
@@ -2623,7 +2501,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 const friendUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUid}`));
                 if (!isMounted) return;
                 if(friendUserSnap.exists() && isMounted) {
-                    setFriendHallOfFame(friendUserSnap.data().hallOfFame || Array(10).fill(null));
                     setLibraryPrivate(friendUserSnap.data().libraryPublic !== true && visitor);
                     setTargetLibraryPublic(friendUserSnap.data().libraryPublic === true);
                 }
@@ -2757,7 +2634,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     {identityState.error && <p role="alert" className="text-amber-300">{identityState.error}</p>}
     {targetUid === currentUserId && !readOnly && <ProfileOwnerTools preview={visitorPreview} busy={loading || identityState.loading || !!identityState.error} onPreview={() => setVisitorPreview(value => !value)} onCustomize={() => setEditingIdentity(true)} onAccount={() => setPage('profile')} onLogout={onLogout} />}
     {editingIdentity && !visitor && <ProfileIdentityEditor db={db} appId={appId} uid={currentUserId} name={targetUsername} initial={identity} revision={identityState.revision} entries={list} libraryPublic={targetLibraryPublic} onClose={() => setEditingIdentity(false)} onSaved={result => { setEditingIdentity(false); showToast(result.cleanupPending ? 'Profile saved. Image cleanup will retry next time.' : 'Profile saved.'); }} />}
-    <PublicProfileHeader identity={identity} name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
+    <PublicProfileHeader identity={identity} name={targetUsername} entries={list} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
     {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
     {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}
     {tab === 'overview' && <div className="flex flex-col gap-9">
@@ -2773,7 +2650,6 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Activity</h2><div className="overflow-x-auto">{!activityLoading && !activityError && <ActivityHeatmap data={activityData} theme={theme} />}</div><p className="text-xs text-gray-500 mt-3">Based on the most recent 20 public activity events.</p></section>
       </div>}
       </React.Fragment>)}
-      {!libraryPrivate && identity.modules.includes('anime') && identity.modules.includes('vn') && !identity.showcases.anime.length && !identity.showcases.vn.length && <PublicProfileFavorites favorites={friendHallOfFame} onSelect={openEntry} />}
     </div>}
     {tab === "library" && !libraryPrivate && (
                 <div className="space-y-4">
