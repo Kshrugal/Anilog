@@ -23,11 +23,9 @@ jobs:
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
       - run: npm ci
-      - name: Deploy Firestore rules
-        run: npx firebase deploy --only firestore:rules --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive
-      - name: Deploy and verify profile image rules
-        if: inputs.include_storage
+      - name: Deploy and verify Firebase privacy rules
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-        run: node scripts/deploy-storage-rules.mjs
+          DEPLOY_STORAGE_RULES: ${{ inputs.include_storage }}
+        run: node scripts/deploy-firebase-rules.mjs

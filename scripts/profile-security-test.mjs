@@ -77,6 +77,7 @@ try {
   await denied(setDoc(doc(owner.firestore(), showcasePath), { revision: 2, items: [] }));
   const appearance = { themeId: 'neon', viewMode: 'grid', density: 'comfortable', showTrail: true, showQuickTip: true, sidebarCollapsed: false };
   await allowed(setDoc(doc(owner.firestore(), 'artifacts/demo-anilog/privateUsers/owner/settings/appearance'), appearance));
+  await allowed(updateDoc(doc(owner.firestore(), 'artifacts/demo-anilog/privateUsers/owner/settings/appearance'), { themeId: 'monochrome' }));
   await denied(updateDoc(doc(owner.firestore(), userPath), { settings: appearance }));
   const path = 'profile-images/owner/test.webp';
   await allowed(owner.storage().ref(path).put(new Uint8Array([1, 2, 3]), { contentType: 'image/webp' }));

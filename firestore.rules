@@ -63,7 +63,7 @@ service cloud.firestore {
       allow read, delete: if isOwner(userId);
       allow create, update: if isOwner(userId) && settingId == 'appearance'
         && request.resource.data.keys().hasOnly(['themeId', 'viewMode', 'density', 'showTrail', 'showQuickTip', 'sidebarCollapsed'])
-        && request.resource.data.themeId in ['neon', 'toxic', 'sunset', 'indigo', 'orange', 'mono', 'emerald']
+        && request.resource.data.themeId in ['neon', 'toxic', 'sunset', 'indigo', 'orange', 'mono', 'monochrome', 'emerald']
         && request.resource.data.viewMode in ['grid', 'list', 'journal']
         && request.resource.data.density in ['comfortable', 'compact']
         && request.resource.data.showTrail is bool && request.resource.data.showQuickTip is bool && request.resource.data.sidebarCollapsed is bool;

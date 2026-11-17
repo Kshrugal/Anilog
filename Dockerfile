@@ -30,7 +30,7 @@ FROM node:20-slim
 WORKDIR /app
 
 # Install 'serve' to host the static files
-RUN npm install -g serve
+RUN npm install -g serve@14.2.8
 
 # Copy built files from build stage
 COPY --from=build /app/dist ./dist

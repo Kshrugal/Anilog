@@ -60,7 +60,7 @@ export function ProfileIdentityEditor({ db, appId, uid, name, initial, revision,
   const change = useCallback((patch: Partial<ProfileIdentity>) => { dirty.current = true; setChanged(true); setDiscard(false); setDraft(value => ({ ...value, ...patch })); }, []);
   function editImage(target: 'avatar' | 'banner') { setSection('appearance'); setPreview(false); setKind(target); }
   async function upload(file?: File) {
-    if (!file || !uploadsEnabled) return;
+    if (!file || !uploadsEnabled || busy.current) return;
     const current = ++generation.current, selectedKind = kind;
     setError(''); setProcessing(true); busy.current = true;
     try {
