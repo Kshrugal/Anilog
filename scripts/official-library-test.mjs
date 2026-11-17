@@ -51,7 +51,7 @@ function render(name, state, context = {}) {
       const key = stateNames[index++];
       return [Object.hasOwn(state, key) ? state[key] : typeof initial === 'function' ? initial() : initial, () => {}];
     },
-    useEffect: () => {}, useMemo: callback => callback(),
+    useEffect: () => {}, useMemo: callback => callback(), useCallback: callback => callback,
     useContext: () => ({ theme, viewMode: 'grid', ...context }), ThemeContext: {},
     localStorage: { getItem: () => '[]' }, scoreSummary, AVG_EPISODE_MINUTES: 24,
     motion: new Proxy({}, { get: (_target, tag) => ({ children, className, title }) => React.createElement(tag, { className, title }, children) }),

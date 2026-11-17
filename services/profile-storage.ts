@@ -9,8 +9,11 @@ export async function prepareProfileImage(file: File): Promise<Blob> {
     if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 40_000_000) throw new Error('Image dimensions are too large.');
     const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Your browser could not prepare this image.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('Image conversion failed.')), 'image/webp', 0.88));
+    if (blob.type !== 'image/webp') throw new Error('Your browser does not support WebP image uploads. Try an updated browser.');
     if (blob.size > 5 * 1024 * 1024) throw new Error('Image is too large after compression.');
     return blob;
   } finally { bitmap.close(); }

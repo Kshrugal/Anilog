@@ -30,6 +30,49 @@ const bind = async (path, bindings, exports) => {
   const body = ast.statements.filter(n => !ts.isImportDeclaration(n)).map(n => n.getText(ast).replace(/^export /, '')).join('\n');
   return new Function(...Object.keys(bindings), `${compile(body)}; return {${exports}};`)(...Object.values(bindings));
 };
+test('profile crop batches pointer updates, clamps focus, and cancels pending work on close', async () => {
+  const scheduled = new Map(), changes = [], cleanups = [];
+  let sequence = 0;
+  const { ProfileImageEditor } = await bind('../features/ProfileImageEditor.tsx', {
+    React, useState: value => [value, () => {}], useRef: value => ({ current: value }),
+    useEffect: action => { const cleanup = action(); if (cleanup) cleanups.push(cleanup); },
+    requestAnimationFrame: action => { scheduled.set(++sequence, action); return sequence; },
+    cancelAnimationFrame: id => scheduled.delete(id),
+    IdentityImage: 'img', ImagePlus: 'i', RotateCcw: 'i', Trash2: 'i', Upload: 'i', UserRound: 'i',
+  }, 'ProfileImageEditor');
+  const element = ProfileImageEditor({ kind: 'avatar', image: identity.emptyImage(), hasImage: true, enabled: true, onChange: image => changes.push(image), onUpload() {}, onRemove() {} });
+  const find = node => React.isValidElement(node) ? node.props.onPointerDown ? node : React.Children.toArray(node.props.children).map(find).find(Boolean) : null;
+  const crop = find(element);
+  crop.props.onPointerDown({ clientX: 100, clientY: 100, pointerId: 1, preventDefault() {}, currentTarget: { getBoundingClientRect: () => ({ width: 200, height: 200 }), setPointerCapture() {} } });
+  for (let i = 1; i <= 20; i++) crop.props.onPointerMove({ clientX: 100 + i, clientY: 100 - i });
+  assert.equal(scheduled.size, 1); assert.equal(changes.length, 0);
+  scheduled.values().next().value();
+  assert.deepEqual(changes.map(image => [image.x, image.y]), [[40, 60]]);
+  crop.props.onPointerMove({ clientX: 1000, clientY: -1000 });
+  crop.props.onPointerUp();
+  assert.deepEqual(changes.at(-1), { ...identity.emptyImage(), x: 0, y: 100 });
+  assert.equal(scheduled.size, 0);
+  crop.props.onPointerMove({ clientX: 0, clientY: 0 });
+  assert.equal(scheduled.size, 0);
+  cleanups.forEach(cleanup => cleanup());
+});
+test('upload preparation validates inputs, downsizes large images, and releases image memory', async () => {
+  let closed = 0, drawn = 0, outputType = 'image/webp';
+  const bitmap = { width: 4096, height: 2048, close() { closed++; } };
+  const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() { drawn++; } }), toBlob: callback => callback(new Blob(['image'], { type: outputType })) };
+  const { prepareProfileImage } = await bind('../services/profile-storage.ts', {
+    createImageBitmap: async () => bitmap, document: { createElement: () => canvas },
+  }, 'prepareProfileImage');
+  for (const input of [{ type: 'image/svg+xml', size: 100 }, { type: 'image/png', size: 0 }, { type: 'image/png', size: 9 * 1024 * 1024 }]) await assert.rejects(prepareProfileImage(input), /JPEG, PNG, or WebP/);
+  const image = await prepareProfileImage({ type: 'image/png', size: 100 });
+  assert.equal(image.type, 'image/webp'); assert.equal(canvas.width, 2048); assert.equal(canvas.height, 1024); assert.equal(drawn, 1); assert.equal(closed, 1);
+  outputType = 'image/png';
+  await assert.rejects(prepareProfileImage({ type: 'image/png', size: 100 }), /does not support WebP/);
+  assert.equal(closed, 2);
+  bitmap.width = bitmap.height = 10000;
+  await assert.rejects(prepareProfileImage({ type: 'image/png', size: 100 }), /dimensions/);
+  assert.equal(closed, 3);
+});
 test('combined layout visibility and ordering move media as one section', async () => {
   const { profileLayoutRows, toggleProfileModule, moveProfileModule } = await bind('../services/profile-layout.ts', identity, 'profileLayoutRows,toggleProfileModule,moveProfileModule');
   const value = { ...identity.defaultIdentity(), mediaLayout: 'combined' };

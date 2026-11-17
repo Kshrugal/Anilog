@@ -10,6 +10,7 @@ const pages = ts.createSourceFile('Pages.tsx', await readFile(new URL('../featur
 
 // Execute the real handler bodies with a small in-memory Firestore boundary.
 function handler(component, name, bindings) {
+  bindings = { useCallback: callback => callback, ...bindings };
   const fn = pages.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === component);
   let initializer;
   function visit(node) {

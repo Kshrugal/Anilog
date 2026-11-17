@@ -2,6 +2,7 @@ import React, {
   useState,
   useEffect,
   useMemo,
+  useCallback,
   useContext,
   useRef,
 } from "react";
@@ -256,7 +257,7 @@ export function HomePage({ db, userId, username, showToast }) {
     });
   }, [myList, statusFilter, sortBy, localQuery, mediaFilter, collectionFilter, tagFilter]);
 
-  const handleQuickIncrement = async (anime) => {
+  const handleQuickIncrement = useCallback(async (anime) => {
     if(!db || !userId) return;
     const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, anime.id);
     
@@ -291,7 +292,7 @@ export function HomePage({ db, userId, username, showToast }) {
         console.error("Quick update failed", e);
         showToast("Failed to update", 'error');
     }
-  };
+  }, [db, userId, username, showToast]);
 
   useEffect(() => {
     localStorage.setItem(`anilog_saved_views_${userId}`, JSON.stringify(savedViews));
@@ -319,6 +320,16 @@ export function HomePage({ db, userId, username, showToast }) {
       setSelectedIds([]); setSelectionMode(false);
     } catch (error) { console.error(error); showToast('Bulk update failed. Nothing was changed.', 'error'); }
   };
+
+  const libraryCards = useMemo(() => filteredList.map((anime) => (
+                    <div key={anime.id} className="relative">{selectionMode && <button onClick={() => setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id])} aria-label={"Select " + anime.title} aria-pressed={selectedIds.includes(anime.id)} className={`absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-md border text-xs font-black shadow-lg ${selectedIds.includes(anime.id) ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/30 bg-black/70 text-transparent'}`}>✓</button>}<AnimeCard
+                        key={anime.id}
+                        anime={anime}
+                        onCardClick={() => selectionMode ? setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id]) : setSelectedAnimeKitsuId(anime.kitsuId)}
+                        onQuickIncrement={statusFilter === 'watching' ? () => handleQuickIncrement(anime) : undefined}
+                        viewMode={viewMode === 'journal' ? 'list' : viewMode}
+                    /></div>
+                )), [filteredList, selectionMode, selectedIds, statusFilter, viewMode, handleQuickIncrement]);
 
   const gridVariants = {
     hidden: { opacity: 0 },
@@ -516,7 +527,7 @@ export function HomePage({ db, userId, username, showToast }) {
       <LayoutGroup>
         <AnimatePresence mode="popLayout">
             <motion.div 
-                key={`${statusFilter}-${sortBy}-${viewMode}`}
+                key={`${statusFilter}-${viewMode}`}
                 variants={gridVariants}
                 initial="hidden"
                 animate="show"
@@ -533,15 +544,7 @@ export function HomePage({ db, userId, username, showToast }) {
                         {localQuery || mediaFilter !== 'all' || collectionFilter !== 'all' || tagFilter !== 'all' ? <button onClick={() => { setMediaFilter('all'); setCollectionFilter('all'); setTagFilter('all'); setLocalQuery(''); }} className="mt-3 rounded-lg bg-white/5 px-3 py-2 text-xs font-bold text-gray-300 transition-colors hover:bg-white/10 hover:text-white">Clear filters</button> : <p className="text-sm mt-2">Go to Search to find something to watch!</p>}
                     </motion.div>
                 )}
-                {!loading && !error && filteredList.map((anime) => (
-                    <div key={anime.id} className="relative">{selectionMode && <button onClick={() => setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id])} aria-label={"Select " + anime.title} aria-pressed={selectedIds.includes(anime.id)} className={`absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-md border text-xs font-black shadow-lg ${selectedIds.includes(anime.id) ? 'border-blue-400 bg-blue-500 text-white' : 'border-white/30 bg-black/70 text-transparent'}`}>✓</button>}<AnimeCard
-                        key={anime.id} 
-                        anime={anime} 
-                        onCardClick={() => selectionMode ? setSelectedIds(current => current.includes(anime.id) ? current.filter(id => id !== anime.id) : [...current, anime.id]) : setSelectedAnimeKitsuId(anime.kitsuId)}
-                        onQuickIncrement={statusFilter === 'watching' ? () => handleQuickIncrement(anime) : undefined}
-                        viewMode={viewMode === 'journal' ? 'list' : viewMode}
-                    /></div>
-                ))}
+                {!loading && !error && libraryCards}
             </motion.div>
         </AnimatePresence>
       </LayoutGroup>
