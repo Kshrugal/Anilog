@@ -95,7 +95,8 @@ service cloud.firestore {
         // Authentication owns the email address. Public profile documents must
         // never contain it, including after partial updates to legacy records.
         allow create, update: if isOwner(userId) && profileHasNoPrivateEmail()
-          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'hallOfFame', 'libraryPublic'])
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'hallOfFame', 'libraryPublic', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
+          && (resource == null ? !request.resource.data.keys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']) : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']))
           && request.resource.data.uid == userId && request.resource.data.username is string
           && request.resource.data.username.size() > 0 && request.resource.data.username.size() <= 80
           && (!('libraryPublic' in request.resource.data) || request.resource.data.libraryPublic is bool);
