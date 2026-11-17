@@ -51,13 +51,6 @@ jobs:
           npm ci
           npm run check
 
-      - name: Audit and backfill sanitized public libraries
-        env:
-          FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
-          CONFIRM_PROFILE_MIGRATION: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-        run: node scripts/backfill-public-library.mjs
-
       - name: Build and Deploy to Cloud Run
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
@@ -74,4 +67,4 @@ jobs:
       # Deploy rules after the compatible frontend is live so sign-up never
       # encounters a rules/code mismatch during rollout.
       - name: Deploy Firestore rules
-        run: npx firebase deploy --only firestore:rules,storage --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive
+        run: npx --yes firebase-tools@13.35.1 deploy --only firestore:rules --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive
