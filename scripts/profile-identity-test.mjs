@@ -82,27 +82,26 @@ test('combined layout visibility and ordering move media as one section', async 
   assert.deepEqual(toggleProfileModule({ ...value, modules: ['bio', 'characters'] }, 'anime', true), ['bio', 'characters', 'anime', 'vn']);
   assert.deepEqual(moveProfileModule(value, 'bio', -1), value.modules);
 });
-test('show-based character selection uses exact catalogue IDs and filters unsafe or spoiler images', async () => {
+test('favorite character search preserves both catalogues and filters unsafe artwork', async () => {
   const profile = await import(url(await readFile(new URL('../services/profile.ts', import.meta.url), 'utf8')));
   const calls = [];
   const fetch = async (endpoint, options) => {
     calls.push({ endpoint, body: JSON.parse(options.body), signal: options.signal });
-    if (endpoint.includes('anilist')) return { ok: true, json: async () => ({ data: { Media: { characters: { nodes: [{ id: 1, name: { full: 'Naruto' }, image: { large: 'https://s4.anilist.co/naruto.jpg' } }, { id: 2, name: { full: 'Unsafe' }, image: { large: 'javascript:alert(1)' } }] } } } }) };
+    if (endpoint.includes('anilist')) return { ok: true, json: async () => ({ data: { Page: { characters: [{ id: 1, name: { full: 'Naruto' }, image: { large: 'https://s4.anilist.co/naruto.jpg' } }, { id: 2, name: { full: 'Unsafe' }, image: { large: 'javascript:alert(1)' } }] } } }) };
     return { ok: true, json: async () => ({ results: [
-      { id: 'c1', name: 'Safe', image: { url: 'https://t.vndb.org/safe.jpg', sexual: 0, violence: 0 }, vns: [{ id: 'v11', spoiler: 0 }] },
-      { id: 'c2', name: 'Spoiler', image: { url: 'https://t.vndb.org/spoiler.jpg', sexual: 0, violence: 0 }, vns: [{ id: 'v11', spoiler: 2 }] },
-      { id: 'c3', name: 'Explicit', image: { url: 'https://t.vndb.org/explicit.jpg', sexual: 2, violence: 0 }, vns: [{ id: 'v11', spoiler: 0 }] },
+      { id: 'c1', name: 'Safe', image: { url: 'https://t.vndb.org/safe.jpg', sexual: 0, violence: 0 } },
+      { id: 'c3', name: 'Explicit', image: { url: 'https://t.vndb.org/explicit.jpg', sexual: 2, violence: 0 } },
     ] }) };
   };
-  const { profileCast } = await bind('../services/profile-artwork.ts', { ...identity, ...profile, fetch }, 'profileCast');
+  const { searchProfileArtwork } = await bind('../services/profile-artwork.ts', { ...identity, ...profile, fetch }, 'searchProfileArtwork');
   const signal = new AbortController().signal;
-  assert.equal((await profileCast(favorite, signal)).length, 1);
-  assert.deepEqual(calls[0].body.variables, { id: 20 });
-  const characters = await profileCast({ ...favorite, id: 'vndb:v11', kind: 'vn', source: 'vndb' }, signal);
+  assert.equal((await searchProfileArtwork('Naruto', 'characters', 'anilist', signal)).length, 1);
+  assert.deepEqual(calls[0].body.variables, { search: 'Naruto' });
+  const characters = await searchProfileArtwork('Safe', 'characters', 'vndb', signal);
   assert.deepEqual(characters.map(item => item.id), ['vndb:c1']);
-  assert.deepEqual(calls[1].body.filters, ['vn', '=', ['id', '=', 'v11']]);
+  assert.deepEqual(calls[1].body.filters, ['search', '=', 'Safe']);
   assert.ok(calls.every(call => call.signal instanceof AbortSignal));
-  assert.deepEqual(await profileCast({ ...favorite, id: 'kitsu:1', source: 'kitsu' }, signal), []);
+  assert.deepEqual(await searchProfileArtwork('  ', 'characters', 'anilist', signal), []);
   assert.equal(calls.length, 2);
 });
 test('artwork choices expose selected state, duplicate prevention and safe title text', async () => {

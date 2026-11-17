@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, Check, BookOpen, Tv, Users, Library, Globe, Loader2 } from 'lucide-react';
-import { libraryArtwork, profileCast, searchProfileArtwork, type Artwork } from '../services/profile-artwork';
+import { libraryArtwork, searchProfileArtwork, type Artwork } from '../services/profile-artwork';
 
 export function ArtworkGrid({ items, onSelect, selected = [], selectedImage = '' }: { items: Artwork[]; onSelect: (item: Artwork) => void; selected?: string[]; selectedImage?: string }) {
   return <div className="pie-artwork-grid">{items.map(item => {
@@ -51,19 +51,5 @@ export function ProfileArtworkPicker({ entries, kind: fixedKind, onSelect, selec
   </div>;
 }
 
-export function ProfileCastPicker({ media, onSelect, selectedImage }: { media: Artwork; onSelect: (item: Artwork) => void; selectedImage: string }) {
-  const [items, setItems] = useState<Artwork[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController(); setLoading(true); setItems([]); setError('');
-    profileCast(media, controller.signal).then(value => { if (!controller.signal.aborted) setItems(value); }).catch(() => { if (!controller.signal.aborted) setError('Character artwork is unavailable.'); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [media, retry]);
-  return <section className="pie-cast"><div className="pie-section-heading"><div><p className="pie-kicker">Characters</p><h3>{media.title}</h3></div></div>{loading ? <p role="status" className="pie-muted">Loading characters...</p> : error ? <p role="alert" className="pie-error">{error} <button type="button" className="pie-text-action" onClick={() => setRetry(value => value + 1)}>Retry</button></p> : items.length ? <ArtworkGrid items={items} onSelect={onSelect} selectedImage={selectedImage} /> : <p className="pie-muted">No character artwork available for this title.</p>}</section>;
-}
-
-// Framing changes should not rebuild an entire library or character grid.
+// Keep unchanged favorite-search results stable when adjacent settings change.
 export const MemoProfileArtworkPicker = React.memo(ProfileArtworkPicker);
-export const MemoProfileCastPicker = React.memo(ProfileCastPicker);

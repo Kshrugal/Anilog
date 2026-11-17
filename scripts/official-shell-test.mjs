@@ -39,6 +39,7 @@ assert.doesNotMatch(card, /idNum|% 7/);
 for (const field of ['favorite', 'priority', 'personalTags', 'onQuickIncrement']) assert.ok(card.includes(field));
 
 const app = text('App');
+assert.doesNotMatch(app.slice(app.indexOf('const pageVariants'), app.indexOf('const pageTransition')), /filter:|blur\(/, 'navigation must not rasterize a full-page blur');
 assert.match(app, /guestMode \? \['search', 'discovery', 'social'\] : \['home', 'search', 'discovery', 'social', 'stats'\]/);
 assert.match(app, /navItem === 'stats' && <StatsIcon/);
 assert.match(app, /onClick=\{\(\) => setPage\(navItem\)\}/);

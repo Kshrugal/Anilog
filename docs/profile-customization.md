@@ -1,24 +1,33 @@
 # Profile customization
 
-## Artwork without uploads
+## Profile images
 
-Open your profile, choose Customize profile, then Appearance. The profile-picture and banner buttons in the header choose the image target. Select a title from Your library or Catalogue to use its cover. For AniList anime and VNDB novels, the exact title ID loads its character artwork beneath the title picker; selecting a character sets that portrait as the profile picture. Kitsu covers are supported, but character associations are not guessed from title similarity. Global character search is also available.
+Appearance now uses uploads only. The profile-picture and banner buttons choose the image target. Existing saved catalogue artwork and cover-collage backgrounds remain readable; changing the image never changes the library or favorites. Catalogue and character search remain available in Favorites, not the image editor.
 
 Framing supports dragging, keyboard-accessible horizontal/vertical sliders, zoom and reset. All image choices, crops and profile settings remain a draft until Save profile. Discard confirmation is inline, not a browser dialog. The editor follows the current app theme; the saved public profile accent remains independent.
 
 Favorites can appear as one Favorite media shelf or separate anime/VN shelves. Character favorites remain separate. In combined mode, Layout treats media as one visible/reorderable section. Selecting artwork/favorites does not change library tracking.
 
-## Enabling file uploads later
+## Storage setup and release
 
-The current deployed preview deliberately hides file-upload controls. Catalogue artwork does not require Storage or a billing upgrade.
+Firebase project `anilog-10335` is on Blaze. Its default bucket is `anilog-10335.firebasestorage.app`, in `US-CENTRAL1`. Cloud Run hosting uses a different project; never substitute that project for the Firebase backend.
 
-1. The owner must upgrade Firebase project `anilog-10335` from Spark to Blaze and create its default Firebase Storage bucket. This is a billing action for the owner, not an automatic app change. Cloud Run's hosting project is a different project; enabling billing there does not enable this Firebase bucket.
-2. Verify that the actual bucket matches the app's `VITE_FIREBASE_STORAGE_BUCKET` configuration. Deploy `storage.rules` using the main branch's Deploy Firebase Profile Rules workflow with `include_storage=true`; do not enable test/public-write rules. The deployment account may need narrowly scoped bucket-discovery permissions in the Firebase project, separately from its existing Rules Admin role.
-3. Set `VITE_PROFILE_UPLOADS_ENABLED=true` at build time for preview, deploy, and test with a non-production profile before enabling it on the official frontend. Keep the flag off until bucket access and the rules are verified.
-4. Verify accepted JPEG/PNG/WebP input, rejected SVG/oversized input, WebP conversion, save-conflict rollback and replaced-image cleanup against the real configured bucket. Existing local emulator tests cover these paths, but are not proof of a working hosted bucket.
+1. Run the existing Deploy Firebase Profile Rules workflow from the `preview` ref with `include_storage=true`. The Admin SDK publishes and reads back both rulesets using the deployment account's existing Rules Admin role. It does not need database or bucket-admin access. The script refuses a different project or bucket.
+2. Preview builds set `VITE_PROFILE_UPLOADS_ENABLED=true`. The official frontend is not automatically promoted. Both use the existing account/backend, with private libraries and journals protected by Firestore rules.
+3. Inputs accept nonempty JPEG/PNG/WebP up to 8 MB and 40 million pixels, resize to a maximum 2048-pixel edge, and encode actual WebP before saving. Storage accepts only immutable owner-path `.webp` objects up to 5 MB. Profile images are intentionally public; listing, creating, and deleting objects require their owner. Other paths are denied.
+4. Images upload on Save, not selection. Identity and favorites commit atomically with a revision check. Failed saves remove new objects; successful saves remove replaced images and retry old orphans while preserving another tab's recent uploads. Do not overwrite the real owner's profile during QA.
 
 Official setup requirements: https://firebase.google.com/docs/storage/web/start
 
+## Component boundaries and performance
+
+- `ProfileIdentityEditor.tsx` owns the draft, dialog, save/discard behavior, and editor tabs.
+- `ProfileImageEditor.tsx` owns upload controls, framing, and animation-frame-batched crop gestures.
+- `profile-storage.ts` validates/encodes images and coordinates uploads, transactions, and cleanup.
+- `ProfileArtworkPicker.tsx` and `ProfileShowcases.tsx` are used for favorites only.
+- `styles/tailwind.css`, `tailwind.config.js`, and `postcss.config.js` compile styles during the build, replacing browser-time CDN compilation. Keep generated theme focus classes in the safelist.
+- Home caches unchanged library card elements across modal interactions and keeps card instances when sorting. Navigation retains fade/slide, without the full-page blur. Card tilt, sheen, stars, and hover effects are preserved.
+
 ## Verification
 
-`npm run check` includes profile normalization, safe bio rendering, exact-provider character selection, spoiler/unsafe-image filtering, artwork selection accessibility, combined-layout ordering, transaction conflict handling and image cleanup tests. Browser review additionally covers all four editor views at 320/390/768/1280px, selection/crop/save/reopen, keyboard navigation and inline discard. Use the isolated demo Firebase configuration for write-heavy tests; do not overwrite the owner's real profile during QA.
+`npm run check` covers profile normalization, safe bio rendering, favorite-search filtering/accessibility, combined-layout ordering, crop batching, file validation/conversion, transaction conflict handling, cleanup, and built stylesheet/route checks. Local browser tests cover avatar/banner upload, crop, save, reload, narrow-phone layouts, favorites, bio, and title-modal interactions. `npm run test:security` covers private data and owner-only upload permissions. Hosted rule publication is separately verified by reading back the applied source; emulator tests alone are not proof of a working hosted bucket. A real-account hosted image save must be tested with an image chosen by the owner, not a disposable QA image.

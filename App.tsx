@@ -1453,9 +1453,9 @@ export default function App() {
   }
 
   const pageVariants = {
-    initial: { opacity: 0, y: 10, filter: "blur(10px)" },
-    in: { opacity: 1, y: 0, filter: "blur(0px)" },
-    out: { opacity: 0, y: -10, filter: "blur(10px)" },
+    initial: { opacity: 0, y: 10 },
+    in: { opacity: 1, y: 0 },
+    out: { opacity: 0, y: -10 },
   };
 
   const pageTransition = { type: "spring", stiffness: 100, damping: 20, duration: 0.3 } as any;
