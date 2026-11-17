@@ -31,7 +31,7 @@
 .pie-edit-grid { display:grid; grid-template-columns:minmax(0, 1fr) 260px; padding:26px; gap:28px; }
 .pie-main-section,.pie-side-section { min-width:0; }
 .pie-side-section { border-left:1px solid #ffffff0d; padding-left:26px; }
-.pie-framing-shortcut { display:none; }
+.pie-dialog .pie-framing-shortcut { display:none; }
 .pie-section-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:18px; }
 .pie-section-heading h3 { font-size:15px; line-height:1.4; font-weight:650; margin:3px 0 0; overflow-wrap:anywhere; }
 .pie-section-heading > svg { color:#71717a; flex-shrink:0; }
@@ -140,7 +140,7 @@
   .pie-hero-actions button { padding:7px 9px; font-size:10px; }
   .pie-edit-grid { grid-template-columns:minmax(0,1fr); padding:20px 17px; gap:26px; }
   .pie-side-section { border-left:0; border-top:1px solid #ffffff10; padding:22px 0 0; }
-  .pie-framing-shortcut { display:inline-flex; }
+  .pie-dialog .pie-framing-shortcut { display:inline-flex; }
   .pie-crop-preview.is-avatar { margin-left:0; }
   .pie-artwork-grid { grid-template-columns:repeat(auto-fill,minmax(85px,1fr)); gap:15px 12px; }
   .pie-picker-results { max-height:380px; }
