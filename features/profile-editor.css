@@ -66,7 +66,11 @@
 .pie-artwork-name { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; margin-top:7px; font-size:11px; line-height:1.45; color:#a1a1aa; overflow-wrap:anywhere; }
 .pie-artwork:hover .pie-artwork-name { color:#fff; }
 .pie-dialog .pie-artwork:disabled { opacity:.7; }
-.pie-cast { border-top:1px solid #ffffff12; margin-top:24px; padding-top:22px; }
+.pie-cast { border-top:1px solid #ffffff12; margin-top:18px; padding-top:18px; }
+.pie-cast-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pie-use-cover { display:flex; align-items:center; gap:10px; color:#a1a1aa; font-size:12px; }
+.pie-use-cover img { width:27px; height:38px; object-fit:cover; border-radius:4px; }
+.pie-use-cover:hover { color:#fff; }
 .pie-cast .pie-artwork-grid { max-height:340px; overflow:auto; padding:2px; }
 .pie-crop-preview { width:100%; aspect-ratio:16/7; display:grid; place-items:center; overflow:hidden; background:#ffffff04; border:1px solid #ffffff12; border-radius:6px; color:#3f3f46; margin-bottom:23px; }
 .pie-crop-preview.is-avatar { width:112px; aspect-ratio:1; margin-left:auto; margin-right:auto; }
