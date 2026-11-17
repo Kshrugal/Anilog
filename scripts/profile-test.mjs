@@ -90,7 +90,7 @@ function boundary(overrides = {}) {
     ...helpers, db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false,
     tab: 'overview', loading: false, libraryPrivate: false, loadError: '', friendBusy: false, isFriend: false,
     doc: (_db, path) => path, collection: (_db, path) => path, query: path => path, where: () => {}, orderBy: () => {}, limit: () => {},
-    getDoc: async path => { reads.push(path); return snapshot({}); },
+    getDoc: async path => { reads.push(path); return snapshot({ libraryPublic: true }); },
     getDocs: async path => { reads.push(path); if (path.endsWith('/activity')) throw new Error('Missing composite index'); return { docs: [{ id: 'v1', data: () => ({ title: 'Saved', status: 'reading' }) }] }; },
     console: { error() {} }, showToast() {},
   };
@@ -106,6 +106,7 @@ test('activity index failure cannot block library; own library is not read for o
   await flush();
   assert.equal(state.setLoading, false);
   assert.equal(state.setList[0].kitsuId, 'v1');
+  assert.ok(reads.some(path => path.endsWith('/friend/publicLibrary')));
   assert.equal(state.setActivityError, 'Recent activity is unavailable.');
   assert.equal(reads.some(path => path.endsWith('/me/animeList')), false);
 });

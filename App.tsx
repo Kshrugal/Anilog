@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getAniListMedia } from "./services/anilist";
 import { mediaDetailsCache } from "./services/media-cache";
+import { usePublicLibrary } from "./features/usePublicLibrary";
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
@@ -1154,6 +1155,7 @@ export default function App() {
   const [loading, setLoading] = useState(Boolean(auth));
   const [viewTargetUser, setViewTargetUser] = useState(null);
   const [guestMode, setGuestMode] = useState(() => !auth || sessionStorage.getItem('anilog_guest') === 'true');
+  usePublicLibrary(db, appId, guestMode ? null : userId);
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);

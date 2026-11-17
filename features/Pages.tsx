@@ -1131,7 +1131,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const resolvedRuntime = runtimeFor({ ...anime, totalEpisodes: totalEps, durationMinutes: Number(details.episodeLength || anime.durationMinutes || 0), showType: details.showType || anime.showType });
     const backdrop = details.coverImage?.original || anime.attributes?.coverImage?.original || poster;
 
-    const isOwner = userId === ownerId;
+    const isOwner = userId === ownerId && !readOnly;
 
     useEffect(() => {
         const previousFocus = document.activeElement;
@@ -1214,7 +1214,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         if (!db || !ownerId || !kitsuId) { setLogLoaded(true); return; }
         const fetchUserData = async () => {
             try {
-                const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/animeList`, String(kitsuId));
+                const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/${isOwner ? 'animeList' : 'publicLibrary'}`, String(kitsuId));
                 const snap = await getDocFromServer(docRef);
                 if (!active) return;
                 if (snap.exists()) {
@@ -2203,7 +2203,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
           if(doc.exists()) {
               const stored = Array.isArray(doc.data().hallOfFame) ? doc.data().hallOfFame.slice(0, 10) : [];
               setHallOfFame([...stored, ...Array(Math.max(0, 10 - stored.length)).fill(null)]);
-              setLibraryPublic(doc.data().libraryPublic !== false);
+              setLibraryPublic(doc.data().libraryPublic === true);
           } else {
               setHallOfFame(Array(10).fill(null));
           }
@@ -2701,12 +2701,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 if (!isMounted) return;
                 if(friendUserSnap.exists() && isMounted) {
                     setFriendHallOfFame(friendUserSnap.data().hallOfFame || Array(10).fill(null));
-                    setLibraryPrivate(friendUserSnap.data().libraryPublic === false && targetUid !== currentUserId);
+                    setLibraryPrivate(friendUserSnap.data().libraryPublic !== true && (targetUid !== currentUserId || readOnly));
                 }
 
-                const targetIsPrivate = friendUserSnap.exists() && friendUserSnap.data().libraryPublic === false && targetUid !== currentUserId;
+                const targetIsPrivate = (!friendUserSnap.exists() || friendUserSnap.data().libraryPublic !== true) && (targetUid !== currentUserId || readOnly);
                 if (!targetIsPrivate) {
-                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/animeList`));
+                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/${targetUid === currentUserId && !readOnly ? 'animeList' : 'publicLibrary'}`));
                     if (isMounted) {
                         const friendData = friendSnap.docs.map(d => profileEntry({...d.data(), id: d.id}));
                         setList(friendData);
