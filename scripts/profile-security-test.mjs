@@ -20,6 +20,7 @@ const denied = async promise => { await assertFails(promise); assertions++; };
 try {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
+    await setDoc(doc(db, `${root}/users/legacy`), { uid: 'legacy', username: 'Legacy', top10: ['preserved'], bannerUrl: 'https://example.test/legacy.jpg', streak: 3, lastLogin: 1 });
     await deleteDoc(doc(db, identityPath));
     for (const item of (await getDocs(collection(db, `${identityPath}/showcases`))).docs) await deleteDoc(item.ref);
     await setDoc(doc(db, userPath), { uid: 'owner', username: 'Owner', libraryPublic: true });
@@ -34,6 +35,11 @@ try {
     await denied(setDoc(doc(context.firestore(), identityPath), identity));
   }
   await allowed(getDoc(doc(owner.firestore(), `${userPath}/animeList/anilist:20`)));
+  const legacy = env.authenticatedContext('legacy').firestore();
+  await allowed(updateDoc(doc(legacy, `${root}/users/legacy`), { libraryPublic: true }));
+  await denied(updateDoc(doc(legacy, `${root}/users/legacy`), { top10: ['changed'] }));
+  await denied(updateDoc(doc(owner.firestore(), userPath), { streak: 9 }));
+  await allowed(setDoc(doc(env.authenticatedContext('new-user').firestore(), `${root}/users/new-user`), { uid: 'new-user', username: 'New user', libraryPublic: false }));
   await allowed(setDoc(doc(owner.firestore(), `${userPath}/publicLibrary/anilist:20`), { kitsuId: 'anilist:20', title: 'Naruto', status: 'completed' }));
   await denied(updateDoc(doc(owner.firestore(), `${userPath}/publicLibrary/anilist:20`), { notes: 'leak' }));
   await denied(updateDoc(doc(owner.firestore(), `${userPath}/publicLibrary/anilist:20`), { personalTags: ['leak'] }));

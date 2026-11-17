@@ -1,5 +1,13 @@
 # Phase 2: profile identity and showcases
 
+## Hosted rollout
+
+The owner approved a coordinated release using the existing preview URL, accounts and shared Firebase backend. Hosting is in `gen-lang-client-0108112324`; the actual Auth/Firestore/Storage project is `anilog-10335`. Do not confuse the two when deploying rules or assigning permissions.
+
+The original official frontend received compatibility-only public-library reads and projection sync. The audited backfill completed with original library records unchanged. Four older public metadata fields (`lastLogin`, `bannerUrl`, `top10`, `streak`) are preserved but frozen against new client writes. The temporary Cloud Datastore User role used for the backfill was removed afterwards. The one-time backfill is no longer part of regular main deployments.
+
+Firestore rules can deploy independently. Firebase Storage is not enabled on the database project's Spark plan; file uploads require the owner to complete Firebase billing/Storage setup, followed by the optional Storage-rules deployment. Catalogue artwork, cover collages, bios and favorites do not require that upgrade. Do not claim hosted file uploads are working before that setup is verified.
+
 ## Included
 
 - Public avatar/banner identity with image uploads, nondestructive focal positioning and zoom, catalogue artwork, or a cover collage.

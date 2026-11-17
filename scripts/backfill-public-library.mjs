@@ -12,7 +12,7 @@ const source = await readFile(new URL('../services/profile-identity.ts', import.
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { publicLibraryEntry } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const profiles = await db.collection(`artifacts/${appId}/public/data/users`).get();
-const allowed = ['uid', 'username', 'createdAt', 'friends', 'hallOfFame', 'libraryPublic', 'email'];
+const allowed = ['uid', 'username', 'createdAt', 'friends', 'hallOfFame', 'libraryPublic', 'email', 'lastLogin', 'bannerUrl', 'top10', 'streak'];
 // Audit every public profile before making any changes. Unknown fields are not discarded.
 for (const profile of profiles.docs) {
   const value = profile.data();
