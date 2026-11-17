@@ -1,4 +1,7 @@
+import { createMediaCache } from './media-cache';
+
 const ANILIST_API_URL = 'https://graphql.anilist.co';
+const discoveryCache = createMediaCache<Awaited<ReturnType<typeof loadAniListDiscovery>>>({ ttlMs: 120_000, maxEntries: 4 });
 
 const MEDIA_FIELDS = `
   id
@@ -142,6 +145,10 @@ export async function getAniListSeasonal(perPage = 20) {
 }
 
 export async function getAniListDiscovery(perPage = 10) {
+  return discoveryCache.get(String(perPage), () => loadAniListDiscovery(perPage));
+}
+
+async function loadAniListDiscovery(perPage: number) {
   const data = await queryAniList(`query ($perPage: Int!) {
     trending: Page(page: 1, perPage: $perPage) { media(type: ANIME, isAdult: false, sort: [TRENDING_DESC, POPULARITY_DESC]) { ${MEDIA_FIELDS} } }
     airing: Page(page: 1, perPage: $perPage) { media(type: ANIME, status: RELEASING, isAdult: false, sort: [POPULARITY_DESC, SCORE_DESC]) { ${MEDIA_FIELDS} } }

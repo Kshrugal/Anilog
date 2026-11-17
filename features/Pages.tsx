@@ -75,6 +75,8 @@ import {
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
+import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
+import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
 import { HomeResume } from './HomeResume';
 import { LibraryGrid } from './LibraryGrid';
 import { resumeQueue, libraryStatusCounts, homeStatusLabel, normalizeSavedViews } from '../services/home-library';
@@ -839,22 +841,15 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     const [posting, setPosting] = useState(false);
     const { theme } = useContext(ThemeContext);
 
+    const [feedStatus, setFeedStatus] = useState('loading');
+    const authorKey = JSON.stringify(readOnly ? null : followedIds([userId, ...friends]).sort());
     useEffect(() => {
-        if (!db) return;
-        let isMounted = true;
-        const q = query(collection(db, `artifacts/${appId}/public/data/activity`), orderBy("timestamp", "desc"), limit(50));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-             if (isMounted) {
-                setFeed(snapshot.docs.map(doc => ({...doc.data(), id: doc.id})));
-             }
-        }, (error) => {
-            console.error("Feed listener error:", error);
-        });
-        return () => {
-            isMounted = false;
-            unsubscribe();
-        };
-    }, [db]);
+        if (!db || view !== 'feed') return;
+        setFeed([]); setFeedStatus('loading');
+        return subscribeCommunityActivity(db, appId, JSON.parse(authorKey), 40, items => {
+            setFeed(items); setFeedStatus('ready');
+        }, () => setFeedStatus('error'));
+    }, [db, view, authorKey]);
 
     useEffect(() => {
         if (!db || !userId || readOnly) return;
@@ -867,20 +862,27 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     }, [db, userId, readOnly]);
 
     useEffect(() => {
-        if (!db || !userId || readOnly) return;
-        getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`)).then(snapshot => setReviewLibrary(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }))));
-    }, [db, readOnly, userId]);
+        if (!db || !userId || readOnly || view !== 'feed' || composerType !== 'review') return;
+        let active = true;
+        getDocs(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`))
+            .then(snapshot => { if (active) setReviewLibrary(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() })).sort((a: any, b: any) => String(a.title || '').localeCompare(String(b.title || '')))); })
+            .catch(() => { if (active) showToast('Could not load your review library.', 'error'); });
+        return () => { active = false; };
+    }, [db, readOnly, userId, composerType, view, showToast]);
 
     useEffect(() => {
-        if (searchQuery.length < 3) {
-            setUsers([]);
-            return;
-        }
-        const q = query(collection(db, `artifacts/${appId}/public/data/users`), where("username", ">=", searchQuery), where("username", "<=", searchQuery + '\uf8ff'), limit(10));
-        getDocs(q).then(snapshot => {
-            setUsers(snapshot.docs.map(d => d.data()).filter(u => u.uid !== userId));
-        });
-    }, [searchQuery, db, userId]);
+        const term = searchQuery.trim();
+        setUsers([]);
+        if (!db || view !== 'search' || term.length < 3) return;
+        let active = true;
+        const timer = setTimeout(() => {
+            const lookup = query(collection(db, `artifacts/${appId}/public/data/users`), where('username', '>=', term), where('username', '<=', term + '\uf8ff'), limit(10));
+            getDocs(lookup).then(snapshot => {
+                if (active) setUsers(snapshot.docs.map(entry => ({ ...entry.data(), uid: entry.id })).filter(user => user.uid !== userId));
+            }).catch(() => { if (active) showToast('User search is unavailable.', 'error'); });
+        }, 250);
+        return () => { active = false; clearTimeout(timer); };
+    }, [searchQuery, db, userId, view, showToast]);
 
     const publishPost = async () => {
         if (!db || !userId || !postText.trim() || posting) return;
@@ -902,40 +904,38 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
         setPosting(false);
     };
 
-    const visibleFeed = useMemo(() => feed.filter(item => {
-        if (readOnly) return true;
-        return item.userId === userId || friends.some(friend => (friend.uid || friend) === item.userId);
-    }), [feed, friends, readOnly, userId]);
+    const people = (view === 'friends' ? friends : users).flatMap(person => {
+        const uid = typeof person === 'string' ? person : person?.uid;
+        return uid ? [{ uid, username: person?.username || 'AniLog member' }] : [];
+    });
+    const portraits = useCommunityPortraits(db, appId, view === 'feed' ? feed.map(item => item.userId) : people.map(person => person.uid));
 
     return (
         <div className="space-y-6 max-w-4xl mx-auto">
-            <div className="flex space-x-6 border-b border-white/10 pb-4">
-                <button onClick={() => setView('feed')} className={`text-2xl font-black transition-colors ${view === 'feed' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>Activity</button>
-                {!readOnly && <button onClick={() => setView('friends')} className={`text-2xl font-black transition-colors ${view === 'friends' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>My Friends</button>}
-                <button onClick={() => setView('search')} className={`text-2xl font-black transition-colors ${view === 'search' ? 'text-white' : 'text-gray-600 hover:text-gray-400'}`}>Find Users</button>
-            </div>
+            <h1 className="text-3xl font-bold">Community</h1>
+            <nav aria-label="Community views" className="flex flex-wrap gap-2 border-b border-white/10">
+                {[['feed', 'Activity'], ...(!readOnly ? [['friends', 'Following']] : []), ['search', 'Find people']].map(([id, label]) => <button type="button" key={id} aria-pressed={view === id} onClick={() => setView(id)} className={`border-b-2 px-3 py-3 text-sm font-semibold ${view === id ? 'border-white text-white' : 'border-transparent text-gray-400 hover:text-white'}`}>{label}{id === 'friends' && <span className="ml-2 text-xs opacity-60">{friends.length}</span>}</button>)}
+            </nav>
 
             {view === 'feed' && (
                 <div className="space-y-4">
                     {!readOnly && <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
                         <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
-                        {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><select value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} className="min-w-0 rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="">Choose from your library…</option>{[...reviewLibrary].sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''))).map(item => <option key={item.id} value={String(item.kitsuId || item.id)}>{item.mediaType === 'vn' ? 'VN · ' : ''}{item.title}</option>)}</select><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
+                        {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><select value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} className="min-w-0 rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="">Choose from your library…</option>{reviewLibrary.map(item => <option key={item.id} value={String(item.kitsuId || item.id)}>{item.mediaType === 'vn' ? 'VN · ' : ''}{item.title}</option>)}</select><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
                         <div className="mt-3 flex items-center gap-3"><label className="flex items-center gap-2 text-[10px] font-bold text-gray-500"><input type="checkbox" checked={spoiler} onChange={event => setSpoiler(event.target.checked)} className="accent-red-500" /> Contains spoilers</label><span className="ml-auto text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting || (composerType === 'review' && !reviewTitle)} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
                     </div>}
-                    {visibleFeed.map(item => (
+                    {feed.map(item => (
                         <motion.div 
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             key={item.id} 
-                            className="bg-white/5 border border-white/5 p-4 rounded-2xl flex gap-4 items-center hover:bg-white/10 transition-all backdrop-blur-md group"
+                            className="bg-white/[0.035] border border-white/10 p-4 rounded-lg flex gap-3 items-start hover:bg-white/5 transition-colors group"
                         >
-                            <div className={`w-12 h-12 rounded-full flex-shrink-0 flex items-center justify-center font-black text-white text-lg shadow-lg border border-white/10 overflow-hidden bg-gradient-to-br ${theme.gradient}`}>
-                                {item.username?.[0]?.toUpperCase() || '?'}
-                            </div>
-                            <div className="flex-grow">
+                            <CommunityAvatar name={item.username} portrait={portraits[item.userId]} />
+                            <div className="min-w-0 flex-grow break-words">
                                 <p className="text-gray-300 text-sm leading-relaxed">
-                                    <span className="font-bold text-white hover:text-blue-400 transition-colors cursor-pointer" onClick={() => openUserProfile({uid: item.userId, username: item.username})}>{item.username}</span>{' '}
+                                    <button type="button" className="font-semibold text-white hover:underline" onClick={() => openUserProfile({ uid: item.userId, username: item.username })}>{item.username || 'AniLog member'}</button>{' '}
                                     <span className="opacity-60 mx-1">{item.context}</span>
                                     <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
                                 </p>
@@ -949,33 +949,25 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                                 <SocialActions db={db} activityId={item.id} userId={userId} username={username} readOnly={readOnly} />
                             </div>
                             {item.animeImageUrl && (
-                                <img src={item.animeImageUrl} className="w-10 h-14 object-cover rounded-lg shadow-xl border border-white/10 group-hover:scale-105 transition-transform" alt="anime" referrerPolicy="no-referrer" />
+                                <img src={item.animeImageUrl} className="w-10 h-14 shrink-0 object-cover rounded-lg border border-white/10 group-hover:scale-105 transition-transform" loading="lazy" decoding="async" alt="" referrerPolicy="no-referrer" />
                             )}
                         </motion.div>
                     ))}
-                    {visibleFeed.length === 0 && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or the people you follow.</div>}
+                    {feedStatus === 'loading' && <p role="status" className="py-8 text-sm text-gray-400">Loading activity…</p>}
+                    {feedStatus === 'error' && <p role="alert" className="py-8 text-sm text-gray-400">Activity could not be loaded.</p>}
+                    {feedStatus === 'ready' && !feed.length && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or the people you follow.</div>}
                 </div>
             )}
 
             {view === 'friends' && (
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {friends.map(friend => (
-                            <motion.div 
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                key={friend.uid} 
-                                onClick={() => openUserProfile(friend)}
-                                className="p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl cursor-pointer flex items-center gap-4 transition-colors group"
-                            >
-                                <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center font-bold text-white text-xl border border-white/10 group-hover:border-white/30">
-                                    {friend.username?.[0]?.toUpperCase()}
-                                </div>
-                                <div>
-                                    <p className="font-bold text-white text-lg">{friend.username}</p>
-                                    <p className="text-xs text-green-400 font-medium">Friend</p>
-                                </div>
-                            </motion.div>
+                        {people.map(person => (
+                            <motion.button type="button" whileTap={{ scale: 0.98 }} key={person.uid} onClick={() => openUserProfile(person)} className="community-profile-row">
+                                <CommunityAvatar name={person.username} portrait={portraits[person.uid]} />
+                                <span className="min-w-0 flex-1 break-words font-semibold">{person.username}</span>
+                                <ChevronDownIcon size={15} className="-rotate-90 shrink-0 text-gray-400" />
+                            </motion.button>
                         ))}
                     </div>
                     {friends.length === 0 && <p className="text-center text-gray-500 py-10">You haven't added any friends yet.</p>}
@@ -998,22 +990,12 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                         />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {users.map(user => (
-                            <motion.div 
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                                key={user.uid} 
-                                onClick={() => openUserProfile(user)}
-                                className="p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl cursor-pointer flex items-center gap-4 transition-colors group"
-                            >
-                                <div className="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center font-bold text-white text-xl border border-white/10 group-hover:border-white/30">
-                                    {user.username?.[0]?.toUpperCase()}
-                                </div>
-                                <div>
-                                    <p className="font-bold text-white text-lg">{user.username}</p>
-                                    <p className="text-xs text-gray-500 font-medium">Click to view profile</p>
-                                </div>
-                            </motion.div>
+                        {people.map(person => (
+                            <motion.button type="button" whileTap={{ scale: 0.98 }} key={person.uid} onClick={() => openUserProfile(person)} className="community-profile-row">
+                                <CommunityAvatar name={person.username} portrait={portraits[person.uid]} />
+                                <span className="min-w-0 flex-1 break-words font-semibold">{person.username}</span>
+                                <ChevronDownIcon size={15} className="-rotate-90 shrink-0 text-gray-400" />
+                            </motion.button>
                         ))}
                     </div>
                     {users.length === 0 && searchQuery.length >= 3 && <p className="text-center text-gray-500 py-10">No users found.</p>}
@@ -1630,45 +1612,22 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
 
     return (
         <div className="space-y-12 pb-20">
-            {/* Hero Section - Editorial Style */}
             {heroAnime && (
-                <motion.div 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="relative h-[60vh] min-h-[400px] rounded-[3rem] overflow-hidden group cursor-pointer shadow-2xl"
-                    onClick={() => setSelectedAnime(heroAnime)}
-                >
-                    <img 
-                        src={heroAnime.attributes.coverImage?.large || heroAnime.attributes.posterImage?.large} 
-                        className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" 
-                        alt="Hero"
-                        referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/40 to-transparent" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-transparent to-transparent opacity-60" />
-                    
-                    <div className="absolute bottom-0 left-0 p-8 sm:p-12 space-y-4 max-w-2xl">
-                        <div className="flex items-center gap-3">
-                            <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-[10px] font-black uppercase tracking-widest text-white">#1 Trending</span>
-                            <span className="px-3 py-1 bg-blue-500/20 backdrop-blur-md border border-blue-500/30 rounded-full text-[10px] font-black uppercase tracking-widest text-blue-400">Seasonal Pick</span>
-                        </div>
-                        <h2 className="text-5xl sm:text-7xl font-black text-white tracking-tighter leading-none drop-shadow-2xl break-words">
-                            {heroAnime.attributes.canonicalTitle}
-                        </h2>
-                        <p className="text-gray-300 text-sm sm:text-lg line-clamp-3 max-w-xl font-medium leading-relaxed opacity-80 group-hover:opacity-100 transition-opacity">
-                            {heroAnime.attributes.synopsis}
-                        </p>
-                        <div className="flex items-center gap-4 pt-4">
-                            <button className="px-8 py-4 bg-white text-black rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-105 transition-transform shadow-xl shadow-white/10">
-                                View Details
-                            </button>
-                            <div className="flex items-center gap-2 text-white font-bold">
-                                <StarIcon className="text-yellow-400" />
-                                <span>{heroAnime.attributes.averageRating}%</span>
-                            </div>
+                <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="discover-feature group" aria-label="Trending spotlight">
+                    <img src={heroAnime.attributes.coverImage?.original || heroAnime.attributes.coverImage?.large || heroAnime.attributes.posterImage?.large}
+                        className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
+                        alt="" fetchPriority="high" decoding="async" referrerPolicy="no-referrer" />
+                    <div className="discover-feature-shade" />
+                    <div className="discover-feature-copy space-y-3">
+                        <p className="text-xs font-semibold uppercase text-cyan-200">Trending now</p>
+                        <h2 className="discover-feature-title text-white">{heroAnime.attributes.canonicalTitle}</h2>
+                        {heroAnime.attributes.synopsis && <p className="max-w-xl text-sm text-gray-200 leading-relaxed line-clamp-2">{heroAnime.attributes.synopsis}</p>}
+                        <div className="flex flex-wrap items-center gap-4 pt-2">
+                            <button type="button" onClick={() => setSelectedAnime(heroAnime)} className="rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-black transition hover:bg-gray-200 active:scale-[0.98]">View details</button>
+                            {Number(heroAnime.attributes.averageRating) > 0 && <span className="flex items-center gap-1.5 text-sm font-semibold text-white"><StarIcon size={16} className="text-amber-300" />{heroAnime.attributes.averageRating}%</span>}
                         </div>
                     </div>
-                </motion.div>
+                </motion.section>
             )}
 
             <AnimeCarousel title="Trending Now" animeList={trending} onAnimeClick={setSelectedAnime} isKitsuList={true} />
@@ -2140,7 +2099,7 @@ function LibraryResetPanel({ db, userId, username, myList, activityData: _activi
 }
 
 export function ProfilePage({ db, userId, username, setUsername, showToast, openUserProfile }) {
-  const { theme, setThemeId, viewMode, setViewMode, density, setDensity, showTrail, setShowTrail } = useContext(ThemeContext);
+  const { theme, setThemeId, viewMode, setViewMode, density, setDensity, showTrail, setShowTrail, showAmbient, setShowAmbient, backdrop, setBackdrop } = useContext(ThemeContext);
   const [newUsername, setNewUsername] = useState(username);
   const [hallOfFame, setHallOfFame] = useState([]);
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
@@ -2397,11 +2356,12 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                     <div className="space-y-3">
                         <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Content density</span><span className="grid grid-cols-2 gap-2 rounded-lg bg-black/25 p-1">{['comfortable', 'compact'].map(option => <button type="button" key={option} onClick={() => setDensity(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${density === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
                         <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-gray-500">Default library view</span><span className="grid grid-cols-3 gap-2 rounded-lg bg-black/25 p-1">{['grid', 'list', 'journal'].map(option => <button type="button" key={option} onClick={() => setViewMode(option)} className={`rounded-md px-3 py-2 text-xs font-bold capitalize transition-colors ${viewMode === option ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>{option}</button>)}</span></label>
-                        <div className="flex justify-between items-center p-4 bg-black/20 rounded-xl">
-                            <span className="font-bold text-sm text-gray-300">Mouse Trail</span>
-                            <button type="button" onClick={() => setShowTrail(!showTrail)} aria-label="Mouse Trail" aria-pressed={showTrail} className={`w-10 h-5 rounded-full p-0.5 transition-colors ${showTrail ? theme.accentBg : 'bg-gray-700'}`}>
-                                <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform ${showTrail ? 'translate-x-5' : 'translate-x-0'}`} />
-                            </button>
+                        <div role="group" aria-label="Backdrop">
+                            <span className="mb-2 block text-xs font-semibold text-gray-400">Backdrop</span>
+                            <div className="grid grid-cols-2 gap-2 rounded-lg bg-black/25 p-1">{[['tinted', 'Theme tint'], ['graphite', 'Graphite']].map(([id, label]) => <button key={id} type="button" aria-pressed={backdrop === id} onClick={() => setBackdrop(id)} className={`rounded-md px-3 py-2 text-xs font-semibold ${backdrop === id ? 'bg-white text-black' : 'text-gray-400 hover:text-white'}`}>{label}</button>)}</div>
+                        </div>
+                        <div className="divide-y divide-white/10 border-y border-white/10">
+                            {([['Ambient stars', showAmbient, setShowAmbient], ['Pointer glow', showTrail, setShowTrail]] as const).map(([label, checked, update]) => <label key={label} className="flex items-center justify-between gap-4 py-3 text-sm text-gray-200"><span>{label}</span><input type="checkbox" role="switch" className="anilog-switch" checked={checked} onChange={event => update(event.target.checked)} /></label>)}
                         </div>
                     </div>
                 </div>

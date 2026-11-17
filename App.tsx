@@ -16,6 +16,8 @@ import { mediaDetailsCache } from "./services/media-cache";
 import { usePublicLibrary } from './features/usePublicLibrary';
 import { usePrivateAppearance } from './features/usePrivateAppearance';
 import { useProfileIdentity } from './features/useProfileIdentity';
+import { followedIds, subscribeCommunityActivity } from './services/community-activity';
+import { CommunityAvatar, useCommunityPortraits } from './features/CommunityIdentity';
 import { IdentityImage } from './features/ProfileIdentityVisual';
 import { initializeApp } from "firebase/app";
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
@@ -35,10 +37,6 @@ import {
   setDoc,
   updateDoc,
   collection,
-  query,
-  orderBy,
-  limit,
-  onSnapshot,
   serverTimestamp,
   addDoc,
   deleteField,
@@ -51,6 +49,7 @@ import {
     useTransform, 
     useMotionValue,
     useMotionTemplate,
+    useReducedMotion,
 } from "framer-motion";
 import { 
   Search as SearchIcon, 
@@ -69,6 +68,7 @@ import {
   CalendarDays as ScheduleIcon,
   Layers3 as DecksIcon,
   Menu as MenuIcon,
+  X as CloseIcon,
 } from 'lucide-react';
 // Removed AI and GenreGalaxy imports as requested
 
@@ -327,6 +327,10 @@ export const ThemeContext = createContext({
   viewMode: 'grid',
   setViewMode: (mode) => {},
   showTrail: true,
+  showAmbient: true,
+  setShowAmbient: (_value: boolean) => {},
+  backdrop: 'tinted',
+  setBackdrop: (_value: string) => {},
   setShowTrail: (show) => {},
   setPage: (page) => {},
   sidebarCollapsed: false,
@@ -1065,33 +1069,42 @@ function PreviewBanner() {
   );
 }
 
-function NotificationCenter({ db, userId, onClose, setPage }) {
+function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     setItems([]);
+    setError(false);
     setLoading(Boolean(db && userId));
     if (!db || !userId) return;
     let disposed = false;
     let unsubscribe = () => {};
     getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(profile => {
       if (disposed) return;
-      const friendIds = new Set((profile.data()?.friends || []).map(friend => friend.uid || friend));
-      unsubscribe = onSnapshot(query(collection(db, `artifacts/${appId}/public/data/activity`), orderBy('timestamp', 'desc'), limit(40)), snapshot => {
+      const authors = followedIds(profile.data()?.friends || []).filter(id => id !== userId);
+      unsubscribe = subscribeCommunityActivity(db, appId, authors, 12, next => {
         if (disposed) return;
-        setItems(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(item => item.userId === userId || friendIds.has(item.userId)).slice(0, 12));
-        setLoading(false);
-      }, () => { if (!disposed) setLoading(false); });
-    }).catch(() => { if (!disposed) setLoading(false); });
+        setItems(next); setError(false); setLoading(false);
+      }, () => { if (!disposed) { setError(true); setLoading(false); } });
+    }).catch(() => { if (!disposed) { setError(true); setLoading(false); } });
     return () => { disposed = true; unsubscribe(); };
   }, [db, userId]);
+
+  const portraits = useCommunityPortraits(db, appId, items.map(item => item.userId));
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement;
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', dismiss);
+    return () => { document.removeEventListener('keydown', dismiss); if (previous?.isConnected) previous.focus(); };
+  }, [onClose]);
 
   return createPortal(
     <div className="fixed inset-0 z-[120] bg-black/50" onClick={onClose}>
       <motion.aside initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} className="absolute right-3 top-20 flex max-h-[calc(100vh-6rem)] w-[min(420px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#101318] shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-white/5 p-4"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-400">Activity inbox</p><h2 className="mt-1 text-lg font-bold text-white">Notifications</h2></div><button onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white">×</button></div>
-        <div className="overflow-y-auto p-2">{loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { setPage('social'); onClose(); }} className="flex w-full gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-500/15 text-xs font-black text-blue-300">{item.username?.[0]?.toUpperCase() || '?'}</span><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">You are all caught up</p><p className="mt-1 text-xs text-gray-600">Friend and account activity will appear here.</p></div>}</div>
+        <div className="flex items-center justify-between border-b border-white/5 p-4"><h2 className="text-lg font-bold text-white">Notifications</h2><button autoFocus aria-label="Close notifications" title="Close notifications" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><CloseIcon size={17} /></button></div>
+        <div className="overflow-y-auto p-2">{loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : error ? <p role="alert" className="p-8 text-center text-sm text-gray-400">Activity could not be loaded.</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { onClose(); openUserProfile({ uid: item.userId, username: item.username }); }} className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><CommunityAvatar name={item.username} portrait={portraits[item.userId]} /><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">You are all caught up</p><p className="mt-1 text-xs text-gray-600">New activity from people you follow appears here.</p></div>}</div>
         <button onClick={() => { setPage('social'); onClose(); }} className="border-t border-white/5 p-3 text-xs font-bold text-blue-400 hover:bg-white/5">Open community</button>
       </motion.aside>
     </div>, document.body
@@ -1216,6 +1229,11 @@ export default function App() {
   const [density, setDensity] = useState(() => localStorage.getItem('anilog_density') || 'comfortable');
   const [showQuickTip, setShowQuickTip] = useState(() => localStorage.getItem('anilog_quick_tip') !== 'false');
   const [showTrail, setShowTrail] = useState(() => localStorage.getItem('anilog_trail') !== 'false');
+  const [showAmbient, setShowAmbient] = useState(() => localStorage.getItem('anilog_ambient') !== 'false');
+  const [backdrop, setBackdrop] = useState(() => localStorage.getItem('anilog_backdrop') === 'graphite' ? 'graphite' : 'tinted');
+  const reducedMotion = useReducedMotion();
+  useEffect(() => { localStorage.setItem('anilog_ambient', String(showAmbient)); }, [showAmbient]);
+  useEffect(() => { localStorage.setItem('anilog_backdrop', backdrop); }, [backdrop]);
   const appearanceError = usePrivateAppearance(db, appId, guestMode ? null : userId,
     { themeId, viewMode, density, showTrail, showQuickTip, sidebarCollapsed }, values => {
       if (THEMES[values.themeId]) setThemeId(values.themeId);
@@ -1490,41 +1508,19 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
+      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip, showAmbient, setShowAmbient, backdrop, setBackdrop }}>
       <div className="min-h-screen bg-[#050505] text-gray-100 font-sans flex flex-col relative overflow-hidden selection:bg-white/20">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
         
-        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} />}
-        <StarField active={true} />
-        <MouseTrail themeId={themeId} active={showTrail} />
+        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} openUserProfile={openUserProfile} />}
+        <div className="anilog-backdrop" data-backdrop={backdrop} style={{ '--scene-accent': theme.scrollbarThumb } as React.CSSProperties} aria-hidden="true" />
+        <StarField active={showAmbient && !reducedMotion} />
+        <MouseTrail themeId={themeId} active={showTrail && !reducedMotion} />
 
         <PreviewBanner />
 
-        {/* Dynamic Nebula - Physics Based */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <motion.div
-            animate={{
-              x: [0, 50, -50, 0],
-              y: [0, -30, 30, 0],
-              scale: [1, 1.2, 1],
-              opacity: [0.15, 0.25, 0.15]
-            }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            className={`absolute top-[-20%] left-[-10%] w-[800px] h-[800px] rounded-full blur-[150px] mix-blend-screen ${theme.accentBg.replace('bg-', 'bg-')}`}
-          />
-          <motion.div
-            animate={{
-              x: [0, -50, 50, 0],
-              y: [0, 30, -30, 0],
-              scale: [1, 1.3, 1],
-              opacity: [0.1, 0.2, 0.1]
-            }}
-            transition={{ duration: 25, repeat: Infinity, ease: "linear", delay: 2 }}
-            className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-purple-900/30 rounded-full blur-[150px] mix-blend-screen"
-          />
-        </div>
-        <header className="sticky top-0 z-30 bg-[#050505]/60 backdrop-blur-xl border-b border-white/5">
+        <header className="anilog-header sticky top-0 z-30">
           <nav className="container mx-auto px-4 py-3 flex flex-wrap gap-x-1 gap-y-2 justify-between items-center">
             <button type="button" aria-label="AniLog home" className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}>
               {APP_NAME}

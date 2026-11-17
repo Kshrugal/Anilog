@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import ts from 'typescript';
 
-const source = await readFile(new URL('../services/anilist.ts', import.meta.url), 'utf8');
+const cacheSource = await readFile(new URL('../services/media-cache.ts', import.meta.url), 'utf8');
+const cacheUrl = `data:text/javascript;base64,${Buffer.from(ts.transpileModule(cacheSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText).toString('base64')}`;
+const source = (await readFile(new URL('../services/anilist.ts', import.meta.url), 'utf8')).replace("'./media-cache'", `'${cacheUrl}'`);
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
@@ -30,6 +32,15 @@ function mockPayload(t, payload, { ok = true, status = 200 } = {}) {
     ok, status, json: async () => payload,
   }));
 }
+
+test('Discover shares its public request and reuses recent results', async t => {
+  const fetch = mockPayload(t, { data: { trending: { media: [] } } });
+  const first = api.getAniListDiscovery(3);
+  const second = api.getAniListDiscovery(3);
+  assert.deepEqual(await first, await second);
+  await api.getAniListDiscovery(3);
+  assert.equal(fetch.mock.callCount(), 1);
+});
 
 test('search keeps its timeout active through body parsing and maps results', async t => {
   const timer = mockTimeout(t);

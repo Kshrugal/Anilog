@@ -43,7 +43,8 @@ assert.doesNotMatch(app.slice(app.indexOf('const pageVariants'), app.indexOf('co
 assert.match(app, /guestMode \? \['search', 'discovery', 'social'\] : \['home', 'search', 'discovery', 'social', 'stats'\]/);
 assert.match(app, /navItem === 'stats' && <StatsIcon/);
 assert.match(app, /onClick=\{\(\) => setPage\(navItem\)\}/);
-assert.match(app, /<MouseTrail themeId=\{themeId\} active=\{showTrail\}/);
+assert.match(app, /<MouseTrail themeId=\{themeId\} active=\{showTrail && !reducedMotion\}/);
+assert.match(app, /<StarField active=\{showAmbient && !reducedMotion\}/);
 assert.match(app, /setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip/);
 assert.match(app, /flex-grow min-w-0 w-full container mx-auto p-4 pb-32 z-10/);
 assert.match(app, /case "schedule": return <SchedulePage/);
@@ -61,7 +62,7 @@ for (const page of ['SearchPage', 'SocialPage', 'SchedulePage', 'DecksPage']) {
 }
 assert.match(app, /isNotificationsOpen && !guestMode && <NotificationCenter/);
 for (const action of ["setPage('schedule')", "setPage('decks')"]) assert.ok(text('CommandPalette').includes(action));
-assert.match(text('NotificationCenter'), /onSnapshot\(query\(collection/);
+assert.match(text('NotificationCenter'), /subscribeCommunityActivity\(db, appId, authors/);
 assert.match(text('fetchMediaDetails'), /AbortSignal.timeout\(15_000\)/);
 assert.match(text('exportUserData'), /URL.revokeObjectURL\(url\)/);
 
