@@ -1,97 +1,126 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Upload, Monitor, Smartphone, ArrowUp, ArrowDown, RotateCcw, Eye, Pencil } from 'lucide-react';
-import { ACCENTS, MODULES, emptyImage, type ProfileIdentity } from '../services/profile-identity';
+import { X, Upload, Monitor, Smartphone, ArrowUp, ArrowDown, RotateCcw, Eye, Crop, Image as ImageIcon, UserRound, AlignLeft, Heart, PanelsTopLeft, Check, Loader2, Camera, Tv, BookOpen, Users } from 'lucide-react';
+import { ThemeContext } from '../App';
+import { ACCENTS, emptyImage, type ProfileIdentity } from '../services/profile-identity';
+import { profileLayoutRows, toggleProfileModule, moveProfileModule } from '../services/profile-layout';
+import { type Artwork } from '../services/profile-artwork';
 import { prepareProfileImage, saveProfileIdentity } from '../services/profile-storage';
-import { ProfileIdentityVisual } from './ProfileIdentityVisual';
+import { IdentityImage, ProfileIdentityVisual } from './ProfileIdentityVisual';
 import { ProfileBio } from './ProfileBio';
-import { ProfileArtworkPicker } from './ProfileArtworkPicker';
-import { IdentityShowcase, ShowcaseEditor, SHOWCASE_LABELS } from './ProfileShowcases';
+import { MemoProfileArtworkPicker as ProfileArtworkPicker, MemoProfileCastPicker as ProfileCastPicker } from './ProfileArtworkPicker';
+import { IdentityShowcase, ShowcaseEditor } from './ProfileShowcases';
+import './profile-editor.css';
 
-export function ProfileIdentityEditor({ db, appId, uid, name, initial, revision, entries, onClose, onSaved }: { db: any; appId: string; uid: string; name: string; initial: ProfileIdentity; revision: number; entries: any[]; onClose: () => void; onSaved: (value: any) => void }) {
+const moduleNames = { bio: 'About', progress: 'In progress', anime: 'Anime favorites', vn: 'Visual novel favorites', characters: 'Character favorites', activity: 'Activity' };
+const tabs = [['appearance', 'Appearance', ImageIcon], ['about', 'About', AlignLeft], ['favorites', 'Favorites', Heart], ['layout', 'Layout', PanelsTopLeft]] as const;
+
+export function ProfileIdentityEditor({ db, appId, uid, name, initial, revision, entries, libraryPublic = false, onClose, onSaved }: { db: any; appId: string; uid: string; name: string; initial: ProfileIdentity; revision: number; entries: any[]; libraryPublic?: boolean; onClose: () => void; onSaved: (value: any) => void }) {
+  const { theme } = useContext(ThemeContext);
   const uploadsEnabled = (import.meta.env.DEV && import.meta.env.VITE_LOCAL_FIREBASE === 'true') || import.meta.env.VITE_PROFILE_UPLOADS_ENABLED === 'true';
   const [draft, setDraft] = useState<ProfileIdentity>(initial);
   const [files, setFiles] = useState<Partial<Record<'avatar' | 'banner', Blob>>>({});
-  const [kind, setKind] = useState<'avatar' | 'banner'>('banner');
+  const [kind, setKind] = useState<'avatar' | 'banner'>('avatar');
+  const [section, setSection] = useState<typeof tabs[number][0]>('appearance');
+  const [showcaseKind, setShowcaseKind] = useState<'anime' | 'vn' | 'characters'>('anime');
+  const [media, setMedia] = useState<Artwork | null>(null);
   const [mobile, setMobile] = useState(false);
-  const [previewOnly, setPreviewOnly] = useState(false);
+  const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [discard, setDiscard] = useState(false);
   const [error, setError] = useState('');
-  const [section, setSection] = useState<'identity' | 'showcases' | 'layout'>('identity');
-  const [showcaseKind, setShowcaseKind] = useState<'anime' | 'vn' | 'characters'>('anime');
+  const [changed, setChanged] = useState(false);
   const urls = useRef<string[]>([]);
   const dialog = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
+  const framing = useRef<HTMLElement>(null);
+  const drag = useRef<{ clientX: number; clientY: number; x: number; y: number; width: number; height: number } | null>(null);
+  useEffect(() => { scroll.current?.scrollTo({ top: 0 }); }, [section, preview]);
   const busy = useRef(false);
   const dirty = useRef(false);
   const generation = useRef(0);
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; }, [onClose]);
-  function requestClose() { if (!busy.current && (!dirty.current || window.confirm('Discard unsaved profile changes?'))) close.current(); }
+  function requestClose() { if (!busy.current) { if (dirty.current) setDiscard(true); else close.current(); } }
   useEffect(() => {
     const objectUrls = urls.current;
     const invalidateUploads = () => { generation.current++; };
     const previous = document.activeElement as HTMLElement;
-    const overflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; dialog.current?.focus();
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden'; dialog.current?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); requestClose(); }
       if (e.key === 'Tab') {
-        const controls = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex="0"]') || [])].filter(e => e.getClientRects().length);
+        const controls = [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),summary,[tabindex="0"]') || [])].filter(element => element.getClientRects().length);
         if (!controls.length) { e.preventDefault(); return; }
-        if (e.shiftKey && (document.activeElement === controls[0] || document.activeElement === dialog.current)) { e.preventDefault(); controls.at(-1)?.focus(); }
+        if (!dialog.current?.contains(document.activeElement) || (e.shiftKey && (document.activeElement === controls[0] || document.activeElement === dialog.current))) { e.preventDefault(); (e.shiftKey ? controls.at(-1) : controls[0])?.focus(); }
         else if (!e.shiftKey && document.activeElement === controls.at(-1)) { e.preventDefault(); controls[0].focus(); }
       }
     };
     document.addEventListener('keydown', key, true);
     return () => { invalidateUploads(); objectUrls.forEach(URL.revokeObjectURL); document.body.style.overflow = overflow; document.removeEventListener('keydown', key, true); previous?.focus(); };
   }, []);
-  function change(patch: Partial<ProfileIdentity>) { dirty.current = true; setDraft(d => ({ ...d, ...patch })); }
+  const change = useCallback((patch: Partial<ProfileIdentity>) => { dirty.current = true; setChanged(true); setDiscard(false); setDraft(value => ({ ...value, ...patch })); }, []);
+  const chooseArtwork = useCallback((item: Artwork) => {
+    const url = kind === 'banner' && item.banner ? item.banner : item.imageUrl;
+    change({ [kind]: { ...emptyImage(), url }, ...(kind === 'banner' ? { bannerMode: 'image' } : {}) });
+    setFiles(value => ({ ...value, [kind]: undefined }));
+    if (item.kind !== 'characters') setMedia(item);
+  }, [kind, change]);
+  function editImage(target: 'avatar' | 'banner') { setSection('appearance'); setPreview(false); setKind(target); setMedia(null); }
   async function upload(file?: File) {
-    if (!file) return;
+    if (!file || !uploadsEnabled) return;
     const current = ++generation.current, selectedKind = kind;
     setError(''); setProcessing(true); busy.current = true;
     try {
       const blob = await prepareProfileImage(file);
       if (current !== generation.current) return;
       const url = URL.createObjectURL(blob); urls.current.push(url);
-      setFiles(f => ({ ...f, [selectedKind]: blob }));
+      setFiles(value => ({ ...value, [selectedKind]: blob }));
       change({ [selectedKind]: { ...emptyImage(), url }, ...(selectedKind === 'banner' ? { bannerMode: 'image' } : {}) });
     } catch (e) { if (current === generation.current) setError(e instanceof Error ? e.message : 'Image could not be opened.'); }
     finally { if (current === generation.current) { setProcessing(false); busy.current = false; } }
   }
   async function save() {
-    if (busy.current) return; busy.current = true; setSaving(true); setError('');
+    if (busy.current) return;
+    busy.current = true; setSaving(true); setError(''); setDiscard(false);
     try { const result = await saveProfileIdentity(db, appId, uid, draft, files, revision); dirty.current = false; onSaved(result); }
     catch (e) { setError(e instanceof Error ? e.message : 'Profile could not be saved.'); }
     finally { busy.current = false; setSaving(false); }
   }
-  const covers = [...draft.showcases.anime, ...draft.showcases.vn, ...entries].map(e => e.imageUrl || e.image).filter((url, i, all) => url && all.indexOf(url) === i);
-  return createPortal(<div className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-md p-3 sm:p-6 flex items-center justify-center" onClick={requestClose}>
-    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="identity-editor-title" onClick={e => e.stopPropagation()} className="w-full max-w-6xl max-h-[94dvh] flex flex-col overflow-hidden rounded-lg border border-white/20 bg-[#08090f] text-white shadow-2xl">
-      <header className="flex justify-between items-center gap-3 p-5 border-b border-white/10"><h2 id="identity-editor-title" className="text-lg font-semibold min-w-0">Customize profile</h2><div className="flex shrink-0"><button title={previewOnly ? 'Edit profile' : 'Preview profile'} aria-label={previewOnly ? 'Edit profile' : 'Preview profile'} onClick={() => { setPreviewOnly(value => !value); setMobile(true); }} className="p-2 lg:hidden">{previewOnly ? <Pencil size={20} /> : <Eye size={20} />}</button><button aria-label="Close profile editor" disabled={saving || processing} onClick={requestClose} className="p-2"><X size={20} /></button></div></header>
-      <nav aria-label="Profile editor sections" className="flex gap-2 px-5 py-3 border-b border-white/10">{(['identity', 'showcases', 'layout'] as const).map(tab => <button key={tab} type="button" aria-pressed={section === tab} onClick={() => { setSection(tab); setPreviewOnly(false); }} className={`px-3 py-2 rounded text-sm capitalize ${section === tab ? 'bg-white text-black' : 'text-gray-400'}`}>{tab}</button>)}</nav>
-      <div className="overflow-y-auto min-h-0 grid lg:grid-cols-[22rem_minmax(0,1fr)]">
-        <fieldset disabled={saving || processing} className={`min-w-0 p-5 space-y-6 border-b lg:border-r border-white/10 ${previewOnly ? 'hidden lg:block' : ''}`}>
-          {section === 'identity' && <>
-          <div className="flex gap-2">{(['avatar', 'banner'] as const).map(value => <button key={value} aria-pressed={kind === value} onClick={() => setKind(value)} className={`px-4 py-2 rounded capitalize ${kind === value ? 'bg-white text-black' : 'bg-white/5'}`}>{value}</button>)}</div>
-          {kind === 'banner' && <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={draft.bannerMode === 'collage'} onChange={e => change({ bannerMode: e.target.checked ? 'collage' : 'image' })} />Cover collage</label>}
-          <label className="block text-sm">Upload {kind}<span className="flex items-center gap-2 mt-2"><Upload size={16} /><input aria-label={`Upload ${kind}`} type="file" disabled={!uploadsEnabled} title={uploadsEnabled ? undefined : 'File uploads are not available yet'} accept="image/jpeg,image/png,image/webp" onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} className="w-full min-w-0 text-xs" /></span><span className="block text-xs text-gray-500 mt-2">{uploadsEnabled ? 'JPEG, PNG, WebP · up to 8 MB' : 'File uploads are not available yet'}</span></label>
-          <div className="space-y-3">{[['x', 'Horizontal focus', 0, 100, 1], ['y', 'Vertical focus', 0, 100, 1], ['zoom', 'Zoom', 1, 3, 0.05]].map(([key, label, min, max, step]) => <label key={key} className="block text-xs text-gray-300">{label}<input aria-label={String(label)} type="range" min={min} max={max} step={step} value={draft[kind][key]} onChange={e => change({ [kind]: { ...draft[kind], [key]: Number(e.target.value) } })} className="block w-full mt-2" /></label>)}<button onClick={() => { change({ [kind]: emptyImage(), ...(kind === 'banner' ? { bannerMode: 'collage' } : {}) }); setFiles(f => ({ ...f, [kind]: undefined })); }} className="text-xs flex gap-2 items-center"><RotateCcw size={14} />Reset {kind}</button></div>
-          <details><summary className="cursor-pointer text-sm mb-3">Choose character or media artwork</summary><ProfileArtworkPicker entries={entries} onSelect={item => { const url = kind === 'banner' && item.banner ? item.banner : item.imageUrl; change({ [kind]: { ...emptyImage(), url }, ...(kind === 'banner' ? { bannerMode: 'image' } : {}) }); setFiles(f => ({ ...f, [kind]: undefined })); }} /></details>
-          <div><label htmlFor="profile-bio" className="block text-sm mb-2">Bio</label><textarea id="profile-bio" maxLength={2000} value={draft.bio} onChange={e => change({ bio: e.target.value })} className="w-full h-32 rounded border border-white/15 bg-black/20 p-3 text-sm" /><p className="text-xs text-gray-500">{draft.bio.length}/2000 · **bold**, *italic*, ||spoiler||</p></div>
-          <div><p className="text-sm mb-3">Public profile accent</p><div className="flex gap-3">{Object.entries(ACCENTS).map(([name, color]) => <button key={name} title={name} aria-label={`${name} accent`} aria-pressed={draft.accent === name} onClick={() => change({ accent: name as any })} className={`w-8 h-8 rounded-full border-2 ${draft.accent === name ? 'border-white ring-2 ring-white/30' : 'border-transparent'}`} style={{ background: color }} />)}</div></div>
-          </>}
-          {section === 'showcases' && <><div className="space-y-2"><p className="text-xs font-medium text-gray-400">Media showcase</p><div role="group" aria-label="Media showcase layout" className="flex border-b border-white/10">{(['combined', 'separate'] as const).map(mode => <button key={mode} type="button" aria-pressed={(draft.mediaLayout || 'separate') === mode} onClick={() => change({ mediaLayout: mode })} className={`flex-1 py-2.5 text-xs border-b-2 transition-colors ${(draft.mediaLayout || 'separate') === mode ? 'border-cyan-200 text-white' : 'border-transparent text-gray-500 hover:text-white'}`}>{mode === 'combined' ? 'Favorite media' : 'Anime + visual novels'}</button>)}</div></div><select aria-label="Showcase category" value={showcaseKind} onChange={e => setShowcaseKind(e.target.value as any)} className="w-full bg-[#161b25] border border-white/15 rounded p-2 text-sm">{Object.entries(SHOWCASE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><ShowcaseEditor key={showcaseKind} kind={showcaseKind} entries={entries} items={draft.showcases[showcaseKind]} onChange={items => change({ showcases: { ...draft.showcases, [showcaseKind]: items } })} /></>}
-          {section === 'layout' && <div><p className="text-sm mb-3">Overview sections</p>{[...draft.modules, ...MODULES.filter(m => !draft.modules.includes(m))].map((module, i) => <div key={module} className="flex items-center gap-3 py-2 border-b border-white/5"><label className="flex-1 capitalize text-sm"><input type="checkbox" checked={draft.modules.includes(module)} onChange={e => change({ modules: e.target.checked ? [...draft.modules, module] : draft.modules.filter(m => m !== module) })} className="mr-3" />{SHOWCASE_LABELS[module] || module}</label>{[-1, 1].map(delta => <button key={delta} aria-label={`Move ${module} ${delta < 0 ? 'up' : 'down'}`} disabled={!draft.modules.includes(module) || i + delta < 0 || i + delta >= draft.modules.length} onClick={() => { const next = [...draft.modules]; [next[i], next[i + delta]] = [next[i + delta], next[i]]; change({ modules: next }); }} className="p-2 disabled:opacity-20">{delta < 0 ? <ArrowUp size={14} /> : <ArrowDown size={14} />}</button>)}</div>)}</div>}
-        </fieldset>
-        <section className={`min-w-0 p-5 bg-black/15 lg:sticky lg:top-0 self-start ${previewOnly ? '' : 'hidden lg:block'}`}><div className="flex justify-between items-center mb-4"><h3 className="text-sm text-gray-400">Preview</h3><div className="flex gap-2"><button title="Desktop preview" aria-label="Desktop preview" aria-pressed={!mobile} onClick={() => setMobile(false)} className={`p-2 rounded ${!mobile ? 'bg-white/10' : ''}`}><Monitor size={18} /></button><button title="Mobile preview" aria-label="Mobile preview" aria-pressed={mobile} onClick={() => setMobile(true)} className={`p-2 rounded ${mobile ? 'bg-white/10' : ''}`}><Smartphone size={18} /></button></div></div>
-          <div className={`mx-auto border border-white/10 ${mobile ? 'max-w-[360px]' : 'w-full'}`} style={{ '--profile-accent': ACCENTS[draft.accent] } as React.CSSProperties}>
-            <ProfileIdentityVisual identity={draft} name={name} covers={covers} mobile={mobile} />
-            <div className="p-5 space-y-6">{draft.modules.map(module => module in SHOWCASE_LABELS ? <IdentityShowcase key={module} kind={module as keyof typeof SHOWCASE_LABELS} identity={draft} /> : <section key={module}><h3 className="capitalize text-sm font-semibold mb-3" style={{ color: ACCENTS[draft.accent] }}>{module === 'bio' ? 'About' : module}</h3>{module === 'bio' ? <ProfileBio text={draft.bio} /> : module === 'progress' ? <div className="flex gap-2 overflow-hidden">{entries.filter(e => e.status === 'watching').slice(0, 4).map((e, i) => <img key={i} src={e.imageUrl} alt={e.title} className="w-16 h-24 object-cover rounded" />)}</div> : <p className="text-xs text-gray-500">Public activity</p>}</section>)}</div>
-          </div>
-        </section>
+  const covers = [...draft.showcases.anime, ...draft.showcases.vn, ...(preview && !libraryPublic ? [] : entries)].map(entry => entry.imageUrl || entry.image).filter((url, index, all) => url && all.indexOf(url) === index);
+  const hasImage = !!draft[kind].url && (kind === 'avatar' || draft.bannerMode === 'image');
+  const progress = entries.filter(entry => ['watching', 'reading'].includes(entry.status));
+  const orderedModules = profileLayoutRows(draft);
+  const enabledRows = orderedModules.filter(module => draft.modules.includes(module));
+  return createPortal(<div className="pie-overlay" onClick={requestClose}>
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="identity-editor-title" className="pie-dialog" onClick={e => e.stopPropagation()} style={{ '--editor-accent': theme.scrollbarThumb, '--editor-button-text': theme.id === 'monochrome' ? '#09090b' : '#fff' } as React.CSSProperties}>
+      <header className="pie-header"><div><p className="pie-kicker">{name} <span>/</span> Profile</p><h2 id="identity-editor-title">Customize profile</h2></div><div className="pie-header-actions"><button type="button" className="pie-icon" title={preview ? 'Return to editing' : 'Preview profile'} aria-label={preview ? 'Return to editing' : 'Preview profile'} aria-pressed={preview} onClick={() => setPreview(value => !value)}><Eye size={18} /></button><button type="button" className="pie-icon" title="Close profile editor" aria-label="Close profile editor" disabled={saving || processing} onClick={requestClose}><X size={20} /></button></div></header>
+      <nav className="pie-nav" aria-label="Profile editor sections">{tabs.map(([id, label, Icon]) => <button type="button" key={id} disabled={saving || processing} aria-pressed={!preview && section === id} onClick={() => { setSection(id); setPreview(false); }}><Icon size={16} /><span>{label}</span></button>)}</nav>
+      <div className="pie-scroll" ref={scroll}>
+        <div className={`pie-profile-preview ${preview ? 'is-preview' : ''} ${preview && mobile ? 'is-mobile' : ''}`} style={{ '--profile-accent': ACCENTS[draft.accent] } as React.CSSProperties}>
+          <div className="pie-hero"><ProfileIdentityVisual identity={draft} name={name} covers={covers} mobile={preview && mobile} compact={!preview} />{!preview && <div className="pie-hero-actions"><button type="button" disabled={saving || processing} aria-pressed={section === 'appearance' && kind === 'avatar'} onClick={() => editImage('avatar')}><UserRound size={14} />Profile picture</button><button type="button" disabled={saving || processing} aria-pressed={section === 'appearance' && kind === 'banner'} onClick={() => editImage('banner')}><Camera size={14} />Banner</button></div>}</div>
+          {preview ? <div className="pie-full-preview"><div className="pie-preview-toolbar"><span className="pie-kicker">{libraryPublic ? 'Visitor appearance' : 'Visitor appearance / Private library'}</span><div className="pie-segments"><button type="button" title="Desktop preview" aria-label="Desktop preview" aria-pressed={!mobile} onClick={() => setMobile(false)}><Monitor size={16} /></button><button type="button" title="Mobile preview" aria-label="Mobile preview" aria-pressed={mobile} onClick={() => setMobile(true)}><Smartphone size={16} /></button></div></div>{draft.modules.map(module => module === 'bio' ? draft.bio && <section className="pie-preview-section" key={module}><h3>About</h3><ProfileBio text={draft.bio} /></section> : module === 'progress' ? libraryPublic && <section className="pie-preview-section" key={module}><h3>In progress</h3><div className="pie-progress">{progress.slice(0, 6).map(entry => <div key={entry.kitsuId || entry.id}><img src={entry.imageUrl} alt="" /><p>{entry.title}</p></div>)}</div>{!progress.length && <p className="pie-muted">No titles in progress.</p>}</section> : module === 'activity' ? null : <IdentityShowcase key={module} identity={draft} kind={module as 'anime' | 'vn' | 'characters'} />)}</div> : null}
+        </div>
+        {!preview && <fieldset disabled={saving || processing} className="pie-fields">
+          {section === 'appearance' && <div className="pie-edit-grid"><section className="pie-main-section"><div className="pie-section-heading"><div><p className="pie-kicker">Artwork</p><h3>{kind === 'avatar' ? 'Profile picture' : 'Banner'}</h3></div><button type="button" className="pie-framing-shortcut pie-text-action" disabled={!hasImage} onClick={() => framing.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })}><Crop size={14} />Frame</button></div>
+            {kind === 'banner' && <div className="pie-segments pie-banner-mode" role="group" aria-label="Banner style"><button type="button" aria-pressed={draft.bannerMode === 'image'} onClick={() => { if (draft.banner.url) change({ bannerMode: 'image' }); }}>Artwork</button><button type="button" aria-pressed={draft.bannerMode === 'collage'} onClick={() => change({ bannerMode: 'collage' })}>Cover collage</button></div>}
+            <ProfileArtworkPicker key={kind} entries={entries} selectedImage={draft[kind].url} onSelect={chooseArtwork} />
+            {kind === 'avatar' && media && <ProfileCastPicker media={media} selectedImage={draft.avatar.url} onSelect={chooseArtwork} />}
+          </section><aside ref={framing} className="pie-side-section"><div className="pie-section-heading"><h3>Framing</h3><button type="button" className="pie-icon" title="Reset framing" aria-label="Reset framing" disabled={!hasImage} onClick={() => change({ [kind]: { ...draft[kind], x: 50, y: 50, zoom: 1 } })}><RotateCcw size={15} /></button></div>
+            <div title={hasImage ? 'Drag to reposition' : undefined} className={`pie-crop-preview ${kind === 'avatar' ? 'is-avatar' : ''} ${hasImage ? 'is-draggable' : ''}`} onPointerDown={e => { if (!hasImage || busy.current) return; const bounds = e.currentTarget.getBoundingClientRect(); drag.current = { clientX: e.clientX, clientY: e.clientY, x: draft[kind].x, y: draft[kind].y, width: bounds.width, height: bounds.height }; e.currentTarget.setPointerCapture(e.pointerId); e.preventDefault(); }} onPointerMove={e => { const start = drag.current; if (!start || busy.current) return; const clamp = (value: number) => Math.max(0, Math.min(100, value)); change({ [kind]: { ...draft[kind], x: Math.round(clamp(start.x - (e.clientX - start.clientX) / start.width * 100)), y: Math.round(clamp(start.y - (e.clientY - start.clientY) / start.height * 100)) } }); }} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>{hasImage ? <IdentityImage image={draft[kind]} className="w-full h-full" /> : kind === 'avatar' ? <UserRound size={32} /> : <ImageIcon size={32} />}</div>
+            <div className="pie-crop-controls">{[['x', 'Horizontal focus', 0, 100, 1], ['y', 'Vertical focus', 0, 100, 1], ['zoom', 'Zoom', 1, 3, 0.05]].map(([key, label, min, max, step]) => <label key={key}><span>{label}<output>{key === 'zoom' ? `${draft[kind][key].toFixed(2)}x` : `${draft[kind][key]}%`}</output></span><input aria-label={String(label)} type="range" disabled={!hasImage} min={min} max={max} step={step} value={draft[kind][key]} onChange={e => change({ [kind]: { ...draft[kind], [key]: Number(e.target.value) } })} /></label>)}</div>
+            {hasImage && <button type="button" className="pie-text-action pie-remove-image" onClick={() => { change({ [kind]: emptyImage(), ...(kind === 'banner' ? { bannerMode: 'collage' } : {}) }); setFiles(value => ({ ...value, [kind]: undefined })); setMedia(null); }}>Remove {kind === 'avatar' ? 'profile picture' : 'banner'}</button>}
+            {uploadsEnabled && <label className="pie-upload"><Upload size={16} />Upload image<input aria-label={`Upload ${kind}`} type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} /></label>}
+            <div className="pie-accent-section"><div className="pie-section-heading"><h3>Profile accent</h3></div><div className="pie-swatches">{Object.entries(ACCENTS).map(([id, color]) => <button type="button" key={id} title={id} aria-label={`${id} accent`} aria-pressed={draft.accent === id} onClick={() => change({ accent: id as any })} style={{ background: color }}>{draft.accent === id && <Check size={15} />}</button>)}</div></div>
+          </aside></div>}
+          {section === 'about' && <div className="pie-edit-grid"><section className="pie-main-section"><div className="pie-section-heading"><div><p className="pie-kicker">Identity</p><h3>About you</h3></div><span className="pie-muted">{draft.bio.length}/2000</span></div><label className="pie-sr-only" htmlFor="profile-bio">Bio</label><textarea id="profile-bio" maxLength={2000} value={draft.bio} onChange={e => change({ bio: e.target.value })} placeholder="A little about you..." /><div className="pie-format-toolbar">{[['Bold', '**', 'Text'], ['Italic', '*', 'Text'], ['Spoiler', '||', 'Spoiler']].map(([label, marker, placeholder]) => <button type="button" key={label} onClick={() => { const input = document.getElementById('profile-bio') as HTMLTextAreaElement; const start = input.selectionStart, end = input.selectionEnd; const selected = draft.bio.slice(start, end) || placeholder; const next = draft.bio.slice(0, start) + marker + selected + marker + draft.bio.slice(end); if (next.length <= 2000) { change({ bio: next }); requestAnimationFrame(() => { input.focus(); input.setSelectionRange(start + marker.length, start + marker.length + selected.length); }); } }}><span className={label === 'Bold' ? 'font-bold' : label === 'Italic' ? 'italic' : ''}>{label}</span></button>)}</div></section><aside className="pie-side-section"><div className="pie-section-heading"><h3>About</h3><Eye size={15} /></div>{draft.bio ? <ProfileBio text={draft.bio} /> : <p className="pie-muted">No bio yet.</p>}</aside></div>}
+          {section === 'favorites' && <div className="pie-favorites-section"><div className="pie-section-heading"><div><p className="pie-kicker">Showcase</p><h3>Favorites</h3></div><div className="pie-segments" role="group" aria-label="Media showcase layout">{(['combined', 'separate'] as const).map(mode => <button type="button" key={mode} aria-pressed={(draft.mediaLayout || 'separate') === mode} onClick={() => change({ mediaLayout: mode })}>{mode === 'combined' ? 'Favorite media' : 'Separate lists'}</button>)}</div></div><div className="pie-category-tabs" role="group" aria-label="Showcase category">{([['anime', 'Anime', Tv], ['vn', 'Visual novels', BookOpen], ['characters', 'Characters', Users]] as const).map(([id, label, Icon]) => <button type="button" key={id} aria-pressed={showcaseKind === id} onClick={() => setShowcaseKind(id)}><Icon size={15} />{label}<span>{draft.showcases[id].length}/8</span></button>)}</div><ShowcaseEditor key={showcaseKind} kind={showcaseKind} entries={entries} items={draft.showcases[showcaseKind]} onChange={items => change({ showcases: { ...draft.showcases, [showcaseKind]: items } })} /><div className="pie-shelf-preview" style={{ '--profile-accent': ACCENTS[draft.accent] } as React.CSSProperties}><IdentityShowcase identity={draft} kind={draft.mediaLayout === 'combined' ? (draft.modules.find(module => module === 'anime' || module === 'vn') || 'anime') as 'anime' | 'vn' : showcaseKind} />{draft.mediaLayout === 'combined' && showcaseKind === 'characters' && <IdentityShowcase identity={draft} kind="characters" />}</div></div>}
+          {section === 'layout' && <section className="pie-layout-section"><div className="pie-section-heading"><div><p className="pie-kicker">Overview</p><h3>Profile sections</h3></div><button type="button" className="pie-text-action" onClick={() => { setPreview(true); }}>Preview<Eye size={14} /></button></div>{orderedModules.map((module, index) => <div className="pie-module-row" key={module}><span className="pie-module-number">{draft.modules.includes(module) ? String(index + 1).padStart(2, '0') : '--'}</span><label className="pie-module-label"><input type="checkbox" checked={draft.modules.includes(module)} onChange={e => change({ modules: toggleProfileModule(draft, module, e.target.checked) })} /><span>{draft.mediaLayout === 'combined' && ['anime', 'vn'].includes(module) ? 'Favorite media' : moduleNames[module]}</span></label><div className="pie-order-buttons">{[-1, 1].map(delta => <button type="button" className="pie-icon" key={delta} title={`Move ${moduleNames[module]} ${delta < 0 ? 'up' : 'down'}`} aria-label={`Move ${module} ${delta < 0 ? 'up' : 'down'}`} disabled={!draft.modules.includes(module) || index + delta < 0 || index + delta >= enabledRows.length} onClick={() => { change({ modules: moveProfileModule(draft, module, delta) }); }}>{delta < 0 ? <ArrowUp size={15} /> : <ArrowDown size={15} />}</button>)}</div></div>)}</section>}
+        </fieldset>}
       </div>
-      <footer className="p-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3"><p role="alert" className="text-sm text-rose-300 flex-1 min-w-0">{error || (processing ? 'Preparing image…' : '')}</p><button onClick={requestClose} disabled={saving || processing} className="px-4 py-2 text-sm">Cancel</button><button onClick={save} disabled={saving || processing || (draft.bannerMode === 'image' && !draft.banner.url)} style={{ backgroundColor: ACCENTS[draft.accent] }} className="px-5 py-2 rounded text-black text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40">{saving ? 'Saving…' : 'Save profile'}</button></footer>
+      <footer className="pie-footer">{discard ? <><p role="alert">Discard unsaved changes?</p><button type="button" className="pie-secondary" autoFocus onClick={() => setDiscard(false)}>Keep editing</button><button type="button" className="pie-danger" onClick={() => close.current()}>Discard</button></> : <><p className={error ? 'pie-error' : 'pie-muted'} role={error ? 'alert' : 'status'}>{error || (processing ? 'Preparing image...' : changed ? 'Unsaved changes' : '')}</p><button type="button" className="pie-secondary" disabled={saving || processing} onClick={requestClose}>Cancel</button><button type="button" className="pie-primary" disabled={!changed || saving || processing || (draft.bannerMode === 'image' && !draft.banner.url)} onClick={save}>{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{saving ? 'Saving...' : 'Save profile'}</button></>}</footer>
     </div>
   </div>, document.body);
 }

@@ -1,10 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search } from 'lucide-react';
-import { libraryArtwork, searchProfileArtwork, type Artwork } from '../services/profile-artwork';
+import { Search, Check, BookOpen, Tv, Users, Library, Globe, Loader2 } from 'lucide-react';
+import { libraryArtwork, profileCast, searchProfileArtwork, type Artwork } from '../services/profile-artwork';
 
-export function ProfileArtworkPicker({ entries, kind: fixedKind, onSelect, selected = [] }: { entries: any[]; kind?: 'anime' | 'vn' | 'characters'; onSelect: (item: Artwork) => void; selected?: string[] }) {
+export function ArtworkGrid({ items, onSelect, selected = [], selectedImage = '' }: { items: Artwork[]; onSelect: (item: Artwork) => void; selected?: string[]; selectedImage?: string }) {
+  return <div className="pie-artwork-grid">{items.map(item => {
+    const chosen = selected.includes(item.id) || selectedImage === item.imageUrl;
+    return <button key={item.id} type="button" disabled={selected.includes(item.id)} aria-pressed={chosen} title={item.title} aria-label={`Select ${item.title}`} onClick={() => onSelect(item)} className={`pie-artwork ${chosen ? 'is-selected' : ''}`}>
+      <span className="pie-artwork-image"><img src={item.imageUrl} alt="" referrerPolicy="no-referrer" loading="lazy" />{chosen && <span className="pie-artwork-check"><Check size={13} /></span>}</span>
+      <span className="pie-artwork-name">{item.title}</span>
+    </button>;
+  })}</div>;
+}
+
+export function ProfileArtworkPicker({ entries, kind: fixedKind, onSelect, selected = [], selectedImage = '' }: { entries: any[]; kind?: 'anime' | 'vn' | 'characters'; onSelect: (item: Artwork) => void; selected?: string[]; selectedImage?: string }) {
   const [kind, setKind] = useState<'anime' | 'vn' | 'characters'>(fixedKind || 'anime');
   const [source, setSource] = useState<'anilist' | 'vndb'>('anilist');
+  const [view, setView] = useState<'library' | 'catalogue'>(fixedKind === 'characters' ? 'catalogue' : 'library');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Artwork[]>([]);
   const [loading, setLoading] = useState(false);
@@ -14,18 +25,45 @@ export function ProfileArtworkPicker({ entries, kind: fixedKind, onSelect, selec
   useEffect(() => () => request.current?.abort(), []);
   function reset() { request.current?.abort(); setResults([]); setSearched(false); setLoading(false); setError(''); }
   async function search() {
-    reset(); const controller = new AbortController(); request.current = controller; setLoading(true);
+    if (!query.trim()) return;
+    reset(); setView('catalogue');
+    const controller = new AbortController(); request.current = controller; setLoading(true);
     try { const items = await searchProfileArtwork(query, kind, source, controller.signal); if (!controller.signal.aborted) { setResults(items); setSearched(true); } }
     catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Search failed.'); }
     finally { if (!controller.signal.aborted) setLoading(false); }
   }
-  const local = entries.map(libraryArtwork).filter((item): item is Artwork => !!item && item.kind === kind && item.title.toLowerCase().includes(query.toLowerCase()));
-  const items = searched ? results : local.slice(0, 16);
-  return <div className="space-y-3">
-    <div className="flex gap-2">{!fixedKind && <select aria-label="Artwork category" value={kind} onChange={e => { reset(); setKind(e.target.value as any); }} className="min-w-0 bg-[#161b25] border border-white/15 rounded p-2 text-xs"><option value="anime">Anime</option><option value="vn">Visual novels</option><option value="characters">Characters</option></select>}{kind === 'characters' && <select aria-label="Character catalogue" value={source} onChange={e => { reset(); setSource(e.target.value as any); }} className="min-w-0 bg-[#161b25] border border-white/15 rounded p-2 text-xs"><option value="anilist">AniList</option><option value="vndb">VNDB</option></select>}</div>
-    <form className="flex gap-2" onSubmit={e => { e.preventDefault(); search(); }}><input aria-label="Search profile artwork" placeholder={kind === 'characters' ? 'Search characters' : 'Search titles'} value={query} maxLength={100} onChange={e => { reset(); setQuery(e.target.value); }} className="min-w-0 w-full bg-black/20 border border-white/15 rounded p-2 text-sm" /><button aria-label="Search catalogue" title="Search catalogue" disabled={!query.trim() || loading} className="p-2 rounded bg-white/10 disabled:opacity-40"><Search size={18} /></button></form>
-    {loading && <p role="status" className="text-xs text-gray-400">Searching…</p>}{error && <p role="alert" className="text-xs text-rose-300">{error}</p>}
-    <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">{items.map(item => <button key={item.id} type="button" disabled={selected.includes(item.id)} title={item.title} aria-label={`Select ${item.title}`} onClick={() => onSelect(item)} className="min-w-0 text-left disabled:opacity-30 group"><img src={item.imageUrl} alt="" referrerPolicy="no-referrer" loading="lazy" className="w-full aspect-[2/3] object-cover rounded border border-white/10 group-hover:border-white/50" /><span className="text-[10px] line-clamp-2 mt-1">{item.title}</span></button>)}</div>
-    {searched && !loading && !items.length && <p className="text-xs text-gray-500">No matching artwork.</p>}
+  const seen = new Set<string>();
+  const local = entries.map(libraryArtwork).filter((item): item is Artwork => {
+    if (!item || item.kind !== kind || !item.title.toLowerCase().includes(query.toLowerCase()) || seen.has(item.id)) return false;
+    seen.add(item.id); return true;
+  });
+  const items = view === 'library' ? local : results;
+  return <div className="pie-picker">
+    {!fixedKind && <div className="pie-segments" role="group" aria-label="Artwork category">{([['anime', 'Anime', Tv], ['vn', 'Visual novels', BookOpen], ['characters', 'Characters', Users]] as const).map(([id, label, Icon]) => <button key={id} type="button" aria-pressed={kind === id} onClick={() => { reset(); setKind(id); if (id === 'characters') setView('catalogue'); }}><Icon size={14} />{label}</button>)}</div>}
+    <div className="pie-picker-toolbar"><div className="pie-source-tabs" role="group" aria-label="Artwork source">
+      {kind !== 'characters' && <button type="button" aria-pressed={view === 'library'} onClick={() => { reset(); setView('library'); }}><Library size={14} />Your library</button>}
+      <button type="button" aria-pressed={view === 'catalogue'} onClick={() => { reset(); setView('catalogue'); }}><Globe size={14} />Catalogue</button>
+    </div>{kind === 'characters' && <select aria-label="Character catalogue" value={source} onChange={e => { reset(); setSource(e.target.value as any); }}><option value="anilist">AniList</option><option value="vndb">VNDB</option></select>}</div>
+    <form className="pie-search" onSubmit={e => { e.preventDefault(); search(); }}><Search size={16} aria-hidden="true" /><input aria-label="Search profile artwork" placeholder={kind === 'characters' ? 'Find a character...' : view === 'library' ? 'Filter your library...' : 'Find a title...'} value={query} maxLength={100} onChange={e => { reset(); setQuery(e.target.value); }} /><button type="submit" aria-label="Search catalogue" title="Search catalogue" disabled={!query.trim() || loading}>{loading ? <Loader2 size={17} className="animate-spin" /> : <Search size={17} />}</button></form>
+    {error && <p role="alert" className="pie-error">{error}</p>}{loading && <p role="status" className="pie-muted">Searching catalogue...</p>}
+    <div className="pie-picker-results"><ArtworkGrid items={items} onSelect={onSelect} selected={selected} selectedImage={selectedImage} /></div>
+    {!items.length && !loading && !error && <div className="pie-empty">{view === 'library' ? 'No matching titles in your library.' : searched ? 'No matching artwork.' : kind === 'characters' ? 'Search for a character.' : 'Search the catalogue.'}{view === 'library' && query.trim() && <button type="button" className="pie-text-action" onClick={search}>Search catalogue</button>}</div>}
   </div>;
 }
+
+export function ProfileCastPicker({ media, onSelect, selectedImage }: { media: Artwork; onSelect: (item: Artwork) => void; selectedImage: string }) {
+  const [items, setItems] = useState<Artwork[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController(); setLoading(true); setItems([]); setError('');
+    profileCast(media, controller.signal).then(value => { if (!controller.signal.aborted) setItems(value); }).catch(() => { if (!controller.signal.aborted) setError('Character artwork is unavailable.'); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [media, retry]);
+  return <section className="pie-cast"><div className="pie-section-heading"><div><p className="pie-kicker">Characters</p><h3>{media.title}</h3></div></div>{loading ? <p role="status" className="pie-muted">Loading characters...</p> : error ? <p role="alert" className="pie-error">{error} <button type="button" className="pie-text-action" onClick={() => setRetry(value => value + 1)}>Retry</button></p> : items.length ? <ArtworkGrid items={items} onSelect={onSelect} selectedImage={selectedImage} /> : <p className="pie-muted">No character artwork available for this title.</p>}</section>;
+}
+
+// Framing changes should not rebuild an entire library or character grid.
+export const MemoProfileArtworkPicker = React.memo(ProfileArtworkPicker);
+export const MemoProfileCastPicker = React.memo(ProfileCastPicker);

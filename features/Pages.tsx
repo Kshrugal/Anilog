@@ -2683,6 +2683,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     const [isFriend, setIsFriend] = useState(false);
     const [activityData, setActivityData] = useState([]);
     const [libraryPrivate, setLibraryPrivate] = useState(false);
+    const [targetLibraryPublic, setTargetLibraryPublic] = useState(false);
 
     useEffect(() => {
         let isMounted = true;
@@ -2696,6 +2697,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         setActivityError('');
         setFriendHallOfFame([]);
         setLibraryPrivate(false);
+        setTargetLibraryPublic(false);
         setIsFriend(false);
         setSelectedAnimeData(null);
         setSelectedOwnerId(null);
@@ -2713,6 +2715,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 if(friendUserSnap.exists() && isMounted) {
                     setFriendHallOfFame(friendUserSnap.data().hallOfFame || Array(10).fill(null));
                     setLibraryPrivate(friendUserSnap.data().libraryPublic !== true && visitor);
+                    setTargetLibraryPublic(friendUserSnap.data().libraryPublic === true);
                 }
 
                 const targetIsPrivate = (!friendUserSnap.exists() || friendUserSnap.data().libraryPublic !== true) && visitor;
@@ -2843,8 +2846,8 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
   <div className="profile-identity min-w-0 max-w-6xl mx-auto space-y-7 pb-8" style={{ '--profile-accent': ACCENTS[identity.accent] } as React.CSSProperties}>
     <style>{`.profile-identity .text-cyan-200,.profile-identity .text-cyan-300{color:var(--profile-accent)}.profile-identity .border-cyan-300{border-color:var(--profile-accent)}`}</style>
     {identityState.error && <p role="alert" className="text-amber-300">{identityState.error}</p>}
-    {targetUid === currentUserId && !readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3"><label className="text-xs text-gray-300 flex items-center gap-2"><input type="checkbox" checked={visitorPreview} onChange={e => setVisitorPreview(e.target.checked)} />Visitor preview</label>{!visitorPreview && <div className="flex flex-wrap items-center gap-3"><button disabled={identityState.loading || !!identityState.error} onClick={() => setEditingIdentity(true)} className="text-sm text-cyan-200 disabled:opacity-40">Customize profile</button><button onClick={() => setPage('profile')} className="inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white"><SettingsIcon size={16} />Manage account</button>{onLogout && <button onClick={onLogout} title="Sign out" aria-label="Sign out" className="p-2 text-gray-400 hover:text-red-300"><LogoutIcon size={17} /></button>}</div>}</div>}
-    {editingIdentity && !visitor && <ProfileIdentityEditor db={db} appId={appId} uid={currentUserId} name={targetUsername} initial={identity} revision={identityState.revision} entries={list} onClose={() => setEditingIdentity(false)} onSaved={result => { setEditingIdentity(false); showToast(result.cleanupPending ? 'Profile saved. Image cleanup will retry next time.' : 'Profile saved.'); }} />}
+    {targetUid === currentUserId && !readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3"><label className="text-xs text-gray-400 inline-flex items-center gap-2.5 py-2"><input type="checkbox" className="h-3.5 w-3.5" style={{ accentColor: ACCENTS[identity.accent] }} checked={visitorPreview} onChange={e => setVisitorPreview(e.target.checked)} />Visitor preview</label>{!visitorPreview && <div className="flex flex-wrap items-center gap-3"><button disabled={loading || identityState.loading || !!identityState.error} onClick={() => setEditingIdentity(true)} className="inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-white/10 disabled:opacity-40"><SettingsIcon size={14} />Customize profile</button><button onClick={() => setPage('profile')} className="inline-flex items-center gap-2 py-2 text-xs text-gray-400 hover:text-white">Manage account</button>{onLogout && <button onClick={onLogout} title="Sign out" aria-label="Sign out" className="p-2 text-gray-400 hover:text-red-300"><LogoutIcon size={17} /></button>}</div>}</div>}
+    {editingIdentity && !visitor && <ProfileIdentityEditor db={db} appId={appId} uid={currentUserId} name={targetUsername} initial={identity} revision={identityState.revision} entries={list} libraryPublic={targetLibraryPublic} onClose={() => setEditingIdentity(false)} onSaved={result => { setEditingIdentity(false); showToast(result.cleanupPending ? 'Profile saved. Image cleanup will retry next time.' : 'Profile saved.'); }} />}
     <PublicProfileHeader identity={identity} name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
     {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
     {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}

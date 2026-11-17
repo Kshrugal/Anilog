@@ -4,6 +4,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
+import { Check } from 'lucide-react';
 
 const compile = text => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.React } }).outputText;
 const url = text => `data:text/javascript;base64,${Buffer.from(compile(text)).toString('base64')}`;
@@ -29,6 +30,44 @@ const bind = async (path, bindings, exports) => {
   const body = ast.statements.filter(n => !ts.isImportDeclaration(n)).map(n => n.getText(ast).replace(/^export /, '')).join('\n');
   return new Function(...Object.keys(bindings), `${compile(body)}; return {${exports}};`)(...Object.values(bindings));
 };
+test('combined layout visibility and ordering move media as one section', async () => {
+  const { profileLayoutRows, toggleProfileModule, moveProfileModule } = await bind('../services/profile-layout.ts', identity, 'profileLayoutRows,toggleProfileModule,moveProfileModule');
+  const value = { ...identity.defaultIdentity(), mediaLayout: 'combined' };
+  assert.deepEqual(profileLayoutRows(value), ['bio', 'progress', 'anime', 'characters', 'activity']);
+  assert.deepEqual(moveProfileModule(value, 'anime', -1), ['bio', 'anime', 'vn', 'progress', 'characters', 'activity']);
+  assert.deepEqual(toggleProfileModule(value, 'anime', false), ['bio', 'progress', 'characters', 'activity']);
+  assert.deepEqual(toggleProfileModule({ ...value, modules: ['bio', 'characters'] }, 'anime', true), ['bio', 'characters', 'anime', 'vn']);
+  assert.deepEqual(moveProfileModule(value, 'bio', -1), value.modules);
+});
+test('show-based character selection uses exact catalogue IDs and filters unsafe or spoiler images', async () => {
+  const profile = await import(url(await readFile(new URL('../services/profile.ts', import.meta.url), 'utf8')));
+  const calls = [];
+  const fetch = async (endpoint, options) => {
+    calls.push({ endpoint, body: JSON.parse(options.body), signal: options.signal });
+    if (endpoint.includes('anilist')) return { ok: true, json: async () => ({ data: { Media: { characters: { nodes: [{ id: 1, name: { full: 'Naruto' }, image: { large: 'https://s4.anilist.co/naruto.jpg' } }, { id: 2, name: { full: 'Unsafe' }, image: { large: 'javascript:alert(1)' } }] } } } }) };
+    return { ok: true, json: async () => ({ results: [
+      { id: 'c1', name: 'Safe', image: { url: 'https://t.vndb.org/safe.jpg', sexual: 0, violence: 0 }, vns: [{ id: 'v11', spoiler: 0 }] },
+      { id: 'c2', name: 'Spoiler', image: { url: 'https://t.vndb.org/spoiler.jpg', sexual: 0, violence: 0 }, vns: [{ id: 'v11', spoiler: 2 }] },
+      { id: 'c3', name: 'Explicit', image: { url: 'https://t.vndb.org/explicit.jpg', sexual: 2, violence: 0 }, vns: [{ id: 'v11', spoiler: 0 }] },
+    ] }) };
+  };
+  const { profileCast } = await bind('../services/profile-artwork.ts', { ...identity, ...profile, fetch }, 'profileCast');
+  const signal = new AbortController().signal;
+  assert.equal((await profileCast(favorite, signal)).length, 1);
+  assert.deepEqual(calls[0].body.variables, { id: 20 });
+  const characters = await profileCast({ ...favorite, id: 'vndb:v11', kind: 'vn', source: 'vndb' }, signal);
+  assert.deepEqual(characters.map(item => item.id), ['vndb:c1']);
+  assert.deepEqual(calls[1].body.filters, ['vn', '=', ['id', '=', 'v11']]);
+  assert.ok(calls.every(call => call.signal instanceof AbortSignal));
+  assert.deepEqual(await profileCast({ ...favorite, id: 'kitsu:1', source: 'kitsu' }, signal), []);
+  assert.equal(calls.length, 2);
+});
+test('artwork choices expose selected state, duplicate prevention and safe title text', async () => {
+  const { ArtworkGrid } = await bind('../features/ProfileArtworkPicker.tsx', { React, Check }, 'ArtworkGrid');
+  const html = renderToStaticMarkup(React.createElement(ArtworkGrid, { items: [{ ...favorite, title: '<script>unsafe</script>' }], selected: [favorite.id], onSelect() {} }));
+  assert.match(html, /aria-pressed="true"/); assert.match(html, /disabled=""/);
+  assert.doesNotMatch(html, /<script>/); assert.match(html, /&lt;script&gt;/);
+});
 test('identity normalization rejects unsafe URLs, malformed favorites and private fields', () => {
   const value = identity.normalizeIdentity({ accent: '__proto__', bio: 'x'.repeat(2200), privateSettings: { email: 'secret' }, avatar: { url: 'javascript:alert(1)', zoom: 99 }, modules: ['bio', 'bio', 'journal'], showcases: { anime: [favorite, favorite, { ...favorite, source: 'vndb' }, { ...favorite, id: 'anilist:3', title: '' }] } });
   assert.equal(value.accent, 'cyan'); assert.equal(value.bio.length, 2000); assert.equal(value.avatar.url, ''); assert.equal(value.avatar.zoom, 3);
