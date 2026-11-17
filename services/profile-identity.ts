@@ -2,7 +2,7 @@ export const ACCENTS = { cyan: '#67e8f9', rose: '#fda4af', green: '#86efac', gol
 export const MODULES = ['bio', 'progress', 'anime', 'vn', 'characters', 'activity'] as const;
 export type ShowcaseItem = { id: string; title: string; imageUrl: string; source: 'anilist' | 'vndb' | 'kitsu'; kind: 'anime' | 'vn' | 'characters' };
 export type ProfileImage = { url: string; path: string; x: number; y: number; zoom: number };
-export type ProfileIdentity = { version: 1; bio: string; accent: keyof typeof ACCENTS; bannerMode: 'collage' | 'image'; avatar: ProfileImage; banner: ProfileImage; modules: string[]; showcases: { anime: ShowcaseItem[]; vn: ShowcaseItem[]; characters: ShowcaseItem[] } };
+export type ProfileIdentity = { version: 1; bio: string; accent: keyof typeof ACCENTS; mediaLayout?: 'combined' | 'separate'; bannerMode: 'collage' | 'image'; avatar: ProfileImage; banner: ProfileImage; modules: string[]; showcases: { anime: ShowcaseItem[]; vn: ShowcaseItem[]; characters: ShowcaseItem[] } };
 export const emptyImage = (): ProfileImage => ({ url: '', path: '', x: 50, y: 50, zoom: 1 });
 export const defaultIdentity = (): ProfileIdentity => ({ version: 1, bio: '', accent: 'cyan', bannerMode: 'collage', avatar: emptyImage(), banner: emptyImage(), modules: [...MODULES], showcases: { anime: [], vn: [], characters: [] } });
 export function safeArtwork(url: string) {
@@ -23,7 +23,14 @@ export function normalizeIdentity(value: any): ProfileIdentity {
       seen.add(item.id); return true;
     }).slice(0, 8).map(item => ({ id: item.id, title: item.title.slice(0, 200), imageUrl: item.imageUrl, source: item.source, kind }))];
   })) as ProfileIdentity['showcases'];
-  return { ...defaults, bio: typeof value?.bio === 'string' ? value.bio.slice(0, 2000) : '', accent: Object.hasOwn(ACCENTS, value?.accent || '') ? value.accent : 'cyan', bannerMode: value?.bannerMode === 'image' ? 'image' : 'collage', avatar: image(value?.avatar), banner: image(value?.banner), modules: Array.isArray(value?.modules) ? [...new Set<string>(value.modules.filter((m: string) => MODULES.includes(m as any)))] : defaults.modules, showcases };
+  return { ...defaults, mediaLayout: value?.mediaLayout === 'combined' ? 'combined' : 'separate', bio: typeof value?.bio === 'string' ? value.bio.slice(0, 2000) : '', accent: Object.hasOwn(ACCENTS, value?.accent || '') ? value.accent : 'cyan', bannerMode: value?.bannerMode === 'image' ? 'image' : 'collage', avatar: image(value?.avatar), banner: image(value?.banner), modules: Array.isArray(value?.modules) ? [...new Set<string>(value.modules.filter((m: string) => MODULES.includes(m as any)))] : defaults.modules, showcases };
+}
+export function profileShowcase(identity: ProfileIdentity, module: string) {
+  if (identity.mediaLayout === 'combined' && ['anime', 'vn'].includes(module)) {
+    const first = identity.modules.find(value => value === 'anime' || value === 'vn');
+    return { hidden: module !== first, title: 'Favorite media', items: [...(identity.modules.includes('anime') ? identity.showcases.anime : []), ...(identity.modules.includes('vn') ? identity.showcases.vn : [])] };
+  }
+  return { hidden: false, title: undefined, items: identity.showcases[module] || [] };
 }
 export function showcaseUrl(item: ShowcaseItem) {
   const id = item.id.split(':')[1];

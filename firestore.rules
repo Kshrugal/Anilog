@@ -46,7 +46,8 @@ service cloud.firestore {
     }
     function validIdentity(data, userId) {
       return data.keys().hasAll(['version', 'revision', 'bio', 'accent', 'bannerMode', 'avatar', 'banner', 'modules'])
-        && data.keys().hasOnly(['version', 'revision', 'bio', 'accent', 'bannerMode', 'avatar', 'banner', 'modules'])
+        && data.keys().hasOnly(['version', 'revision', 'bio', 'accent', 'bannerMode', 'avatar', 'banner', 'modules', 'mediaLayout'])
+        && (!('mediaLayout' in data) || data.mediaLayout in ['combined', 'separate'])
         && data.version == 1 && data.revision is int && data.revision > 0
         && data.bio is string && data.bio.size() <= 2000
         && data.accent in ['cyan', 'rose', 'green', 'gold', 'violet']

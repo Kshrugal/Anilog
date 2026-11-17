@@ -9,6 +9,20 @@ const compile = text => ts.transpileModule(text, { compilerOptions: { target: ts
 const url = text => `data:text/javascript;base64,${Buffer.from(compile(text)).toString('base64')}`;
 const identity = await import(url(await readFile(new URL('../services/profile-identity.ts', import.meta.url), 'utf8')));
 const favorite = { id: 'anilist:20', title: 'Naruto', source: 'anilist', kind: 'anime', imageUrl: 'https://s4.anilist.co/example.jpg' };
+test('combined favorite media preserves both catalogues and respects hidden modules', () => {
+  const value = identity.defaultIdentity(); value.mediaLayout = 'combined';
+  value.showcases.anime = [favorite];
+  value.showcases.vn = [{ ...favorite, id: 'vndb:v11', source: 'vndb', kind: 'vn' }];
+  assert.equal(identity.profileShowcase(value, 'anime').title, 'Favorite media');
+  assert.equal(identity.profileShowcase(value, 'anime').items.length, 2);
+  assert.equal(identity.profileShowcase(value, 'vn').hidden, true);
+  value.modules = ['vn', 'characters'];
+  assert.equal(identity.profileShowcase(value, 'vn').hidden, false);
+  assert.equal(identity.profileShowcase(value, 'vn').items.length, 1);
+  value.mediaLayout = 'separate';
+  assert.deepEqual(identity.profileShowcase(value, 'anime').items, [favorite]);
+  assert.equal(identity.normalizeIdentity({ mediaLayout: 'invalid' }).mediaLayout, 'separate');
+});
 const bind = async (path, bindings, exports) => {
   const source = await readFile(new URL(path, import.meta.url), 'utf8');
   const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

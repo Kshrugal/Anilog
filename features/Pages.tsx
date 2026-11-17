@@ -82,7 +82,7 @@ import { useProfileIdentity } from './useProfileIdentity';
 import { ProfileIdentityEditor } from './ProfileIdentityEditor';
 import { ProfileBio } from './ProfileBio';
 import { ACCENTS } from '../services/profile-identity';
-import { ProfileShowcase } from './ProfileShowcases';
+import { IdentityShowcase } from './ProfileShowcases';
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -2852,7 +2852,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
       {identity.modules.map(module => <React.Fragment key={module}>
       {module === 'bio' && identity.bio && <section><h2 className="text-lg font-semibold mb-3">About</h2><ProfileBio text={identity.bio} /></section>}
       {module === 'progress' && (loading ? <p role="status" className="py-12 text-gray-400">Loading profile...</p> : !loadError && !libraryPrivate && <PublicProfileOverview entries={list} stats={stats} onSelect={openEntry} onLibrary={openLibrary} onStats={() => setTab('stats')} />)}
-      {(['anime', 'vn', 'characters']).includes(module) && <ProfileShowcase kind={module as 'anime' | 'vn' | 'characters'} items={identity.showcases[module]} />}
+      {(['anime', 'vn', 'characters']).includes(module) && <IdentityShowcase kind={module as 'anime' | 'vn' | 'characters'} identity={identity} />}
       {!libraryPrivate && module === 'activity' && <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Recent activity</h2>
           {activityLoading ? <p className="text-sm text-gray-500">Loading activity...</p> : activityError ? <p className="text-sm text-gray-500">{activityError}</p> : activityData.slice(0, 5).map((item, index) => <div key={index} className="flex gap-3 py-3 border-b border-white/5 min-w-0">{item.animeImageUrl && <img src={item.animeImageUrl} alt="" loading="lazy" className="w-9 h-12 rounded object-cover shrink-0" />}<div className="min-w-0"><p className="text-sm text-gray-300 break-words">{item.context} <span className="text-white font-medium">{item.animeTitle}</span></p>{item.noteContent && <details className="text-xs text-gray-400 mt-2"><summary className="cursor-pointer">{item.spoiler ? 'Spoiler note' : 'Note'}</summary><p className="mt-2 break-words">{item.noteContent}</p></details>}<p className="text-xs text-gray-500 mt-1">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</p></div></div>)}

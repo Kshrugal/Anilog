@@ -1,0 +1,25 @@
+name: Upgrade Shared Profile Backend
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+      - run: npm ci
+      - name: Audit and backfill sanitized public library
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          CONFIRM_PROFILE_MIGRATION: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        run: node scripts/backfill-public-library.mjs
+      - name: Deploy compatible privacy rules
+        run: npx firebase deploy --only firestore:rules,storage --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive

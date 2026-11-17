@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 
 const projectId = 'demo-anilog';
 const env = await initializeTestEnvironment({ projectId,
@@ -20,6 +20,8 @@ const denied = async promise => { await assertFails(promise); assertions++; };
 try {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
+    await deleteDoc(doc(db, identityPath));
+    for (const item of (await getDocs(collection(db, `${identityPath}/showcases`))).docs) await deleteDoc(item.ref);
     await setDoc(doc(db, userPath), { uid: 'owner', username: 'Owner', libraryPublic: true });
     await setDoc(doc(db, `${userPath}/animeList/anilist:20`), { kitsuId: 'anilist:20', title: 'Naruto', status: 'completed', notes: 'PRIVATE JOURNAL SECRET', personalTags: ['private'] });
     await setDoc(doc(db, `artifacts/demo-anilog/privateUsers/owner/journal/entry`), { notes: 'secret' });
@@ -47,7 +49,8 @@ try {
     await denied(updateDoc(doc(owner.firestore(), identityPath), { ...patch, revision: 2 }));
   }
   const favorite = { id: 'anilist:20', title: 'Naruto', source: 'anilist', kind: 'anime', imageUrl: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx20.jpg' };
-  await allowed(updateDoc(doc(owner.firestore(), identityPath), { revision: 2 }));
+  await denied(updateDoc(doc(owner.firestore(), identityPath), { revision: 2, mediaLayout: 'invalid' }));
+  await allowed(updateDoc(doc(owner.firestore(), identityPath), { revision: 2, mediaLayout: 'combined' }));
   await denied(updateDoc(doc(owner.firestore(), identityPath), { revision: 2 }));
   const showcasePath = `${identityPath}/showcases/anime`;
   await allowed(setDoc(doc(owner.firestore(), showcasePath), { revision: 2, items: [favorite] }));
