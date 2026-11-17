@@ -13,16 +13,23 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getAniListMedia } from "./services/anilist";
 import { mediaDetailsCache } from "./services/media-cache";
+import { usePublicLibrary } from './features/usePublicLibrary';
+import { usePrivateAppearance } from './features/usePrivateAppearance';
+import { useProfileIdentity } from './features/useProfileIdentity';
+import { IdentityImage } from './features/ProfileIdentityVisual';
 import { initializeApp } from "firebase/app";
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import {
   getAuth,
   onAuthStateChanged,
   signOut,
   setPersistence,
   browserLocalPersistence,
+  connectAuthEmulator,
 } from "firebase/auth";
 import {
   getFirestore,
+  connectFirestoreEmulator,
   doc,
   getDoc,
   setDoc,
@@ -76,7 +83,8 @@ const hardcodedConfig = {
   measurementId: "",
 };
 
-const firebaseConfig = {
+const localFirebase = import.meta.env.DEV && import.meta.env.VITE_LOCAL_FIREBASE === 'true';
+const firebaseConfig = localFirebase ? { apiKey: 'demo-anilog-local', authDomain: 'demo-anilog.local', projectId: 'demo-anilog', storageBucket: 'demo-anilog.appspot.com', appId: 'demo-anilog' } : {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || hardcodedConfig.apiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || hardcodedConfig.authDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || hardcodedConfig.projectId,
@@ -86,10 +94,9 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || hardcodedConfig.measurementId,
 };
 
-export const appId = import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.appId;
+export const appId = localFirebase ? 'demo-anilog' : import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.appId;
 
 export const APP_NAME = "AniLog";
-const CREATOR_NAME = "KshrugalJain";
 const IS_PREVIEW = import.meta.env.VITE_DEPLOY_ENV === 'preview';
 
 export function AniLogMark({ className = "text-2xl" }) {
@@ -137,6 +144,11 @@ try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    if (localFirebase) {
+      connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+      connectFirestoreEmulator(db, '127.0.0.1', 8080);
+      connectStorageEmulator(getStorage(app), '127.0.0.1', 9199);
+    }
     setLogLevel("silent");
   }
 } catch (error) {
@@ -530,21 +542,6 @@ function ToastContainer({ toasts, removeToast }) {
         </div>,
         document.body
     );
-}
-
-function FooterInfo() {
-    const { theme } = useContext(ThemeContext);
-    return (
-        <div className="w-full py-8 text-center flex flex-col items-center gap-2 mt-8 opacity-50 hover:opacity-100 transition-opacity">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                Made by <span className={`${theme.accentText}`}>{CREATOR_NAME}</span>
-            </p>
-            <a href="https://paypal.me/KshrugalJain943" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-[10px] font-bold text-gray-400 hover:text-white border border-white/5 hover:border-white/10">
-                <HeartIcon /> Support the Dev
-            </a>
-            <p className="text-[10px] text-gray-600">Press Cmd+K to search</p>
-        </div>
-    )
 }
 
 // --- Error Boundary Component ---
@@ -1153,6 +1150,8 @@ export default function App() {
   const [loading, setLoading] = useState(Boolean(auth));
   const [viewTargetUser, setViewTargetUser] = useState(null);
   const [guestMode, setGuestMode] = useState(() => !auth || sessionStorage.getItem('anilog_guest') === 'true');
+  const publicLibraryError = usePublicLibrary(db, appId, guestMode ? null : userId);
+  const ownIdentity = useProfileIdentity(db, appId, guestMode ? null : userId);
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -1215,6 +1214,15 @@ export default function App() {
   const [density, setDensity] = useState(() => localStorage.getItem('anilog_density') || 'comfortable');
   const [showQuickTip, setShowQuickTip] = useState(() => localStorage.getItem('anilog_quick_tip') !== 'false');
   const [showTrail, setShowTrail] = useState(() => localStorage.getItem('anilog_trail') !== 'false');
+  const appearanceError = usePrivateAppearance(db, appId, guestMode ? null : userId,
+    { themeId, viewMode, density, showTrail, showQuickTip, sidebarCollapsed }, values => {
+      if (THEMES[values.themeId]) setThemeId(values.themeId);
+      if (['grid', 'list', 'journal'].includes(values.viewMode)) setViewMode(values.viewMode);
+      if (['comfortable', 'compact'].includes(values.density)) setDensity(values.density);
+      if (typeof values.showTrail === 'boolean') setShowTrail(values.showTrail);
+      if (typeof values.showQuickTip === 'boolean') setShowQuickTip(values.showQuickTip);
+      if (typeof values.sidebarCollapsed === 'boolean') setSidebarCollapsed(values.sidebarCollapsed);
+    });
 
   // Effects to save state
   useEffect(() => localStorage.setItem('anilog_theme', themeId), [themeId]);
@@ -1522,7 +1530,7 @@ export default function App() {
             <div className="ml-auto flex shrink-0 items-center space-x-0.5 sm:space-x-2">
               <HeaderTools guestMode={guestMode} setPage={setPage} onCommands={() => setIsCmdOpen(true)} onNotifications={() => setIsNotificationsOpen(true)} />
               {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => openUserProfile({ uid: userId, username })} title="Profile" aria-label="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "user_profile" && targetProfileUid === userId ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
-                <ProfileIcon />
+                {ownIdentity.identity.avatar.url ? <IdentityImage image={ownIdentity.identity.avatar} className="h-6 w-6 rounded-full" /> : <ProfileIcon />}
               </motion.button>}
               {guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={leaveGuestMode} title="Sign in" className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
                 <LogoutIcon />
@@ -1538,6 +1546,8 @@ export default function App() {
         )}
 
         <main className={`flex-grow min-w-0 w-full container mx-auto p-4 pb-32 z-10 ${density === "compact" ? "sm:px-3" : "sm:px-4"}`}>
+          {publicLibraryError && <p role="status" className="text-sm text-amber-300 mb-4">{publicLibraryError}</p>}
+          {appearanceError && <p role="status" className="text-sm text-amber-300 mb-4">{appearanceError}</p>}
           <AnimatePresence mode="popLayout">
             <motion.div key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
@@ -1546,7 +1556,6 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
           
-          <FooterInfo />
         </main>
 
         {/* Floating Magnetic Navigation Dock */}

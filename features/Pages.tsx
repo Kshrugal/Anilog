@@ -78,6 +78,11 @@ import { AnalyticsDashboard } from './Analytics';
 import { PublicProfileHeader, PublicProfileOverview, PublicProfileFavorites } from './PublicProfile';
 import { analyze, runtimeFor, exactTime } from '../services/analytics';
 import { useFranchiseCatalogue } from './useFranchiseCatalogue';
+import { useProfileIdentity } from './useProfileIdentity';
+import { ProfileIdentityEditor } from './ProfileIdentityEditor';
+import { ProfileBio } from './ProfileBio';
+import { ACCENTS } from '../services/profile-identity';
+import { ProfileShowcase } from './ProfileShowcases';
 
 export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
   const [email, setEmail] = useState("");
@@ -1085,7 +1090,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [completedAt, setCompletedAt] = useState("");
     const [personalTags, setPersonalTags] = useState([]);
     const [tagDraft, setTagDraft] = useState("");
-    const [shareNoteActivity, setShareNoteActivity] = useState(true);
+    const [shareNoteActivity, setShareNoteActivity] = useState(false);
     const [vnPlaytimeHours, setVnPlaytimeHours] = useState(0);
     const [vnEndingsCompleted, setVnEndingsCompleted] = useState(0);
     const [vnRoute, setVnRoute] = useState("");
@@ -1132,7 +1137,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const resolvedRuntime = runtimeFor({ ...anime, totalEpisodes: totalEps, durationMinutes: Number(details.episodeLength || anime.durationMinutes || 0), showType: details.showType || anime.showType });
     const backdrop = details.coverImage?.original || anime.attributes?.coverImage?.original || poster;
 
-    const isOwner = userId === ownerId;
+    const isOwner = userId === ownerId && !readOnly;
 
     useEffect(() => {
         const previousFocus = document.activeElement;
@@ -1215,7 +1220,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         if (!db || !ownerId || !kitsuId) { setLogLoaded(true); return; }
         const fetchUserData = async () => {
             try {
-                const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/animeList`, String(kitsuId));
+                const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/${isOwner ? 'animeList' : 'publicLibrary'}`, String(kitsuId));
                 const snap = await getDocFromServer(docRef);
                 if (!active) return;
                 if (snap.exists()) {
@@ -1231,7 +1236,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     setStartedAt(data.startedAt || "");
                     setCompletedAt(data.completedAt || "");
                     setPersonalTags(Array.isArray(data.personalTags) ? data.personalTags : []);
-                    setShareNoteActivity(data.shareNoteActivity !== false);
+                    setShareNoteActivity(data.shareNoteActivity === true);
                     setVnPlaytimeHours(Number(data.vnPlaytimeHours || 0));
                     setVnEndingsCompleted(Number(data.vnEndingsCompleted || 0));
                     setVnRoute(data.vnRoute || "");
@@ -1445,7 +1450,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                         )}
                         </div></details>}
 
-                        {readOnly ? (
+                        {readOnly && !ownerId ? (
                             <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-6 text-center">
                                 <p className="font-bold text-white">Want to add this to your list?</p>
                                 <p className="mt-1 text-sm text-gray-400">Sign in or create a free account to track progress, ratings, and notes.</p>
@@ -1604,7 +1609,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     <span className="text-gray-400 font-bold">Progress</span>
                                     <span className="text-white font-mono text-lg">{isVn ? `${episodes}% read` : <>{episodes} <span className="text-gray-600">/ {totalEps || '?'}</span></>}</span>
                                 </div>
-                                {notes && (
+                                {isOwner && notes && (
                                     <div className="bg-black/30 p-4 rounded-xl border-l-4 border-gray-600">
                                         <p className="text-gray-300 italic">"{notes}"</p>
                                     </div>
@@ -2192,7 +2197,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   const [activityData, setActivityData] = useState([]); 
   const [myList, setMyList] = useState([]);
   const [myDecks, setMyDecks] = useState([]);
-  const [libraryPublic, setLibraryPublic] = useState(true);
+  const [libraryPublic, setLibraryPublic] = useState(false);
   const [privacySaving, setPrivacySaving] = useState(false);
   
   const [profileSelection, setProfileSelection] = useState(null);
@@ -2204,7 +2209,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
           if(doc.exists()) {
               const stored = Array.isArray(doc.data().hallOfFame) ? doc.data().hallOfFame.slice(0, 10) : [];
               setHallOfFame([...stored, ...Array(Math.max(0, 10 - stored.length)).fill(null)]);
-              setLibraryPublic(doc.data().libraryPublic !== false);
+              setLibraryPublic(doc.data().libraryPublic === true);
           } else {
               setHallOfFame(Array(10).fill(null));
           }
@@ -2649,6 +2654,11 @@ import { PROFILE_STATUSES, profileEntry, profileLibrary, profileMediaId, profile
 export function UserProfilePage({ db, currentUserId, currentUsername, targetUser, showToast, setPage, onLogout = undefined, readOnly = false }) {
     const targetUid = targetUser?.uid;
     const targetUsername = targetUser?.username;
+    const [visitorPreview, setVisitorPreview] = useState(false);
+    const [editingIdentity, setEditingIdentity] = useState(false);
+    const identityState = useProfileIdentity(db, appId, targetUid);
+    const identity = identityState.identity;
+    const visitor = readOnly || visitorPreview || targetUid !== currentUserId;
     const [loadedTarget, setLoadedTarget] = useState(null);
     const [list, setList] = useState([]);
     const [myList, setMyList] = useState([]);
@@ -2676,7 +2686,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
 
     useEffect(() => {
         let isMounted = true;
-        setLoadedTarget({ targetUid, currentUserId, readOnly });
+        setLoadedTarget({ targetUid, currentUserId, readOnly, visitorPreview });
         setList([]);
         setMyList([]);
         setLoading(true);
@@ -2702,12 +2712,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 if (!isMounted) return;
                 if(friendUserSnap.exists() && isMounted) {
                     setFriendHallOfFame(friendUserSnap.data().hallOfFame || Array(10).fill(null));
-                    setLibraryPrivate(friendUserSnap.data().libraryPublic === false && targetUid !== currentUserId);
+                    setLibraryPrivate(friendUserSnap.data().libraryPublic !== true && visitor);
                 }
 
-                const targetIsPrivate = friendUserSnap.exists() && friendUserSnap.data().libraryPublic === false && targetUid !== currentUserId;
+                const targetIsPrivate = (!friendUserSnap.exists() || friendUserSnap.data().libraryPublic !== true) && visitor;
                 if (!targetIsPrivate) {
-                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/animeList`));
+                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/${visitor ? 'publicLibrary' : 'animeList'}`));
                     if (isMounted) {
                         const friendData = friendSnap.docs.map(d => profileEntry({...d.data(), id: d.id}));
                         setList(friendData);
@@ -2733,7 +2743,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
             }).catch(error => console.error('Unable to load following', error));
         }
         return () => { isMounted = false; };
-    }, [db, targetUid, currentUserId, readOnly, refresh]);
+    }, [db, targetUid, currentUserId, readOnly, refresh, visitorPreview, visitor]);
 
     useEffect(() => {
         setMyList([]);
@@ -2827,26 +2837,31 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     const openLibrary = (media = 'all', nextStatus = 'all') => { setMediaFilter(media); setStatus(nextStatus); setSearchQuery(''); setSort('updated'); setTab('library'); };
 
     if(!targetUser) return null;
-    if (loadedTarget?.targetUid !== targetUid || loadedTarget?.currentUserId !== currentUserId || loadedTarget?.readOnly !== readOnly) return <div role="status" className="mx-auto max-w-5xl pt-6 text-gray-500">Loading profile...</div>;
+    if (loadedTarget?.targetUid !== targetUid || loadedTarget?.currentUserId !== currentUserId || loadedTarget?.readOnly !== readOnly || Boolean(loadedTarget?.visitorPreview) !== visitorPreview) return <div role="status" className="mx-auto max-w-5xl pt-6 text-gray-500">Loading profile...</div>;
 
     return (
-  <div className="min-w-0 max-w-6xl mx-auto space-y-7 pb-8">
-    {targetUid === currentUserId && !readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3"><span className="text-xs text-gray-400">Your profile</span><div className="flex items-center gap-3"><button onClick={() => setPage('profile')} className="inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white"><SettingsIcon size={16} />Manage account</button>{onLogout && <button onClick={onLogout} title="Sign out" aria-label="Sign out" className="p-2 text-gray-400 hover:text-red-300"><LogoutIcon size={17} /></button>}</div></div>}
-    <PublicProfileHeader name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
+  <div className="profile-identity min-w-0 max-w-6xl mx-auto space-y-7 pb-8" style={{ '--profile-accent': ACCENTS[identity.accent] } as React.CSSProperties}>
+    <style>{`.profile-identity .text-cyan-200,.profile-identity .text-cyan-300{color:var(--profile-accent)}.profile-identity .border-cyan-300{border-color:var(--profile-accent)}`}</style>
+    {identityState.error && <p role="alert" className="text-amber-300">{identityState.error}</p>}
+    {targetUid === currentUserId && !readOnly && <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3"><label className="text-xs text-gray-300 flex items-center gap-2"><input type="checkbox" checked={visitorPreview} onChange={e => setVisitorPreview(e.target.checked)} />Visitor preview</label>{!visitorPreview && <div className="flex flex-wrap items-center gap-3"><button disabled={identityState.loading || !!identityState.error} onClick={() => setEditingIdentity(true)} className="text-sm text-cyan-200 disabled:opacity-40">Customize profile</button><button onClick={() => setPage('profile')} className="inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white"><SettingsIcon size={16} />Manage account</button>{onLogout && <button onClick={onLogout} title="Sign out" aria-label="Sign out" className="p-2 text-gray-400 hover:text-red-300"><LogoutIcon size={17} /></button>}</div>}</div>}
+    {editingIdentity && !visitor && <ProfileIdentityEditor db={db} appId={appId} uid={currentUserId} name={targetUsername} initial={identity} revision={identityState.revision} entries={list} onClose={() => setEditingIdentity(false)} onSaved={result => { setEditingIdentity(false); showToast(result.cleanupPending ? 'Profile saved. Image cleanup will retry next time.' : 'Profile saved.'); }} />}
+    <PublicProfileHeader identity={identity} name={targetUsername} entries={list} favorites={friendHallOfFame} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
     {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
     {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}
-    {tab === 'overview' && !libraryPrivate && <div className="space-y-9">
-      {loading ? <p role="status" className="py-12 text-gray-400">Loading profile...</p> : !loadError && <>
-        <PublicProfileOverview entries={list} stats={stats} onSelect={openEntry} onLibrary={openLibrary} onStats={() => setTab('stats')} />
-        <PublicProfileFavorites favorites={friendHallOfFame} onSelect={openEntry} />
-      </>}
-      <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
+    {tab === 'overview' && <div className="flex flex-col gap-9">
+      {identity.modules.map(module => <React.Fragment key={module}>
+      {module === 'bio' && identity.bio && <section><h2 className="text-lg font-semibold mb-3">About</h2><ProfileBio text={identity.bio} /></section>}
+      {module === 'progress' && (loading ? <p role="status" className="py-12 text-gray-400">Loading profile...</p> : !loadError && !libraryPrivate && <PublicProfileOverview entries={list} stats={stats} onSelect={openEntry} onLibrary={openLibrary} onStats={() => setTab('stats')} />)}
+      {(['anime', 'vn', 'characters']).includes(module) && <ProfileShowcase kind={module as 'anime' | 'vn' | 'characters'} items={identity.showcases[module]} />}
+      {!libraryPrivate && module === 'activity' && <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Recent activity</h2>
           {activityLoading ? <p className="text-sm text-gray-500">Loading activity...</p> : activityError ? <p className="text-sm text-gray-500">{activityError}</p> : activityData.slice(0, 5).map((item, index) => <div key={index} className="flex gap-3 py-3 border-b border-white/5 min-w-0">{item.animeImageUrl && <img src={item.animeImageUrl} alt="" loading="lazy" className="w-9 h-12 rounded object-cover shrink-0" />}<div className="min-w-0"><p className="text-sm text-gray-300 break-words">{item.context} <span className="text-white font-medium">{item.animeTitle}</span></p>{item.noteContent && <details className="text-xs text-gray-400 mt-2"><summary className="cursor-pointer">{item.spoiler ? 'Spoiler note' : 'Note'}</summary><p className="mt-2 break-words">{item.noteContent}</p></details>}<p className="text-xs text-gray-500 mt-1">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</p></div></div>)}
           {!activityLoading && !activityError && !activityData.length && <p className="text-sm text-gray-500">No recent activity.</p>}
         </section>
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Activity</h2><div className="overflow-x-auto">{!activityLoading && !activityError && <ActivityHeatmap data={activityData} theme={theme} />}</div><p className="text-xs text-gray-500 mt-3">Based on the most recent 20 public activity events.</p></section>
-      </div>
+      </div>}
+      </React.Fragment>)}
+      {!libraryPrivate && identity.modules.includes('anime') && identity.modules.includes('vn') && !identity.showcases.anime.length && !identity.showcases.vn.length && <PublicProfileFavorites favorites={friendHallOfFame} onSelect={openEntry} />}
     </div>}
     {tab === "library" && !libraryPrivate && (
                 <div className="space-y-4">
@@ -2911,7 +2926,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     userId={currentUserId} 
                     ownerId={selectedOwnerId}
                     username={currentUsername}
-                    readOnly={readOnly || !currentUserId}
+                    readOnly={visitor || !currentUserId}
                 />
             )}
   </div>

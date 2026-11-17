@@ -8,6 +8,7 @@ import ts from 'typescript';
 const compile = text => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.React } }).outputText;
 const toUrl = text => `data:text/javascript;base64,${Buffer.from(compile(text)).toString('base64')}`;
 const profile = await import(toUrl(await readFile(new URL('../services/profile.ts', import.meta.url), 'utf8')));
+const identity = await import(toUrl(await readFile(new URL('../services/profile-identity.ts', import.meta.url), 'utf8')));
 const franchiseUrl = toUrl(await readFile(new URL('../services/franchises.ts', import.meta.url), 'utf8'));
 const analytics = await import(toUrl((await readFile(new URL('../services/analytics.ts', import.meta.url), 'utf8')).replace("from './franchises'", `from '${franchiseUrl}'`)));
 const uiSource = await readFile(new URL('../features/PublicProfile.tsx', import.meta.url), 'utf8');
@@ -15,7 +16,7 @@ const uiTree = ts.createSourceFile('PublicProfile.tsx', uiSource, ts.ScriptTarge
 const iconNames = uiTree.statements.filter(ts.isImportDeclaration).find(n => n.moduleSpecifier.text === 'lucide-react').importClause.namedBindings.elements.map(n => n.name.text);
 const iconBindings = Object.fromEntries(iconNames.map(n => [n, icons[n]]));
 const uiBody = uiTree.statements.filter(n => !ts.isImportDeclaration(n)).map(n => n.getText(uiTree).replace(/^export /, '')).join('\n');
-const bindings = { React, useState: initial => [initial, () => {}], ...profile, ...iconBindings, AnimeCard: ({ anime }) => React.createElement('div', { 'data-tile': anime.title }, anime.title) };
+const bindings = { React, IdentityImage: () => null, useState: initial => [initial, () => {}], ...profile, ...iconBindings, AnimeCard: ({ anime }) => React.createElement('div', { 'data-tile': anime.title }, anime.title) };
 const ui = new Function(...Object.keys(bindings), `${compile(uiBody)};return {PublicProfileHeader,PublicProfileOverview,PublicProfileFavorites};`)(...Object.values(bindings));
 const entries = [
   { id: '1', kitsuId: '1', title: 'Watching fixture', status: 'watching', totalEpisodes: 12, watchedEpisodes: 3, imageUrl: 'https://example.test/anime.jpg' },
@@ -52,7 +53,7 @@ function renderProfile(state, props = {}) {
   const names = component.body.statements.filter(ts.isVariableStatement).flatMap(s => [...s.declarationList.declarations]).filter(n => ts.isArrayBindingPattern(n.name) && n.initializer?.expression?.getText(ast) === 'useState').map(n => n.name.elements[0].name.text);
   let index = 0;
   const values = { loadedTarget: { targetUid: 'friend', currentUserId: 'me', readOnly: false }, list: entries, loading: false, activityLoading: false, ...state };
-  const bound = { React, ...profile, ...analytics, ...ui, useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
+  const bound = { React, ...profile, ...analytics, ...identity, ...ui, appId: 'test', ProfileShowcase: () => null, ProfileBio: () => null, useProfileIdentity: () => ({ identity: identity.defaultIdentity(), revision: 0, loading: false, error: '' }), useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
     useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false } }),
     AnalyticsDashboard: props => React.createElement('div', { 'data-public-statistics': props.title, 'data-editable': String(props.editableGroups) }),
     ActivityHeatmap: () => React.createElement('div'), LockIcon: icons.Lock, SettingsIcon: icons.Settings, LogoutIcon: icons.LogOut,

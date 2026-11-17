@@ -21,7 +21,6 @@ const text = name => declaration(name).getText(tree);
 const visualFingerprints = {
   StarField: '3504e0047945fedea195272e0ce021957b547d24d1f61790b3c8d8e2922173b9',
   MouseTrail: '265ef768e34795af096ef0c19ea7f5af19c7936eae9cf15f623fd5d5cd56de8b',
-  FooterInfo: '2736b8ad98e3341012a92a21141a5ad81c0e7bbd2aca519d8c666d5730467be9',
   AnimeCarousel: '1db6955711ae556e7fd8aab5f2ab5a787900ea90e0fa93bedce34bc237217c72',
 };
 for (const [name, expected] of Object.entries(visualFingerprints)) {
@@ -30,6 +29,7 @@ for (const [name, expected] of Object.entries(visualFingerprints)) {
 }
 
 assert.doesNotMatch(source, /ScrambleText|>AL<|<aside className=\{`sticky/);
+assert.doesNotMatch(source, /Made by|Support the Dev|paypal\.me|FooterInfo/);
 const card = text('AnimeCard');
 for (const effect of ['onMouseMove={handleMouseMove}', 'onMouseLeave={handleMouseLeave}', 'style={{ rotateX, rotateY', 'background: sheenGradient', 'group-hover:scale-110']) {
   assert.ok(card.includes(effect), `Live card effect: ${effect}`);

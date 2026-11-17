@@ -87,10 +87,10 @@ function boundary(overrides = {}) {
   const state = {};
   const reads = [];
   const bindings = {
-    ...helpers, db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false,
+    ...helpers, db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false, visitorPreview: false, visitor: true,
     tab: 'overview', loading: false, libraryPrivate: false, loadError: '', friendBusy: false, isFriend: false,
     doc: (_db, path) => path, collection: (_db, path) => path, query: path => path, where: () => {}, orderBy: () => {}, limit: () => {},
-    getDoc: async path => { reads.push(path); return snapshot({}); },
+    getDoc: async path => { reads.push(path); return snapshot({ libraryPublic: true }); },
     getDocs: async path => { reads.push(path); if (path.endsWith('/activity')) throw new Error('Missing composite index'); return { docs: [{ id: 'v1', data: () => ({ title: 'Saved', status: 'reading' }) }] }; },
     console: { error() {} }, showToast() {},
   };
@@ -218,9 +218,20 @@ test('viewer changes hide stale profile data before another privacy lookup resol
   const guard = component.body.statements.find(node => ts.isIfStatement(node) && node.expression.getText(pages).includes('loadedTarget?.targetUid'));
   assert.ok(guard);
   const hidden = bindings => evaluate(guard.expression, bindings);
-  const current = { targetUid: 'friend', currentUserId: 'owner', readOnly: false };
+  const current = { targetUid: 'friend', currentUserId: 'owner', readOnly: false, visitorPreview: false };
   assert.equal(hidden({ ...current, loadedTarget: current }), false);
   assert.equal(hidden({ ...current, currentUserId: 'guest', loadedTarget: current }), true);
   assert.equal(hidden({ ...current, readOnly: true, loadedTarget: current }), true);
   assert.equal(hidden({ ...current, targetUid: 'next', loadedTarget: current }), true);
+  assert.equal(hidden({ ...current, visitorPreview: true, loadedTarget: current }), true);
+});
+test('visitor preview never loads owner-only library documents, even for its owner', async () => {
+  const preview = boundary({ targetUid: 'me', visitorPreview: true, visitor: true });
+  evaluate(effects[0].expression.arguments[0], preview.bindings)(); await flush();
+  assert.ok(preview.reads.some(path => path.endsWith('/me/publicLibrary')));
+  assert.equal(preview.reads.some(path => path.endsWith('/animeList')), false);
+  const hidden = boundary({ targetUid: 'me', visitorPreview: true, visitor: true, getDoc: async () => snapshot({ libraryPublic: false }) });
+  evaluate(effects[0].expression.arguments[0], hidden.bindings)(); await flush();
+  assert.equal(hidden.state.setLibraryPrivate, true);
+  assert.equal(hidden.reads.some(path => path.endsWith('/publicLibrary') || path.endsWith('/animeList')), false);
 });
