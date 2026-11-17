@@ -14,22 +14,106 @@ service cloud.firestore {
       return !request.resource.data.keys().hasAny(['email']);
     }
 
+    function validImage(image, userId) {
+      return image is map && image.keys().hasAll(['url', 'path', 'x', 'y', 'zoom'])
+        && image.keys().hasOnly(['url', 'path', 'x', 'y', 'zoom'])
+        && image.url is string && image.url.size() <= 2048 && image.path is string
+        && image.x is number && image.x >= 0 && image.x <= 100
+        && image.y is number && image.y >= 0 && image.y <= 100
+        && image.zoom is number && image.zoom >= 1 && image.zoom <= 3
+        && ((image.path == '' && (image.url == '' || image.url.matches('https://(s4[.]anilist[.]co|s5[.]anilist[.]co|t[.]vndb[.]org|s[.]vndb[.]org|media[.]kitsu[.]app|media[.]kitsu[.]io)/.*')))
+          || (image.path.matches('profile-images/' + userId + '/[a-zA-Z0-9-]+[.]webp')
+            && image.url.matches('https://firebasestorage[.]googleapis[.]com/v0/b/[^/]+/o/profile-images%2F' + userId + '%2F[a-zA-Z0-9-]+[.]webp[?].*')));
+    }
+    function validShowcaseItem(item, kind) {
+      let patterns = {'anime:anilist': 'anilist:[0-9]+', 'anime:kitsu': 'kitsu:[0-9]+', 'vn:vndb': 'vndb:v[0-9]+', 'characters:anilist': 'anilist:[0-9]+', 'characters:vndb': 'vndb:c[0-9]+'};
+      return item.keys().hasOnly(['id', 'title', 'imageUrl', 'source', 'kind'])
+        && item.kind == kind && item.title is string && item.title.size() > 0 && item.title.size() <= 200
+        && item.imageUrl.size() <= 2048
+        && item.imageUrl.matches('https://(s4[.]anilist[.]co|s5[.]anilist[.]co|t[.]vndb[.]org|s[.]vndb[.]org|media[.]kitsu[.]app|media[.]kitsu[.]io)/.*')
+        && item.id.matches(patterns[kind + ':' + item.source]);
+    }
+    function validShowcase(items, kind) {
+      return items is list && items.size() <= 8
+        && (items.size() < 1 || validShowcaseItem(items[0], kind))
+        && (items.size() < 2 || validShowcaseItem(items[1], kind))
+        && (items.size() < 3 || validShowcaseItem(items[2], kind))
+        && (items.size() < 4 || validShowcaseItem(items[3], kind))
+        && (items.size() < 5 || validShowcaseItem(items[4], kind))
+        && (items.size() < 6 || validShowcaseItem(items[5], kind))
+        && (items.size() < 7 || validShowcaseItem(items[6], kind))
+        && (items.size() < 8 || validShowcaseItem(items[7], kind));
+    }
+    function validIdentity(data, userId) {
+      return data.keys().hasAll(['version', 'revision', 'bio', 'accent', 'bannerMode', 'avatar', 'banner', 'modules'])
+        && data.keys().hasOnly(['version', 'revision', 'bio', 'accent', 'bannerMode', 'avatar', 'banner', 'modules', 'mediaLayout'])
+        && (!('mediaLayout' in data) || data.mediaLayout in ['combined', 'separate'])
+        && data.version == 1 && data.revision is int && data.revision > 0
+        && data.bio is string && data.bio.size() <= 2000
+        && data.accent in ['cyan', 'rose', 'green', 'gold', 'violet']
+        && data.bannerMode in ['collage', 'image']
+        && data.modules is list && data.modules.size() <= 6
+        && data.modules.hasOnly(['bio', 'progress', 'anime', 'vn', 'characters', 'activity'])
+        && data.modules.toSet().size() == data.modules.size()
+        && validImage(data.avatar, userId) && validImage(data.banner, userId);
+    }
+
+    // Private preferences and journals are never part of public profile documents.
+    match /artifacts/{appId}/privateUsers/{userId}/settings/{settingId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && settingId == 'appearance'
+        && request.resource.data.keys().hasOnly(['themeId', 'viewMode', 'density', 'showTrail', 'showQuickTip', 'sidebarCollapsed'])
+        && request.resource.data.themeId in ['neon', 'toxic', 'sunset', 'indigo', 'orange', 'mono', 'emerald']
+        && request.resource.data.viewMode in ['grid', 'list', 'journal']
+        && request.resource.data.density in ['comfortable', 'compact']
+        && request.resource.data.showTrail is bool && request.resource.data.showQuickTip is bool && request.resource.data.sidebarCollapsed is bool;
+    }
+    match /artifacts/{appId}/privateUsers/{userId}/journal/{entryId} {
+      allow read, write: if isOwner(userId);
+    }
+
     // Rules for the Anilog application
     match /artifacts/{appId}/public/data {
+      match /profileIdentity/{userId} {
+        allow read: if true;
+        allow create: if isOwner(userId) && validIdentity(request.resource.data, userId) && request.resource.data.revision == 1;
+        allow update: if isOwner(userId) && validIdentity(request.resource.data, userId) && request.resource.data.revision == resource.data.revision + 1;
+        allow delete: if isOwner(userId);
+        match /showcases/{kind} {
+          allow read: if true;
+          allow create, update: if isOwner(userId) && kind in ['anime', 'vn', 'characters']
+            && request.resource.data.keys().hasOnly(['items', 'revision'])
+            && request.resource.data.revision == getAfter(/databases/$(database)/documents/artifacts/$(appId)/public/data/profileIdentity/$(userId)).data.revision
+            && validShowcase(request.resource.data.items, kind);
+          allow delete: if isOwner(userId);
+        }
+      }
       
       // User profiles and settings
       match /users/{userId} {
         allow read: if true; // Public profiles are readable by everyone
         // Authentication owns the email address. Public profile documents must
         // never contain it, including after partial updates to legacy records.
-        allow write: if isOwner(userId) && profileHasNoPrivateEmail();
+        allow create, update: if isOwner(userId) && profileHasNoPrivateEmail()
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'hallOfFame', 'libraryPublic'])
+          && request.resource.data.uid == userId && request.resource.data.username is string
+          && request.resource.data.username.size() > 0 && request.resource.data.username.size() <= 80
+          && (!('libraryPublic' in request.resource.data) || request.resource.data.libraryPublic is bool);
+        allow delete: if isOwner(userId);
         
         // Anime list subcollection
         match /animeList/{animeId} {
-          allow read: if isOwner(userId)
-            || !('libraryPublic' in get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(userId)).data)
-            || get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(userId)).data.libraryPublic == true;
+          allow read: if isOwner(userId);
           allow write: if isOwner(userId);
+        }
+        match /publicLibrary/{animeId} {
+          allow read: if isOwner(userId) || get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(userId)).data.libraryPublic == true;
+          allow create, update: if isOwner(userId)
+            && request.resource.data.keys().hasOnly(['kitsuId', 'title', 'imageUrl', 'totalEpisodes', 'status', 'watchedEpisodes', 'score', 'favorite', 'repeatCount', 'startedAt', 'completedAt', 'genres', 'mediaType', 'showType', 'provider', 'anilistId', 'durationMinutes', 'updatedAt', 'vnPlaytimeHours'])
+            && request.resource.data.kitsuId is string && request.resource.data.title is string
+            && request.resource.data.title.size() <= 500
+            && request.resource.data.status in ['watching', 'reading', 'completed', 'planned', 'planning', 'paused', 'on_hold', 'dropped'];
+          allow delete: if isOwner(userId);
         }
       }
       
