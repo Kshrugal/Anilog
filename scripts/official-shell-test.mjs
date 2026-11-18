@@ -57,12 +57,13 @@ assert.match(app, /active = false;\s+unsubscribe\(\)/);
 assert.doesNotMatch(app, /signInAnonymously/);
 assert.match(app, /!guestMode && \(!currentUser \|\| currentUser.isAnonymous\)/);
 assert.match(app, /if \(!db && \['social', 'decks', 'user_profile'\].includes\(page\)\)/);
-for (const page of ['SearchPage', 'SocialPage', 'SchedulePage', 'DecksPage']) {
+for (const page of ['SearchPage', 'SchedulePage', 'DecksPage']) {
   assert.match(app, new RegExp('<' + page + '[^>]+readOnly=\\{guestMode\\}'));
 }
 assert.match(app, /isNotificationsOpen && !guestMode && <NotificationCenter/);
 for (const action of ["setPage('schedule')", "setPage('decks')"]) assert.ok(text('CommandPalette').includes(action));
-assert.match(text('NotificationCenter'), /subscribeCommunityActivity\(db, appId, authors/);
+assert.match(app, /case "social": return guestMode\s*\? <DiscoveryPage[^>]+readOnly[^>]*>\s*:\s*<SocialPage/);
+assert.match(text('NotificationCenter'), /subscribeCommunityActivity\(db, appId, userId, authors/);
 assert.match(text('fetchMediaDetails'), /AbortSignal.timeout\(15_000\)/);
 assert.match(text('exportUserData'), /URL.revokeObjectURL\(url\)/);
 
