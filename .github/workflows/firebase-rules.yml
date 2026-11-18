@@ -1,26 +1,31 @@
 name: Deploy Firebase Profile Rules
+
 on:
   workflow_dispatch:
     inputs:
       include_storage:
-        description: Deploy Storage rules after Firebase Storage is enabled
+        description: Deploy profile image upload rules
         type: boolean
         default: false
-permissions:
-  contents: read
+
 jobs:
   rules:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
+          cache: npm
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
-      - name: Deploy Firestore profile rules
-        run: npx --yes firebase-tools@13.35.1 deploy --only firestore:rules --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive
-      - name: Deploy Storage profile rules
-        if: inputs.include_storage
-        run: npx --yes firebase-tools@13.35.1 deploy --only storage --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive
+      - run: npm ci
+      - name: Deploy and verify Firebase privacy rules
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          DEPLOY_STORAGE_RULES: ${{ inputs.include_storage }}
+        run: node scripts/deploy-firebase-rules.mjs

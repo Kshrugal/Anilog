@@ -6,10 +6,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 
 const source = await readFile(new URL('../features/Pages.tsx', import.meta.url), 'utf8');
-// Static layout contract from the official d651a44 design, independent of Git history.
+// Keep the official visual family while the practical-home phase tightens vertical space.
 const officialHomeClasses = [
-  'flex flex-col space-y-8',
-  'relative w-full h-72 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10',
+  'flex flex-col space-y-6',
+  'relative w-full h-64 sm:h-56 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10',
   'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6',
 ];
 const parse = text => ts.createSourceFile('Pages.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -19,7 +19,18 @@ const tracking = await readFile(new URL('../services/tracking.ts', import.meta.u
 const compiled = ts.transpileModule(tracking, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { scoreSummary } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 
+const profileSource = await readFile(new URL('../services/profile.ts', import.meta.url), 'utf8');
+const profileUrl = `data:text/javascript;base64,${Buffer.from(ts.transpileModule(profileSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64')}`;
+const trackingUrl = `data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`;
+const homeSource = (await readFile(new URL('../services/home-library.ts', import.meta.url), 'utf8')).replace("from './profile'", `from '${profileUrl}'`).replace("from './tracking'", `from '${trackingUrl}'`);
+const home = await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(homeSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64')}`);
+const resumeSource = await readFile(new URL('../features/HomeResume.tsx', import.meta.url), 'utf8');
+const resumeTree = parse(resumeSource);
+const resumeBody = resumeTree.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(resumeTree).replace(/^export /, '')).join('\n');
+const profile = await import(profileUrl);
+
 function initializer(name, variable, bindings) {
+  bindings = { profileLibrary: profile.profileLibrary, ...bindings };
   let value;
   const visit = node => {
     if (ts.isVariableDeclaration(node) && node.name.getText(ast) === variable) value = node.initializer;
@@ -47,15 +58,16 @@ function render(name, state, context = {}) {
   const theme = { accentText: 'text-blue-400', progressbar: 'bg-blue-500', gradient: 'from-blue-400 to-purple-400', accentBorder: 'border-blue-500' };
   const stub = label => props => React.createElement('div', { 'data-component': label }, props.children);
   const bindings = {
-    React, useState: initial => {
+    React, ...home, ...profile, useRef: value => ({ current: value }), useState: initial => {
       const key = stateNames[index++];
       return [Object.hasOwn(state, key) ? state[key] : typeof initial === 'function' ? initial() : initial, () => {}];
     },
-    useEffect: () => {}, useMemo: callback => callback(),
+    useEffect: () => {}, useMemo: callback => callback(), useCallback: callback => callback,
     useContext: () => ({ theme, viewMode: 'grid', ...context }), ThemeContext: {},
     localStorage: { getItem: () => '[]' }, scoreSummary, AVG_EPISODE_MINUTES: 24,
     motion: new Proxy({}, { get: (_target, tag) => ({ children, className, title }) => React.createElement(tag, { className, title }, children) }),
     LayoutGroup: React.Fragment, AnimatePresence: ({ children }) => children,
+    LibraryGrid: ({ children, className }) => React.createElement('div', { className }, children),
     JournalView: ({ list }) => React.createElement('div', { 'data-component': 'JournalView' }, list.map(item => item.title).join(',')),
     AnimeCard: ({ anime }) => React.createElement('div', { 'data-component': 'AnimeCard' }, anime.title),
     AnimeCardSkeleton: stub('Skeleton'), AnimeCarouselSkeleton: stub('Loading'),
@@ -63,6 +75,7 @@ function render(name, state, context = {}) {
     GenreRadarChart: stub('GenreRadarChart'),
     ...Object.fromEntries(['PlayIcon', 'SearchIcon', 'CloseIcon', 'DiceIcon', 'PlusIcon', 'ViewGridIcon', 'ViewListIcon', 'CommentIcon'].map(key => [key, () => React.createElement('i')])),
   };
+  bindings.HomeResume = new Function('React', 'motion', 'profileIsVn', 'profileProgress', 'progressCommand', 'BookOpen', 'Check', 'ChevronDown', 'Loader2', 'Tv', `${ts.transpileModule(resumeBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeResume;`)(React, bindings.motion, profile.profileIsVn, profile.profileProgress, home.progressCommand, 'i', 'i', 'i', 'i', 'i');
   const js = ts.transpileModule(node.getText(ast).replace(/^export /, ''), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   const Page = new Function(...Object.keys(bindings), `${js}\nreturn ${name};`)(...Object.values(bindings));
   return renderToStaticMarkup(React.createElement(Page, { db: {}, userId: 'test', username: 'Viewer' }));
@@ -85,7 +98,7 @@ test('Home preserves official greeting, hero geometry, and library grid without 
   assert.ok(html.indexOf('Continue Watching') < html.indexOf('data-component="AnimeCard"'));
   assert.ok(!html.includes('Up next'));
   assert.match(html, /<details[^>]*><summary[^>]*>Library Tools/);
-  assert.match(html, />paused<\/button>/);
+  assert.match(html, /Paused<span/);
 });
 
 test('Home retains all secondary filters and Journal respects the filtered library', () => {

@@ -6,10 +6,13 @@ import ts from 'typescript';
 const trackingSource = await readFile(new URL('../services/tracking.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(trackingSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { nextProgress, scoreSummary, planImport, importPayload, resetBackup } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const profileSource = await readFile(new URL('../services/profile.ts', import.meta.url), 'utf8');
+const profile = await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(profileSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64')}`);
 const pages = ts.createSourceFile('Pages.tsx', await readFile(new URL('../features/Pages.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
 // Execute the real handler bodies with a small in-memory Firestore boundary.
 function handler(component, name, bindings) {
+  bindings = { useCallback: callback => callback, pendingProgressRef: { current: new Set() }, setPendingProgress() {}, profileIsVn: profile.profileIsVn, ...bindings };
   const fn = pages.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === component);
   let initializer;
   function visit(node) {
@@ -37,6 +40,9 @@ test('progress caps, completes once, keeps dates, and handles unknown episode to
   assert.equal(nextProgress({ watchedEpisodes: 98, mediaType: 'vn', completedAt: '2020-01-01' }, now).changes.completedAt, '2020-01-01');
   assert.equal(nextProgress({ watchedEpisodes: 100, mediaType: 'vn' }), null);
   assert.equal(nextProgress({ watchedEpisodes: '3', totalEpisodes: 0 }).progress, 4);
+  assert.equal(nextProgress({ watchedEpisodes: 11, episodeCount: 12 }).completed, true);
+  assert.equal(nextProgress({ watchedEpisodes: 12, attributes: { episodeCount: 12 } }), null);
+  assert.equal(nextProgress({ watchedEpisodes: Infinity, totalEpisodes: Infinity }).progress, 1);
 });
 
 test('actual quick handler retries concurrent writes without losing increments or duplicating activity', async () => {
@@ -55,17 +61,34 @@ test('actual quick handler retries concurrent writes without losing increments o
       return result;
     }
   };
-  const increment = handler('HomePage', 'handleQuickIncrement', {
+  const bindings = {
     db: {}, userId: 'me', username: 'Me', appId: 'app', doc: quiet, runTransaction,
     nextProgress, logActivity: activity => activities.push(activity), showToast: message => toasts.push(message),
-  });
+  };
+  const increment = handler('HomePage', 'handleQuickIncrement', bindings);
+  const otherTab = handler('HomePage', 'handleQuickIncrement', bindings);
   const stale = { id: '1', watchedEpisodes: 0 };
-  await Promise.all([increment(stale), increment(stale)]);
+  await Promise.all([increment(stale), otherTab(stale)]);
   await increment(stale);
   assert.equal(value.watchedEpisodes, 12);
   assert.equal(value.status, 'completed');
   assert.equal(activities.length, 2);
   assert.equal(toasts.length, 2);
+});
+
+test('pending progress blocks repeat clicks, releases after failures, and handles VN IDs', async () => {
+  let release;
+  let calls = 0;
+  const activities = [], pending = { current: new Set() };
+  const transaction = new Promise(resolve => { release = resolve; });
+  const increment = handler('HomePage', 'handleQuickIncrement', { db: {}, userId: 'me', username: 'Me', appId: 'app', doc: quiet, nextProgress, pendingProgressRef: pending, runTransaction: async (_db, callback) => { calls++; await transaction; return callback({ get: async () => snapshot({ watchedEpisodes: 98, title: 'Novel' }), update: (_ref, changes) => assert.equal(changes.watchedEpisodes, 100) }); }, logActivity: item => activities.push(item), showToast: quiet });
+  const first = increment({ id: 'v11' });
+  await increment({ id: 'v11' });
+  assert.equal(calls, 1); assert.equal(pending.current.size, 1);
+  release(); await first;
+  assert.equal(pending.current.size, 0); assert.equal(activities.length, 1); assert.match(activities[0].context, /read 100%/);
+  const failed = handler('HomePage', 'handleQuickIncrement', { db: {}, userId: 'me', username: 'Me', appId: 'app', doc() { throw new Error('Invalid reference'); }, pendingProgressRef: pending, showToast: quiet, console: { error: quiet } });
+  await failed({ id: 'x' }); assert.equal(pending.current.size, 0);
 });
 
 test('deleted quick-increment records are not recreated or logged', async () => {
@@ -159,7 +182,6 @@ function resetBindings(downloadBackup) {
     db: {}, userId: 'me', username: 'Me', appId: 'app', myList: [{ title: 'stale' }],
     setIsResetting: quiet, setConfirmation: quiet, setIsOpen: quiet, onReset: quiet, showToast: quiet,
     doc: (_db, path) => path, collection: (_db, path) => path, query: ref => ref, where: quiet,
-    getDocFromServer: async () => snapshot({ hallOfFame: ['favorite'] }),
     getDocsFromServer: async path => path.endsWith('animeList')
       ? querySnapshot([['fresh', { notes: 'private', watchedEpisodes: 10 }]])
       : path === 'interactions' ? querySnapshot([['reply', { text: 'reply' }]])
@@ -168,30 +190,28 @@ function resetBindings(downloadBackup) {
     snapshotEqual: (left, right) => JSON.stringify(left.data()) === JSON.stringify(right.data()),
     runTransaction: async (_db, callback) => {
       const pendingDeletes = [];
-      let clearHall = false;
       const result = await callback({
-        get: async ref => snapshot(records.has(ref) ? records.get(ref) : { hallOfFame: ['favorite'] }, ref),
-        delete: ref => pendingDeletes.push(ref), update: () => { clearHall = true; },
+        get: async ref => snapshot(records.get(ref), ref),
+        delete: ref => pendingDeletes.push(ref), update: () => assert.fail('Library reset must not mutate the profile'),
       });
       deleted.push(...pendingDeletes);
       if (pendingDeletes.length) events.push('delete');
-      if (clearHall) events.push('clearHall');
       return result;
     }, console: { error: quiet },
   };
   return { bindings, deleted, events, records };
 }
 
-test('actual reset backs up fresh records, private fields, IDs, replies and Hall of Fame before deleting', async () => {
+test('actual reset backs up fresh records, private fields, IDs and replies before deleting', async () => {
   let backup;
   const { bindings, deleted, events } = resetBindings(payload => { backup = payload; });
   await handler('LibraryResetPanel', 'resetLibrary', bindings)();
   assert.deepEqual(backup.animeList, [{ id: 'fresh', notes: 'private', watchedEpisodes: 10 }]);
-  assert.deepEqual(backup.hallOfFame, ['favorite']);
+  assert.deepEqual(Object.keys(backup).sort(), ['activity', 'animeList', 'exportedAt', 'username']);
   assert.equal(backup.activity[0].id, 'activity');
   assert.equal(backup.activity[0].interactions[0].text, 'reply');
   assert.deepEqual(deleted, ['fresh', 'activity']);
-  assert.deepEqual(events, ['backup', 'delete', 'clearHall']);
+  assert.deepEqual(events, ['backup', 'delete']);
 });
 
 test('reset never deletes after backup creation or fresh-read failure', async () => {

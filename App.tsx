@@ -13,26 +13,30 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getAniListMedia } from "./services/anilist";
 import { mediaDetailsCache } from "./services/media-cache";
-import { usePublicLibrary } from "./features/usePublicLibrary";
+import { usePublicLibrary } from './features/usePublicLibrary';
+import { usePrivateAppearance } from './features/usePrivateAppearance';
+import { useProfileIdentity } from './features/useProfileIdentity';
+import { followedIds, subscribeCommunityActivity } from './services/community-activity';
+import { CommunityAvatar, useCommunityPortraits } from './features/CommunityIdentity';
+import { IdentityImage } from './features/ProfileIdentityVisual';
 import { initializeApp } from "firebase/app";
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import {
   getAuth,
   onAuthStateChanged,
   signOut,
   setPersistence,
   browserLocalPersistence,
+  connectAuthEmulator,
 } from "firebase/auth";
 import {
   getFirestore,
+  connectFirestoreEmulator,
   doc,
   getDoc,
   setDoc,
   updateDoc,
   collection,
-  query,
-  orderBy,
-  limit,
-  onSnapshot,
   serverTimestamp,
   addDoc,
   deleteField,
@@ -45,6 +49,7 @@ import {
     useTransform, 
     useMotionValue,
     useMotionTemplate,
+    useReducedMotion,
 } from "framer-motion";
 import { 
   Search as SearchIcon, 
@@ -63,6 +68,7 @@ import {
   CalendarDays as ScheduleIcon,
   Layers3 as DecksIcon,
   Menu as MenuIcon,
+  X as CloseIcon,
 } from 'lucide-react';
 // Removed AI and GenreGalaxy imports as requested
 
@@ -77,7 +83,8 @@ const hardcodedConfig = {
   measurementId: "",
 };
 
-const firebaseConfig = {
+const localFirebase = import.meta.env.DEV && import.meta.env.VITE_LOCAL_FIREBASE === 'true';
+const firebaseConfig = localFirebase ? { apiKey: 'demo-anilog-local', authDomain: 'demo-anilog.local', projectId: 'demo-anilog', storageBucket: 'demo-anilog.appspot.com', appId: 'demo-anilog' } : {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || hardcodedConfig.apiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || hardcodedConfig.authDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || hardcodedConfig.projectId,
@@ -87,10 +94,9 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || hardcodedConfig.measurementId,
 };
 
-export const appId = import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.appId;
+export const appId = localFirebase ? 'demo-anilog' : import.meta.env.VITE_FIREBASE_APP_ID || hardcodedConfig.appId;
 
 export const APP_NAME = "AniLog";
-const CREATOR_NAME = "KshrugalJain";
 const IS_PREVIEW = import.meta.env.VITE_DEPLOY_ENV === 'preview';
 
 export function AniLogMark({ className = "text-2xl" }) {
@@ -120,7 +126,7 @@ const PAGE_META = {
   schedule: ['Anime Airing Schedule — AniLog', 'See the next seven days of anime releases in your local timezone.'],
   decks: ['Community Anime & VN Decks — AniLog', 'Explore and publish shareable curated anime and visual novel collections.'],
   stats: ['Your Anime Stats — AniLog', 'Explore your watch time, ratings, genres, milestones, and anime history.'],
-  profile: ['Your Profile — AniLog', 'Manage your AniLog profile, appearance, data, and hall of fame.'],
+  profile: ['Account Settings — AniLog', 'Manage your AniLog appearance, private journal, data, and favorites.'],
   user_profile: ['Community Profile — AniLog', 'View an AniLog community member’s public anime profile and library.'],
 };
 
@@ -138,6 +144,11 @@ try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    if (localFirebase) {
+      connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+      connectFirestoreEmulator(db, '127.0.0.1', 8080);
+      connectStorageEmulator(getStorage(app), '127.0.0.1', 9199);
+    }
     setLogLevel("silent");
   }
 } catch (error) {
@@ -316,6 +327,10 @@ export const ThemeContext = createContext({
   viewMode: 'grid',
   setViewMode: (mode) => {},
   showTrail: true,
+  showAmbient: true,
+  setShowAmbient: (_value: boolean) => {},
+  backdrop: 'tinted',
+  setBackdrop: (_value: string) => {},
   setShowTrail: (show) => {},
   setPage: (page) => {},
   sidebarCollapsed: false,
@@ -533,21 +548,6 @@ function ToastContainer({ toasts, removeToast }) {
     );
 }
 
-function FooterInfo() {
-    const { theme } = useContext(ThemeContext);
-    return (
-        <div className="w-full py-8 text-center flex flex-col items-center gap-2 mt-8 opacity-50 hover:opacity-100 transition-opacity">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                Made by <span className={`${theme.accentText}`}>{CREATOR_NAME}</span>
-            </p>
-            <a href="https://paypal.me/KshrugalJain943" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 transition-colors text-[10px] font-bold text-gray-400 hover:text-white border border-white/5 hover:border-white/10">
-                <HeartIcon /> Support the Dev
-            </a>
-            <p className="text-[10px] text-gray-600">Press Cmd+K to search</p>
-        </div>
-    )
-}
-
 // --- Error Boundary Component ---
 type ErrorBoundaryProps = React.PropsWithChildren;
 type ErrorBoundaryState = { hasError: boolean; error: Error | null };
@@ -619,7 +619,7 @@ export function AnimeCarouselSkeleton({ title }) {
     )
 }
 
-export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, viewMode = 'grid' }) {
+export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, incrementPending = false, viewMode = 'grid' }) {
     const { theme } = useContext(ThemeContext);
     
     const mouseX = useMotionValue(0);
@@ -739,8 +739,9 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                     <button 
                         type="button"
                         aria-label={incrementLabel}
+                        disabled={incrementPending}
                         onClick={(e) => { e.stopPropagation(); onQuickIncrement(); }}
-                        className={`h-11 w-11 shrink-0 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 ${theme.accentText} z-10`}
+                        className={`h-11 w-11 shrink-0 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 disabled:opacity-50 disabled:cursor-wait ${theme.accentText} z-10`}
                         title={incrementLabel}
                     >
                         <span aria-hidden="true" className="flex items-center gap-0.5"><PlusIcon className="h-4 w-4" /><span className="text-xs font-bold">{isVn ? '5%' : '1'}</span></span>
@@ -796,9 +797,10 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, vi
                          <button 
                             type="button"
                             aria-label={incrementLabel}
+                            disabled={incrementPending}
                             title={incrementLabel}
                             onClick={(e) => { e.stopPropagation(); onQuickIncrement(); }}
-                            className={`w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 hover:scale-110 transition-all border border-white/20 shadow-xl ${theme.accentText}`}
+                            className={`w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-white/30 hover:scale-110 transition-all border border-white/20 shadow-xl disabled:opacity-50 disabled:cursor-wait ${theme.accentText}`}
                          >
                              <span aria-hidden="true" className="flex items-center gap-0.5"><PlusIcon className="h-4 w-4" /><span className="text-xs font-bold">{isVn ? '5%' : '1'}</span></span>
                          </button>
@@ -868,7 +870,7 @@ function CommandPalette({ isOpen, onClose, setPage, theme, setThemeId, userId })
             { id: 'social', label: 'Go to Social', icon: <SocialIcon />, action: () => setPage('social') },
             { id: 'schedule', label: 'Open Airing Schedule', icon: <ScheduleIcon />, action: () => setPage('schedule') },
             { id: 'decks', label: 'Explore Community Decks', icon: <DecksIcon />, action: () => setPage('decks') },
-            { id: 'profile', label: 'Go to Profile', icon: <ProfileIcon />, action: () => setPage('profile') },
+            { id: 'profile', label: 'Account settings', icon: <ProfileIcon />, action: () => setPage('profile') },
         ];
         
         const themes = Object.values(THEMES).map(t => ({
@@ -1067,33 +1069,42 @@ function PreviewBanner() {
   );
 }
 
-function NotificationCenter({ db, userId, onClose, setPage }) {
+function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     setItems([]);
+    setError(false);
     setLoading(Boolean(db && userId));
     if (!db || !userId) return;
     let disposed = false;
     let unsubscribe = () => {};
     getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(profile => {
       if (disposed) return;
-      const friendIds = new Set((profile.data()?.friends || []).map(friend => friend.uid || friend));
-      unsubscribe = onSnapshot(query(collection(db, `artifacts/${appId}/public/data/activity`), orderBy('timestamp', 'desc'), limit(40)), snapshot => {
+      const authors = followedIds(profile.data()?.friends || []).filter(id => id !== userId);
+      unsubscribe = subscribeCommunityActivity(db, appId, authors, 12, next => {
         if (disposed) return;
-        setItems(snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() } as any)).filter(item => item.userId === userId || friendIds.has(item.userId)).slice(0, 12));
-        setLoading(false);
-      }, () => { if (!disposed) setLoading(false); });
-    }).catch(() => { if (!disposed) setLoading(false); });
+        setItems(next); setError(false); setLoading(false);
+      }, () => { if (!disposed) { setError(true); setLoading(false); } });
+    }).catch(() => { if (!disposed) { setError(true); setLoading(false); } });
     return () => { disposed = true; unsubscribe(); };
   }, [db, userId]);
+
+  const portraits = useCommunityPortraits(db, appId, items.map(item => item.userId));
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement;
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', dismiss);
+    return () => { document.removeEventListener('keydown', dismiss); if (previous?.isConnected) previous.focus(); };
+  }, [onClose]);
 
   return createPortal(
     <div className="fixed inset-0 z-[120] bg-black/50" onClick={onClose}>
       <motion.aside initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} className="absolute right-3 top-20 flex max-h-[calc(100vh-6rem)] w-[min(420px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#101318] shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-white/5 p-4"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-400">Activity inbox</p><h2 className="mt-1 text-lg font-bold text-white">Notifications</h2></div><button onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white">×</button></div>
-        <div className="overflow-y-auto p-2">{loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { setPage('social'); onClose(); }} className="flex w-full gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-blue-500/15 text-xs font-black text-blue-300">{item.username?.[0]?.toUpperCase() || '?'}</span><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">You are all caught up</p><p className="mt-1 text-xs text-gray-600">Friend and account activity will appear here.</p></div>}</div>
+        <div className="flex items-center justify-between border-b border-white/5 p-4"><h2 className="text-lg font-bold text-white">Notifications</h2><button autoFocus aria-label="Close notifications" title="Close notifications" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><CloseIcon size={17} /></button></div>
+        <div className="overflow-y-auto p-2">{loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : error ? <p role="alert" className="p-8 text-center text-sm text-gray-400">Activity could not be loaded.</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { onClose(); openUserProfile({ uid: item.userId, username: item.username }); }} className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><CommunityAvatar name={item.username} portrait={portraits[item.userId]} /><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">You are all caught up</p><p className="mt-1 text-xs text-gray-600">New activity from people you follow appears here.</p></div>}</div>
         <button onClick={() => { setPage('social'); onClose(); }} className="border-t border-white/5 p-3 text-xs font-bold text-blue-400 hover:bg-white/5">Open community</button>
       </motion.aside>
     </div>, document.body
@@ -1107,7 +1118,6 @@ function HeaderTools({ guestMode, setPage, onCommands, onNotifications }) {
   const tools = [
     { label: 'Schedule', Icon: ScheduleIcon, action: () => setPage('schedule') },
     { label: 'Decks', Icon: DecksIcon, action: () => setPage('decks') },
-    { label: 'Commands', Icon: SearchIcon, action: onCommands },
     ...(!guestMode ? [{ label: 'Notifications', Icon: BellIcon, action: onNotifications }] : []),
   ];
 
@@ -1155,7 +1165,8 @@ export default function App() {
   const [loading, setLoading] = useState(Boolean(auth));
   const [viewTargetUser, setViewTargetUser] = useState(null);
   const [guestMode, setGuestMode] = useState(() => !auth || sessionStorage.getItem('anilog_guest') === 'true');
-  usePublicLibrary(db, appId, guestMode ? null : userId);
+  const publicLibraryError = usePublicLibrary(db, appId, guestMode ? null : userId);
+  const ownIdentity = useProfileIdentity(db, appId, guestMode ? null : userId);
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -1218,6 +1229,20 @@ export default function App() {
   const [density, setDensity] = useState(() => localStorage.getItem('anilog_density') || 'comfortable');
   const [showQuickTip, setShowQuickTip] = useState(() => localStorage.getItem('anilog_quick_tip') !== 'false');
   const [showTrail, setShowTrail] = useState(() => localStorage.getItem('anilog_trail') !== 'false');
+  const [showAmbient, setShowAmbient] = useState(() => localStorage.getItem('anilog_ambient') !== 'false');
+  const [backdrop, setBackdrop] = useState(() => localStorage.getItem('anilog_backdrop') === 'graphite' ? 'graphite' : 'tinted');
+  const reducedMotion = useReducedMotion();
+  useEffect(() => { localStorage.setItem('anilog_ambient', String(showAmbient)); }, [showAmbient]);
+  useEffect(() => { localStorage.setItem('anilog_backdrop', backdrop); }, [backdrop]);
+  const appearanceError = usePrivateAppearance(db, appId, guestMode ? null : userId,
+    { themeId, viewMode, density, showTrail, showQuickTip, sidebarCollapsed }, values => {
+      if (THEMES[values.themeId]) setThemeId(values.themeId);
+      if (['grid', 'list', 'journal'].includes(values.viewMode)) setViewMode(values.viewMode);
+      if (['comfortable', 'compact'].includes(values.density)) setDensity(values.density);
+      if (typeof values.showTrail === 'boolean') setShowTrail(values.showTrail);
+      if (typeof values.showQuickTip === 'boolean') setShowQuickTip(values.showQuickTip);
+      if (typeof values.sidebarCollapsed === 'boolean') setSidebarCollapsed(values.sidebarCollapsed);
+    });
 
   // Effects to save state
   useEffect(() => localStorage.setItem('anilog_theme', themeId), [themeId]);
@@ -1448,9 +1473,9 @@ export default function App() {
   }
 
   const pageVariants = {
-    initial: { opacity: 0, y: 10, filter: "blur(10px)" },
-    in: { opacity: 1, y: 0, filter: "blur(0px)" },
-    out: { opacity: 0, y: -10, filter: "blur(10px)" },
+    initial: { opacity: 0, y: 10 },
+    in: { opacity: 1, y: 0 },
+    out: { opacity: 0, y: -10 },
   };
 
   const pageTransition = { type: "spring", stiffness: 100, damping: 20, duration: 0.3 } as any;
@@ -1462,7 +1487,7 @@ export default function App() {
     switch (page) {
       case "home": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
-        : <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
+        : <HomePage key={userId} db={db} userId={userId} username={username} showToast={showToast} />;
       case "search": return <SearchPage db={db} userId={userId} username={username} onConfetti={triggerConfetti} showToast={showToast} readOnly={guestMode} />;
       case "discovery": return <DiscoveryPage db={db} userId={userId} username={username} readOnly={guestMode} />;
       case "stats": return guestMode
@@ -1473,9 +1498,9 @@ export default function App() {
       case "decks": return <DecksPage db={db} userId={userId} username={username} showToast={showToast} readOnly={guestMode} />;
       case "profile": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
-        : <ProfilePage db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
+        : <ProfilePage key={userId} db={db} userId={userId} username={username} setUsername={setUsername} showToast={showToast} openUserProfile={openUserProfile} />;
       case "user_profile": return viewTargetUser && viewTargetUser.uid === targetProfileUid
-        ? <UserProfilePage key={targetProfileUid} db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} readOnly={guestMode} />
+        ? <UserProfilePage key={targetProfileUid} db={db} currentUserId={userId} currentUsername={username} targetUser={viewTargetUser} showToast={showToast} setPage={setPage} onLogout={handleLogout} readOnly={guestMode} />
         : <div className="py-24 text-center text-gray-500">Loading profile…</div>;
       default: return <HomePage db={db} userId={userId} username={username} showToast={showToast} />;
     }
@@ -1483,56 +1508,31 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip }}>
+      <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip, showAmbient, setShowAmbient, backdrop, setBackdrop }}>
       <div className="min-h-screen bg-[#050505] text-gray-100 font-sans flex flex-col relative overflow-hidden selection:bg-white/20">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
         
-        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} />}
-        <StarField active={true} />
-        <MouseTrail themeId={themeId} active={showTrail} />
+        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} openUserProfile={openUserProfile} />}
+        <div className="anilog-backdrop" data-backdrop={backdrop} style={{ '--scene-accent': theme.scrollbarThumb } as React.CSSProperties} aria-hidden="true" />
+        <StarField active={showAmbient && !reducedMotion} />
+        <MouseTrail themeId={themeId} active={showTrail && !reducedMotion} />
 
         <PreviewBanner />
 
-        {/* Dynamic Nebula - Physics Based */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden">
-          <motion.div
-            animate={{
-              x: [0, 50, -50, 0],
-              y: [0, -30, 30, 0],
-              scale: [1, 1.2, 1],
-              opacity: [0.15, 0.25, 0.15]
-            }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-            className={`absolute top-[-20%] left-[-10%] w-[800px] h-[800px] rounded-full blur-[150px] mix-blend-screen ${theme.accentBg.replace('bg-', 'bg-')}`}
-          />
-          <motion.div
-            animate={{
-              x: [0, -50, 50, 0],
-              y: [0, 30, -30, 0],
-              scale: [1, 1.3, 1],
-              opacity: [0.1, 0.2, 0.1]
-            }}
-            transition={{ duration: 25, repeat: Infinity, ease: "linear", delay: 2 }}
-            className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-purple-900/30 rounded-full blur-[150px] mix-blend-screen"
-          />
-        </div>
-        <header className="sticky top-0 z-30 bg-[#050505]/60 backdrop-blur-xl border-b border-white/5">
+        <header className="anilog-header sticky top-0 z-30">
           <nav className="container mx-auto px-4 py-3 flex flex-wrap gap-x-1 gap-y-2 justify-between items-center">
             <button type="button" aria-label="AniLog home" className={`text-2xl font-black text-transparent bg-clip-text bg-gradient-to-br ${theme.gradient} tracking-tight cursor-pointer drop-shadow-sm flex items-center gap-2`} onClick={() => setPage(guestMode ? 'discovery' : 'home')}>
               {APP_NAME}
             </button>
             <div className="ml-auto flex shrink-0 items-center space-x-0.5 sm:space-x-2">
               <HeaderTools guestMode={guestMode} setPage={setPage} onCommands={() => setIsCmdOpen(true)} onNotifications={() => setIsNotificationsOpen(true)} />
-              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("stats")} title="Stats" className={`p-2 rounded-full transition-all duration-300 ${page === "stats" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
-                <StatsIcon />
+              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => openUserProfile({ uid: userId, username })} title="Profile" aria-label="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "user_profile" && targetProfileUid === userId ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
+                {ownIdentity.identity.avatar.url ? <IdentityImage image={ownIdentity.identity.avatar} className="h-6 w-6 rounded-full" /> : <ProfileIcon />}
               </motion.button>}
-              {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => setPage("profile")} title="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "profile" ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
-                <ProfileIcon />
-              </motion.button>}
-              <motion.button whileTap={{ scale: 0.9 }} onClick={guestMode ? leaveGuestMode : handleLogout} title={guestMode ? "Sign in" : "Logout"} className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
+              {guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={leaveGuestMode} title="Sign in" className="p-2 rounded-full text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors">
                 <LogoutIcon />
-              </motion.button>
+              </motion.button>}
             </div>
           </nav>
         </header>
@@ -1544,6 +1544,8 @@ export default function App() {
         )}
 
         <main className={`flex-grow min-w-0 w-full container mx-auto p-4 pb-32 z-10 ${density === "compact" ? "sm:px-3" : "sm:px-4"}`}>
+          {publicLibraryError && <p role="status" className="text-sm text-amber-300 mb-4">{publicLibraryError}</p>}
+          {appearanceError && <p role="status" className="text-sm text-amber-300 mb-4">{appearanceError}</p>}
           <AnimatePresence mode="popLayout">
             <motion.div key={page} initial="initial" animate="in" exit="out" variants={pageVariants} transition={pageTransition}>
               <Suspense fallback={<PageLoadingFallback />}>
@@ -1552,7 +1554,6 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
           
-          <FooterInfo />
         </main>
 
         {/* Floating Magnetic Navigation Dock */}

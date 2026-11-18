@@ -87,7 +87,7 @@ function boundary(overrides = {}) {
   const state = {};
   const reads = [];
   const bindings = {
-    ...helpers, db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false,
+    ...helpers, db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false, visitorPreview: false, visitor: true,
     tab: 'overview', loading: false, libraryPrivate: false, loadError: '', friendBusy: false, isFriend: false,
     doc: (_db, path) => path, collection: (_db, path) => path, query: path => path, where: () => {}, orderBy: () => {}, limit: () => {},
     getDoc: async path => { reads.push(path); return snapshot({ libraryPublic: true }); },
@@ -106,7 +106,6 @@ test('activity index failure cannot block library; own library is not read for o
   await flush();
   assert.equal(state.setLoading, false);
   assert.equal(state.setList[0].kitsuId, 'v1');
-  assert.ok(reads.some(path => path.endsWith('/friend/publicLibrary')));
   assert.equal(state.setActivityError, 'Recent activity is unavailable.');
   assert.equal(reads.some(path => path.endsWith('/me/animeList')), false);
 });
@@ -143,7 +142,7 @@ test('comparison loads own library only when requested; canceled target fetch ca
   for (const effect of effects) assert.equal(effect.expression.arguments[1].getText(pages).includes('targetUser,'), false);
 });
 
-test('saved selection opens synchronously with target ownership; Hall of Fame uses immediate fallback', () => {
+test('saved selection opens synchronously with target ownership; catalogue-only entries uses immediate fallback', () => {
   const saved = { id: 'v1', kitsuId: 'v1', title: 'Saved title', score: 8 };
   const state = boundary({ list: [saved] });
   const open = handler('openEntry', state.bindings);
@@ -173,7 +172,7 @@ test('follow transaction preserves other concurrent follows and removes legacy s
   assert.equal(state.state.setIsFriend, false);
 });
 
-test('saved provider IDs and Hall of Fame fallbacks keep the unified hydration routing', () => {
+test('saved provider IDs and catalogue-only entries fallbacks keep the unified hydration routing', () => {
   for (const [entry, id] of [
     [{ id: '123', title: 'Kitsu saved' }, '123'],
     [{ id: '123', provider: 'anilist', title: 'AniList saved' }, 'anilist:123'],
@@ -219,9 +218,20 @@ test('viewer changes hide stale profile data before another privacy lookup resol
   const guard = component.body.statements.find(node => ts.isIfStatement(node) && node.expression.getText(pages).includes('loadedTarget?.targetUid'));
   assert.ok(guard);
   const hidden = bindings => evaluate(guard.expression, bindings);
-  const current = { targetUid: 'friend', currentUserId: 'owner', readOnly: false };
+  const current = { targetUid: 'friend', currentUserId: 'owner', readOnly: false, visitorPreview: false };
   assert.equal(hidden({ ...current, loadedTarget: current }), false);
   assert.equal(hidden({ ...current, currentUserId: 'guest', loadedTarget: current }), true);
   assert.equal(hidden({ ...current, readOnly: true, loadedTarget: current }), true);
   assert.equal(hidden({ ...current, targetUid: 'next', loadedTarget: current }), true);
+  assert.equal(hidden({ ...current, visitorPreview: true, loadedTarget: current }), true);
+});
+test('visitor preview never loads owner-only library documents, even for its owner', async () => {
+  const preview = boundary({ targetUid: 'me', visitorPreview: true, visitor: true });
+  evaluate(effects[0].expression.arguments[0], preview.bindings)(); await flush();
+  assert.ok(preview.reads.some(path => path.endsWith('/me/publicLibrary')));
+  assert.equal(preview.reads.some(path => path.endsWith('/animeList')), false);
+  const hidden = boundary({ targetUid: 'me', visitorPreview: true, visitor: true, getDoc: async () => snapshot({ libraryPublic: false }) });
+  evaluate(effects[0].expression.arguments[0], hidden.bindings)(); await flush();
+  assert.equal(hidden.state.setLibraryPrivate, true);
+  assert.equal(hidden.reads.some(path => path.endsWith('/publicLibrary') || path.endsWith('/animeList')), false);
 });

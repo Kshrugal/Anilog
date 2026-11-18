@@ -86,14 +86,17 @@ const transpile = node => ts.transpileModule(node.getText(tree).replace(/^export
   compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const profile = deferred();
-let cleanup, subscriptions = 0, unsubscribed = 0;
+let cleanups = [], subscriptions = 0, unsubscribed = 0;
+const cleanup = () => { cleanups.forEach(stop => stop?.()); cleanups = []; };
 const notifications = vm.createContext({
-  React: { createElement: () => null }, motion: { aside: 'aside' }, BellIcon: 'bell',
-  useState: initial => [initial, () => {}], useEffect: effect => { cleanup = effect(); },
+  React: { createElement: () => null }, motion: { aside: 'aside' }, BellIcon: 'bell', CloseIcon: 'close',
+  useState: initial => [initial, () => {}], useEffect: effect => { cleanups.push(effect()); },
+  followedIds: friends => friends, useCommunityPortraits: () => ({}),
+  subscribeCommunityActivity: () => { subscriptions++; return () => { unsubscribed++; }; },
   getDoc: () => profile.promise, doc: () => ({}), appId: 'test',
   onSnapshot: () => { subscriptions++; return () => { unsubscribed++; }; },
   query: () => ({}), collection: () => ({}), orderBy: () => ({}), limit: () => ({}),
-  createPortal: value => value, document: { body: {} },
+  createPortal: value => value, document: { body: {}, addEventListener() {}, removeEventListener() {} },
 });
 vm.runInContext(transpile(component('NotificationCenter')), notifications);
 vm.runInContext('NotificationCenter({db: {}, userId: "test"})', notifications);

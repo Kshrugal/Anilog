@@ -13,6 +13,8 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     concurrency:
       group: anilog-production
       cancel-in-progress: true
@@ -45,6 +47,7 @@ jobs:
           echo "VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}" >> .env
           echo "VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}" >> .env
           echo "VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}" >> .env
+          echo "VITE_PROFILE_UPLOADS_ENABLED=true" >> .env
 
       - name: Verify production build
         run: |
@@ -64,7 +67,4 @@ jobs:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
         run: node scripts/check-deployment.mjs "$DEPLOY_URL"
 
-      # Deploy rules after the compatible frontend is live so sign-up never
-      # encounters a rules/code mismatch during rollout.
-      - name: Deploy Firestore rules
-        run: npx --yes firebase-tools@13.35.1 deploy --only firestore:rules --project "${{ secrets.VITE_FIREBASE_PROJECT_ID }}" --non-interactive
+      # Shared Firebase rules are released separately via firebase-rules.yml.

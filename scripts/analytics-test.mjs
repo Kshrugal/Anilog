@@ -77,7 +77,10 @@ test('all analytics tabs render real fixture and empty states without invalid nu
   for (const tab of ['overview', 'franchises', 'timeline', 'lab', 'runtimes']) for (const data of [entries, []]) {
     const html = render(tab, 'all', data); assert.ok(!/NaN|Infinity/.test(html)); assert.match(html, /Counting &amp; estimates/);
   }
-  assert.match(render('overview'), /h-32/);
+  assert.match(render('overview'), /h-24/);
+  assert.match(render('overview'), /stats-status-ribbon/);
+  assert.match(render('overview'), /stats-time-tile/);
+  assert.match(render('overview'), /class="stats-media"/);
   assert.match(render('franchises'), /Edit group for Story/);
   assert.match(render('lab'), /Daily minutes/);
   assert.match(render('timeline'), /Completion year/);

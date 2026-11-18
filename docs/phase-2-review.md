@@ -1,0 +1,87 @@
+# Phase 2: profile identity and showcases
+
+## Hosted rollout
+
+The owner approved a coordinated release using the existing preview URL, accounts and shared Firebase backend. Hosting is in `gen-lang-client-0108112324`; the actual Auth/Firestore/Storage project is `anilog-10335`. Do not confuse the two when deploying rules or assigning permissions.
+
+The original official frontend received compatibility-only public-library reads and projection sync. The audited backfill completed with original library records unchanged. Four older public metadata fields (`lastLogin`, `bannerUrl`, `top10`, `streak`) are preserved but frozen against new client writes. The temporary Cloud Datastore User role used for the backfill was removed afterwards. The one-time backfill is no longer part of regular main deployments.
+
+The shared compatibility migration is complete. Firebase is now on Blaze, with default bucket `anilog-10335.firebasestorage.app` in `US-CENTRAL1`. Both rulesets were published and read back using the existing Rules Admin account. Upload permissions were additionally checked in Firebase's rules simulator, without changing the owner's profile. Appearance now uses uploads only; existing saved artwork remains readable, while catalogue search remains in Favorites. See `profile-customization.md` for the current upload implementation.
+
+## Included
+
+- Public avatar/banner identity with image uploads, nondestructive focal positioning and zoom, and compatibility with previously saved catalogue artwork or cover collages.
+- Safe text-only bio formatting (bold, italic and closed-by-default spoilers), five independent profile accents, and overview visibility/order.
+- Separate anime, visual novel and character showcases, up to eight items each. AniList and VNDB search, duplicate prevention, accessible ordering/removal, and direct catalogue links. Selecting a showcase never adds or changes a library entry.
+- Desktop/mobile editor previews and a visitor mode that reads the public library projection, respects explicit library visibility, and hides owner actions.
+- Hall of Fame was retired from the preview in the data portability phase. Existing legacy records are not deleted, and Favorites are the only profile showcases on preview.
+- Creator/support footer removed.
+
+## Data boundaries
+
+Paths below are relative to `artifacts/{appId}`:
+
+| Path | Contents | Access |
+| --- | --- | --- |
+| `public/data/profileIdentity/{uid}` | Bio, image references/crops, accent, module order and revision | Public read, owner validated write |
+| `public/data/profileIdentity/{uid}/showcases/{kind}` | Validated catalogue items and matching revision | Public read, owner write |
+| `public/data/users/{uid}` | Existing public username, following, legacy favorites and library visibility | Public read, owner validated write |
+| `public/data/users/{uid}/animeList/{id}` | Original full library, including journal notes and private tracking fields | Owner only, despite the legacy path name |
+| `public/data/users/{uid}/publicLibrary/{id}` | Explicit, typed public projection without notes, routes, private tags or sharing settings | Owner, or visitors only while `libraryPublic` is explicitly true |
+| `privateUsers/{uid}/settings/appearance` | Private app appearance preferences | Owner only |
+| `privateUsers/{uid}/journal/{id}` | Reserved private journal documents | Owner only |
+
+Existing journal notes stay in the now-private original library; no destructive migration is needed. Public identity/showcases are intentionally public even with a private library. Existing explicitly published social posts remain public; hiding an overview module is not deletion of those posts.
+
+Identity and all three showcase records are saved in one transaction. Revision checks reject stale editors. Separate showcase records keep fully populated profiles within Firestore's rule-evaluation limit.
+
+Uploads accept JPEG/PNG/WebP up to 8 MiB in the editor, decode and re-encode to WebP (maximum edge 2048px, maximum output 5 MiB), and strip original metadata. Storage validates owner path, immutable filename, MIME type and size. Storage rules do not inspect binary signatures; re-encoding is client-side. Profile images are public assets, not private file storage.
+
+Replaced images are deleted only after the profile transaction commits. Failed saves remove their new uploads; successful saves retry orphan cleanup. A one-hour grace period protects concurrent, not-yet-committed uploads. Cleanup failures are surfaced and retried on the next save; this is not a scheduled server-side garbage collector.
+
+The owner app reconciles the public projection once on connection, then writes only changed/deleted entries. Original library data is never spread into a public record. There is no fallback that exposes the original library if projection sync fails.
+
+## Local review
+
+Requires Node and Java 21. On this laptop Java is installed at `/opt/homebrew/opt/openjdk@21`.
+
+```sh
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+npm ci
+npx firebase emulators:start --project demo-anilog --only auth,firestore,storage
+```
+
+In separate terminals:
+
+```sh
+node scripts/seed-profile-review.mjs
+VITE_LOCAL_FIREBASE=true npm run dev -- --host 127.0.0.1 --port 5175
+```
+
+Demo-only credentials: `review@anilog.local` / `AnilogReview123!`. Do not use a real account or password. `VITE_LOCAL_FIREBASE` works only in development and replaces the entire Firebase configuration with `demo-anilog`; it does not read or write live Firebase data. The seed script uses public catalogue metadata and writes only to local emulators. Restarting emulators without an export clears this demo data.
+
+## Verification
+
+```sh
+npm run check
+npm run test:security
+```
+
+Run the security command with the review emulators stopped, since it starts its own isolated test instances. The security suite includes visitors/strangers denied original library, journal and settings reads; validated public projections; invalid identity/showcase writes; a full 24-item atomic save; upload size/type/ownership checks; overwrite denial; and owner cleanup.
+
+Browser review covers real uploads and deletion, keyboard crop adjustments, saved/reopened bio and favorites, both character providers, module ordering/visibility, visitor controls, and 390px mobile layout. No real user data is used.
+
+## Original migration checklist
+
+The following gate was recorded before the coordinated compatibility release. The owner subsequently approved the shared-backend migration; the backfill, privacy audit, compatible official frontend, and rules deployment have completed. Do not rerun the one-time migration during normal deployments. Cloud Run preview and production still share Firebase and are not security-isolated staging environments.
+
+Before a hosted release:
+
+1. Test against a separate Firebase staging project with its own Auth, Firestore and Storage configuration and disposable accounts. Deploy both rule files there, and verify the configured Storage bucket and CORS behavior.
+2. Back up and audit existing public user documents. Move any unexpected private fields out of public documents, remove legacy public email fields, and validate required UID/username fields before enforcing the stricter profile schema. Do not silently drop unknown data.
+3. Backfill `publicLibrary` using the same typed projection for existing accounts so visitors do not need to wait for each owner to sign in. Keep absent `libraryPublic` flags private unless explicitly opted in. Validate that projections contain no private fields, including nested objects.
+4. Coordinate the compatible frontend and rules rollout. Existing old tabs cannot maintain the new projection; prompt/reload old clients during rollout. Never restore public access to original journal-bearing documents as a compatibility workaround.
+5. Recheck real-account sign-in, privacy toggles, uploads, replacement cleanup, public profile/library/statistics and a stale-tab save conflict in staging before production approval.
+
+The initial phase did not promote the new profile frontend to production. The follow-up homepage work is recorded in `phase-3-home.md`; settings remain separate.
