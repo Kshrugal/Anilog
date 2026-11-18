@@ -40,7 +40,7 @@ for (const field of ['favorite', 'priority', 'personalTags', 'onQuickIncrement']
 
 const app = text('App');
 assert.doesNotMatch(app.slice(app.indexOf('const pageVariants'), app.indexOf('const pageTransition')), /filter:|blur\(/, 'navigation must not rasterize a full-page blur');
-assert.match(app, /guestMode \? \['search', 'discovery', 'social'\] : \['home', 'search', 'discovery', 'social', 'stats'\]/);
+assert.match(app, /guestMode \? \['search', 'discovery'\] : \['home', 'search', 'discovery', 'social', 'stats'\]/);
 assert.match(app, /navItem === 'stats' && <StatsIcon/);
 assert.match(app, /onClick=\{\(\) => setPage\(navItem\)\}/);
 assert.match(app, /<MouseTrail themeId=\{themeId\} active=\{showTrail && !reducedMotion\}/);

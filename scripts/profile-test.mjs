@@ -87,7 +87,7 @@ function boundary(overrides = {}) {
   const state = {};
   const reads = [];
   const bindings = {
-    ...helpers, db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false, visitorPreview: false, visitor: true,
+    ...helpers, followedIds: list => list.map(friend => friend.uid || friend), db: {}, appId: 'test', targetUid: 'friend', targetUsername: 'Friend', currentUserId: 'me', readOnly: false, visitorPreview: false, visitor: true,
     tab: 'overview', loading: false, libraryPrivate: false, loadError: '', friendBusy: false, isFriend: false,
     doc: (_db, path) => path, collection: (_db, path) => path, query: path => path, where: () => {}, orderBy: () => {}, limit: () => {},
     getDoc: async path => { reads.push(path); return snapshot({ libraryPublic: true }); },
@@ -100,13 +100,13 @@ function boundary(overrides = {}) {
   return { state, reads, bindings: { ...bindings, ...overrides } };
 }
 
-test('activity index failure cannot block library; own library is not read for overview', async () => {
+test('visitor overview never requests private activity or the viewer library', async () => {
   const { state, reads, bindings } = boundary();
   evaluate(effects[0].expression.arguments[0], bindings)();
   await flush();
   assert.equal(state.setLoading, false);
   assert.equal(state.setList[0].kitsuId, 'v1');
-  assert.equal(state.setActivityError, 'Recent activity is unavailable.');
+  assert.equal(reads.some(path => path.endsWith('/activity')), false);
   assert.equal(reads.some(path => path.endsWith('/me/animeList')), false);
 });
 

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch, deleteDoc, query, where, limit } from 'firebase/firestore';
 
 const projectId = 'demo-anilog';
 const env = await initializeTestEnvironment({ projectId,
@@ -79,6 +79,36 @@ try {
   await allowed(setDoc(doc(owner.firestore(), 'artifacts/demo-anilog/privateUsers/owner/settings/appearance'), appearance));
   await allowed(updateDoc(doc(owner.firestore(), 'artifacts/demo-anilog/privateUsers/owner/settings/appearance'), { themeId: 'monochrome' }));
   await denied(updateDoc(doc(owner.firestore(), userPath), { settings: appearance }));
+  const friend = env.authenticatedContext('friend');
+  const anonymous = env.authenticatedContext('anonymous', { firebase: { sign_in_provider: 'anonymous' } });
+  const activity = `${root}/activity`;
+  const post = `${activity}/privacy-shared`, oldUpdate = `${activity}/privacy-legacy`, thread = `${post}/interactions/privacy-comment`;
+  const shared = client => getDocs(query(collection(client.firestore(), activity), where('userId', '==', 'owner'), where('sharedBy', '==', 'owner'), limit(20)));
+  const record = { userId: 'owner', type: 'text_post', sharedBy: 'owner' };
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), userPath), { uid: 'owner', username: 'Owner', friends: [{ uid: 'friend', username: 'Friend' }] });
+    await setDoc(doc(ctx.firestore(), `${root}/users/friend`), { uid: 'friend', username: 'Friend', friends: ['owner'] });
+    await setDoc(doc(ctx.firestore(), `${root}/users/stranger`), { uid: 'stranger', username: 'Stranger', followingIds: ['owner'] });
+    await setDoc(doc(ctx.firestore(), oldUpdate), { userId: 'owner', type: 'progress' });
+  });
+  await allowed(setDoc(doc(owner.firestore(), post), record));
+  await denied(setDoc(doc(owner.firestore(), `${activity}/invalid`), { ...record, type: 'progress' }));
+  await denied(updateDoc(doc(owner.firestore(), post), { sharedBy: 'friend' }));
+  await denied(updateDoc(doc(owner.firestore(), post), { userId: 'friend' }));
+  await allowed(getDoc(doc(owner.firestore(), oldUpdate)));
+  await denied(getDoc(doc(friend.firestore(), oldUpdate)));
+  await denied(getDocs(collection(guest.firestore(), activity)));
+  await denied(getDoc(doc(anonymous.firestore(), post)));
+  await denied(getDoc(doc(guest.firestore(), post)));
+  await denied(shared(stranger));
+  await allowed(shared(friend));
+  await denied(getDocs(query(collection(friend.firestore(), activity), where('userId', '==', 'owner'))));
+  await allowed(setDoc(doc(friend.firestore(), thread), { userId: 'friend', type: 'comment', text: 'Hello' }));
+  await denied(getDoc(doc(guest.firestore(), thread)));
+  await denied(getDoc(doc(stranger.firestore(), thread)));
+  await allowed(updateDoc(doc(owner.firestore(), userPath), { friends: [], followingIds: [] }));
+  await denied(shared(friend));
+  await denied(getDoc(doc(friend.firestore(), thread)));
   const path = 'profile-images/owner/test.webp';
   await allowed(owner.storage().ref(path).put(new Uint8Array([1, 2, 3]), { contentType: 'image/webp' }));
   await allowed(guest.storage().ref(path).getDownloadURL());

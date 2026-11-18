@@ -95,7 +95,11 @@ service cloud.firestore {
         // Authentication owns the email address. Public profile documents must
         // never contain it, including after partial updates to legacy records.
         allow create, update: if isOwner(userId) && profileHasNoPrivateEmail()
-          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'hallOfFame', 'libraryPublic', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'followingIds', 'hallOfFame', 'libraryPublic', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
+          && (!('followingIds' in request.resource.data) || request.resource.data.followingIds is list)
+          && (resource == null || !('followingIds' in resource.data)
+            || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['friends'])
+            || request.resource.data.diff(resource.data).affectedKeys().hasAny(['followingIds']))
           && (resource == null ? !request.resource.data.keys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']) : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']))
           && request.resource.data.uid == userId && request.resource.data.username is string
           && request.resource.data.username.size() > 0 && request.resource.data.username.size() <= 80
@@ -120,17 +124,43 @@ service cloud.firestore {
       
       // Social activity feed
       match /activity/{activityId} {
-        allow read: if true;
-        allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-        allow update, delete: if isOwner(resource.data.userId);
+        function signedIn() {
+          return isAuthenticated() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+        }
+        function follows(profile, uid, name) {
+          return 'followingIds' in profile ? uid in profile.followingIds
+            : uid in profile.get('friends', []) || {'uid': uid, 'username': name} in profile.get('friends', []);
+        }
+        function mutual(authorId) {
+          let me = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(request.auth.uid)).data;
+          let author = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(authorId)).data;
+          return follows(me, authorId, author.username) && follows(author, request.auth.uid, me.username);
+        }
+        function canRead(activity) {
+          return signedIn() && (isOwner(activity.userId)
+            || (activity.sharedBy == activity.userId && mutual(activity.userId)));
+        }
+        function validAudience(activity) {
+          return !('sharedBy' in activity)
+            || (activity.sharedBy == request.auth.uid && activity.type in ['text_post', 'micro_review']);
+        }
+        allow read: if canRead(resource.data);
+        allow create: if signedIn() && request.resource.data.userId == request.auth.uid
+          && validAudience(request.resource.data);
+        allow update: if signedIn() && isOwner(resource.data.userId)
+          && request.resource.data.userId == resource.data.userId && validAudience(request.resource.data);
+        allow delete: if signedIn() && isOwner(resource.data.userId);
 
         match /interactions/{interactionId} {
-          allow read: if true;
-          allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid
+          function canReadThread() {
+            return canRead(get(/databases/$(database)/documents/artifacts/$(appId)/public/data/activity/$(activityId)).data);
+          }
+          allow read: if canReadThread();
+          allow create: if canReadThread() && request.resource.data.userId == request.auth.uid
             && request.resource.data.type in ['like', 'comment']
             && (request.resource.data.type == 'like'
               || (request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 500));
-          allow update: if isOwner(resource.data.userId)
+          allow update: if canReadThread() && isOwner(resource.data.userId)
             && request.resource.data.userId == resource.data.userId
             && request.resource.data.type == resource.data.type;
           allow delete: if isOwner(resource.data.userId);

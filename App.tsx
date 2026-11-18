@@ -867,7 +867,7 @@ function CommandPalette({ isOpen, onClose, setPage, theme, setThemeId, userId })
             { id: 'home', label: 'Go to Home', icon: <HomeIcon />, action: () => setPage('home') },
             { id: 'search', label: 'Go to Search', icon: <SearchIcon />, action: () => setPage('search') },
             { id: 'stats', label: 'Go to Stats', icon: <StatsIcon />, action: () => setPage('stats') },
-            { id: 'social', label: 'Go to Social', icon: <SocialIcon />, action: () => setPage('social') },
+            ...(userId ? [{ id: 'social', label: 'Go to Social', icon: <SocialIcon />, action: () => setPage('social') }] : []),
             { id: 'schedule', label: 'Open Airing Schedule', icon: <ScheduleIcon />, action: () => setPage('schedule') },
             { id: 'decks', label: 'Explore Community Decks', icon: <DecksIcon />, action: () => setPage('decks') },
             { id: 'profile', label: 'Account settings', icon: <ProfileIcon />, action: () => setPage('profile') },
@@ -1084,7 +1084,7 @@ function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
     getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(profile => {
       if (disposed) return;
       const authors = followedIds(profile.data()?.friends || []).filter(id => id !== userId);
-      unsubscribe = subscribeCommunityActivity(db, appId, authors, 12, next => {
+      unsubscribe = subscribeCommunityActivity(db, appId, userId, authors, 12, next => {
         if (disposed) return;
         setItems(next); setError(false); setLoading(false);
       }, () => { if (!disposed) { setError(true); setLoading(false); } });
@@ -1493,7 +1493,9 @@ export default function App() {
       case "stats": return guestMode
         ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
         : <StatsPage db={db} userId={userId} username={username} />;
-      case "social": return <SocialPage db={db} userId={userId} username={username} showToast={showToast} openUserProfile={openUserProfile} readOnly={guestMode} />;
+      case "social": return guestMode
+        ? <DiscoveryPage db={db} userId={userId} username={username} readOnly />
+        : <SocialPage key={userId} db={db} userId={userId} username={username} showToast={showToast} openUserProfile={openUserProfile} />;
       case "schedule": return <SchedulePage db={db} userId={userId} username={username} readOnly={guestMode} />;
       case "decks": return <DecksPage db={db} userId={userId} username={username} showToast={showToast} readOnly={guestMode} />;
       case "profile": return guestMode
@@ -1511,7 +1513,7 @@ export default function App() {
       <ThemeContext.Provider value={{ theme, setThemeId, viewMode, setViewMode, showTrail, setShowTrail, setPage, sidebarCollapsed, setSidebarCollapsed, density, setDensity, showQuickTip, setShowQuickTip, showAmbient, setShowAmbient, backdrop, setBackdrop }}>
       <div className="min-h-screen bg-[#050505] text-gray-100 font-sans flex flex-col relative overflow-hidden selection:bg-white/20">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
-        <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={userId} />
+        <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={guestMode ? null : userId} />
         
         {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} openUserProfile={openUserProfile} />}
         <div className="anilog-backdrop" data-backdrop={backdrop} style={{ '--scene-accent': theme.scrollbarThumb } as React.CSSProperties} aria-hidden="true" />
@@ -1559,7 +1561,7 @@ export default function App() {
         {/* Floating Magnetic Navigation Dock */}
         <div className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-40 max-w-[calc(100%-1rem)]">
           <div className="relative flex items-center gap-2 px-3 py-2 bg-[#0a0a0a]/60 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl">
-            {(guestMode ? ['search', 'discovery', 'social'] : ['home', 'search', 'discovery', 'social', 'stats']).map((navItem) => {
+            {(guestMode ? ['search', 'discovery'] : ['home', 'search', 'discovery', 'social', 'stats']).map((navItem) => {
               const isActive = page === navItem;
               return (
                   <motion.button 

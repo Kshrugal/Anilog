@@ -789,7 +789,7 @@ function SocialActions({ db, activityId, userId, username, readOnly }) {
     const loadInteractions = async () => {
         if (!db || !activityId) return [];
         try {
-            const snapshot = await getDocs(query(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), orderBy('timestamp', 'asc'), limit(50)));
+            const snapshot = await getDocsFromServer(query(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), orderBy('timestamp', 'asc'), limit(50)));
             const next = snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }));
             setInteractions(next); setLoaded(true); return next;
         } catch (error) {
@@ -842,14 +842,14 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     const { theme } = useContext(ThemeContext);
 
     const [feedStatus, setFeedStatus] = useState('loading');
-    const authorKey = JSON.stringify(readOnly ? null : followedIds([userId, ...friends]).sort());
+    const authorKey = JSON.stringify(followedIds([userId, ...friends]).sort());
     useEffect(() => {
-        if (!db || view !== 'feed') return;
+        if (!db || !userId || readOnly || view !== 'feed') return;
         setFeed([]); setFeedStatus('loading');
-        return subscribeCommunityActivity(db, appId, JSON.parse(authorKey), 40, items => {
+        return subscribeCommunityActivity(db, appId, userId, JSON.parse(authorKey), 40, items => {
             setFeed(items); setFeedStatus('ready');
         }, () => setFeedStatus('error'));
-    }, [db, view, authorKey]);
+    }, [db, userId, readOnly, view, authorKey]);
 
     useEffect(() => {
         if (!db || !userId || readOnly) return;
@@ -890,8 +890,11 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
         setPosting(true);
         try {
             const linkedMedia = reviewLibrary.find(item => String(item.kitsuId || item.id) === reviewTitle);
-            await addDoc(collection(db, `artifacts/${appId}/public/data/activity`), {
-                userId, username, type: composerType === 'review' ? 'micro_review' : 'text_post',
+            const activity = collection(db, `artifacts/${appId}/public/data/activity`);
+            // The sharedBy index uses document ID as its tie-breaker (newest first).
+            const newestFirst = String(9_999_999_999_999 - Date.now()).padStart(13, '0');
+            await setDoc(doc(activity, `${newestFirst}-${doc(activity).id}`), {
+                userId, username, sharedBy: userId, type: composerType === 'review' ? 'micro_review' : 'text_post',
                 context: composerType === 'review' ? `reviewed ${reviewScore ? `${reviewScore}/10` : ''}` : 'posted',
                 animeTitle: composerType === 'review' ? linkedMedia?.title || reviewTitle.trim() : '',
                 animeKitsuId: linkedMedia?.kitsuId || '', animeImageUrl: linkedMedia?.imageUrl || '',
@@ -920,6 +923,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
             {view === 'feed' && (
                 <div className="space-y-4">
                     {!readOnly && <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
+                        <p className="mb-3 text-xs text-gray-400">Posts and reviews are shared with mutual follows. Tracking updates are only visible to you.</p>
                         <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
                         {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><select value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} className="min-w-0 rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="">Choose from your library…</option>{reviewLibrary.map(item => <option key={item.id} value={String(item.kitsuId || item.id)}>{item.mediaType === 'vn' ? 'VN · ' : ''}{item.title}</option>)}</select><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
@@ -1506,7 +1510,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
 
                                 </div></details>
                                 <div className="space-y-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-3"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label><label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500 shrink-0" /> Share update to activity</label></div>
+                                    <div className="flex flex-wrap items-center justify-between gap-3"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label><label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500 shrink-0" /> Log note in my private activity</label></div>
                                     <textarea 
                                         value={notes} 
                                         onChange={(e) => setNotes(e.target.value)}
@@ -2334,7 +2338,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                         Security & Privacy
                     </h3>
                     <div className="space-y-4 relative z-10">
-                        <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-5 rounded-lg border border-blue-500/15 bg-blue-500/[0.05] p-5"><div className="min-w-0"><p id="public-library-label" className="text-sm font-bold text-white">Public library</p><p id="public-library-description" className="mt-1 text-xs leading-relaxed text-gray-400">Let other people view your tracked titles, stats, and taste compatibility. Your profile and social posts stay public.</p></div><button type="button" role="switch" aria-checked={libraryPublic} aria-labelledby="public-library-label" aria-describedby="public-library-description" aria-busy={privacySaving} disabled={privacySaving} onClick={handleLibraryPrivacyToggle} className={`relative block h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 ${libraryPublic ? theme.accentBg : 'bg-gray-700'}`}><span aria-hidden="true" className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${libraryPublic ? 'translate-x-5' : 'translate-x-0'}`} /></button></div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-5 rounded-lg border border-blue-500/15 bg-blue-500/[0.05] p-5"><div className="min-w-0"><p id="public-library-label" className="text-sm font-bold text-white">Public library</p><p id="public-library-description" className="mt-1 text-xs leading-relaxed text-gray-400">Let other people view your tracked titles, stats, and taste compatibility. Your profile stays public. Social posts are shared only with mutual follows.</p></div><button type="button" role="switch" aria-checked={libraryPublic} aria-labelledby="public-library-label" aria-describedby="public-library-description" aria-busy={privacySaving} disabled={privacySaving} onClick={handleLibraryPrivacyToggle} className={`relative block h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 ${libraryPublic ? theme.accentBg : 'bg-gray-700'}`}><span aria-hidden="true" className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${libraryPublic ? 'translate-x-5' : 'translate-x-0'}`} /></button></div>
                         <div className="p-5 bg-black/40 rounded-2xl border border-white/5 hover:border-emerald-500/30 transition-colors">
                             <p className="text-sm font-bold text-white mb-1 flex items-center gap-2">
                                 <LockIcon size={14} className="text-emerald-500" />
@@ -2521,12 +2525,14 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
             }
         };
         fetchData();
-        const activityQ = query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', targetUid), orderBy('timestamp', 'desc'), limit(20));
-        getDocs(activityQ).then(snapshot => {
+        if (!visitor) {
+          const activityQ = query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', targetUid), orderBy('timestamp', 'desc'), limit(20));
+          getDocs(activityQ).then(snapshot => {
             if (isMounted) setActivityData(snapshot.docs.map(d => d.data()));
-        }).catch(() => {
+          }).catch(() => {
             if (isMounted) setActivityError('Recent activity is unavailable.');
-        }).finally(() => { if (isMounted) setActivityLoading(false); });
+          }).finally(() => { if (isMounted) setActivityLoading(false); });
+        }
         if (!readOnly && currentUserId) {
             getDoc(doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`)).then(snapshot => {
                 if (isMounted) setIsFriend((snapshot.data()?.friends || []).some(friend => (friend.uid || friend) === targetUid));
@@ -2567,7 +2573,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 const existingFriends = snapshot.data()?.friends || [];
                 const nextFriends = existingFriends.filter(friend => (friend.uid || friend) !== targetUid);
                 if (!isFriend) nextFriends.push({ uid: targetUid, username: targetUsername });
-                transaction.update(myRef, { friends: nextFriends });
+                transaction.update(myRef, { friends: nextFriends, followingIds: followedIds(nextFriends) });
                 return !isFriend;
             });
             setIsFriend(following);
@@ -2642,12 +2648,12 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
       {module === 'bio' && identity.modules[0] !== 'bio' && identity.bio && <section className="profile-reordered-bio"><h2 className="text-lg font-semibold mb-3">About</h2><ProfileBio text={identity.bio} /></section>}
       {module === 'progress' && (loading ? <p role="status" className="py-12 text-gray-400">Loading profile...</p> : !loadError && !libraryPrivate && <PublicProfileOverview entries={list} stats={stats} onSelect={openEntry} onLibrary={openLibrary} onStats={() => setTab('stats')} />)}
       {(['anime', 'vn', 'characters']).includes(module) && <IdentityShowcase kind={module as 'anime' | 'vn' | 'characters'} identity={identity} />}
-      {!libraryPrivate && module === 'activity' && <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
+      {!visitor && module === 'activity' && <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Recent activity</h2>
           {activityLoading ? <p className="text-sm text-gray-500">Loading activity...</p> : activityError ? <p className="text-sm text-gray-500">{activityError}</p> : activityData.slice(0, 5).map((item, index) => <div key={index} className="flex gap-3 py-3 border-b border-white/5 min-w-0">{item.animeImageUrl && <img src={item.animeImageUrl} alt="" loading="lazy" className="w-9 h-12 rounded object-cover shrink-0" />}<div className="min-w-0"><p className="text-sm text-gray-300 break-words">{item.context} <span className="text-white font-medium">{item.animeTitle}</span></p>{item.noteContent && <details className="text-xs text-gray-400 mt-2"><summary className="cursor-pointer">{item.spoiler ? 'Spoiler note' : 'Note'}</summary><p className="mt-2 break-words">{item.noteContent}</p></details>}<p className="text-xs text-gray-500 mt-1">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</p></div></div>)}
           {!activityLoading && !activityError && !activityData.length && <p className="text-sm text-gray-500">No recent activity.</p>}
         </section>
-        <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Activity</h2><div className="overflow-x-auto">{!activityLoading && !activityError && <ActivityHeatmap data={activityData} theme={theme} />}</div><p className="text-xs text-gray-500 mt-3">Based on the most recent 20 public activity events.</p></section>
+        <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Activity</h2><div className="overflow-x-auto">{!activityLoading && !activityError && <ActivityHeatmap data={activityData} theme={theme} />}</div><p className="text-xs text-gray-500 mt-3">Based on the most recent 20 activity events.</p></section>
       </div>}
       </React.Fragment>)}
     </div>}
