@@ -97,7 +97,13 @@ function boundary(overrides = {}) {
   for (const match of component.getText(pages).matchAll(/\b(set[A-Z]\w*)\(/g)) {
     if (match[1] !== 'setPage') bindings[match[1]] = value => { state[match[1]] = value; };
   }
-  return { state, reads, bindings: { ...bindings, ...overrides } };
+  return { state, reads, bindings: {
+    ...bindings, targetLibraryPublic: true,
+    getLibraryVisibility: profile => profile?.libraryVisibility ?? (profile?.libraryPublic === true ? 'public' : profile?.libraryPublic === false ? 'private' : 'friends'),
+    getDocFromServer: overrides.getDoc ?? bindings.getDoc,
+    getDocsFromServer: overrides.getDocs ?? bindings.getDocs,
+    ...overrides,
+  } };
 }
 
 test('visitor overview never requests private activity or the viewer library', async () => {
@@ -122,6 +128,20 @@ test('private profile never requests library, guests never request own profile o
   await handler('handleFriendAction', guest.bindings)();
   await flush();
   assert.equal(guest.reads.some(path => path.includes('/me')), false);
+});
+
+test('friends-only library relies on server authorization and never loads for guests', async () => {
+  const profile = async () => snapshot({ libraryVisibility: 'friends' });
+  const allowed = boundary({ getDoc: profile });
+  evaluate(effects[0].expression.arguments[0], allowed.bindings)(); await flush();
+  assert.equal(allowed.state.setList[0].kitsuId, 'v1');
+  const denied = boundary({ getDoc: profile, getDocsFromServer: async () => { throw { code: 'permission-denied' }; } });
+  evaluate(effects[0].expression.arguments[0], denied.bindings)(); await flush();
+  assert.equal(denied.state.setLibraryPrivate, true);
+  const guest = boundary({ getDoc: profile, readOnly: true });
+  evaluate(effects[0].expression.arguments[0], guest.bindings)(); await flush();
+  assert.equal(guest.state.setLibraryPrivate, true);
+  assert.equal(guest.reads.some(path => path.endsWith('/publicLibrary')), false);
 });
 
 test('comparison loads own library only when requested; canceled target fetch cannot repopulate state', async () => {

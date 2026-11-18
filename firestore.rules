@@ -10,6 +10,27 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function signedIn() {
+      return isAuthenticated() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function follows(profile, uid, name) {
+      return 'followingIds' in profile ? uid in profile.followingIds
+        : uid in profile.get('friends', []) || {'uid': uid, 'username': name} in profile.get('friends', []);
+    }
+
+    function mutual(appId, authorId, author) {
+      let me = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(request.auth.uid)).data;
+      return follows(me, authorId, author.username) && follows(author, request.auth.uid, me.username);
+    }
+
+    function canViewLibrary(appId, ownerId) {
+      let owner = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(ownerId)).data;
+      let legacy = owner.get('libraryPublic', null);
+      let audience = owner.get('libraryVisibility', legacy == true ? 'public' : legacy == false ? 'private' : 'friends');
+      return audience == 'public' || (audience == 'friends' && signedIn() && mutual(appId, ownerId, owner));
+    }
+
     function profileHasNoPrivateEmail() {
       return !request.resource.data.keys().hasAny(['email']);
     }
@@ -95,7 +116,7 @@ service cloud.firestore {
         // Authentication owns the email address. Public profile documents must
         // never contain it, including after partial updates to legacy records.
         allow create, update: if isOwner(userId) && profileHasNoPrivateEmail()
-          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'followingIds', 'hallOfFame', 'libraryPublic', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'followingIds', 'hallOfFame', 'libraryPublic', 'libraryVisibility', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
           && (!('followingIds' in request.resource.data) || request.resource.data.followingIds is list)
           && (resource == null || !('followingIds' in resource.data)
             || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['friends'])
@@ -103,7 +124,10 @@ service cloud.firestore {
           && (resource == null ? !request.resource.data.keys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']) : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']))
           && request.resource.data.uid == userId && request.resource.data.username is string
           && request.resource.data.username.size() > 0 && request.resource.data.username.size() <= 80
-          && (!('libraryPublic' in request.resource.data) || request.resource.data.libraryPublic is bool);
+          && (!('libraryPublic' in request.resource.data) || request.resource.data.libraryPublic is bool)
+          && (!('libraryVisibility' in request.resource.data)
+            || (request.resource.data.libraryVisibility in ['public', 'friends', 'private']
+              && request.resource.data.libraryPublic == (request.resource.data.libraryVisibility == 'public')));
         allow delete: if isOwner(userId);
         
         // Anime list subcollection
@@ -112,7 +136,7 @@ service cloud.firestore {
           allow write: if isOwner(userId);
         }
         match /publicLibrary/{animeId} {
-          allow read: if isOwner(userId) || get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(userId)).data.libraryPublic == true;
+          allow read: if isOwner(userId) || canViewLibrary(appId, userId);
           allow create, update: if isOwner(userId)
             && request.resource.data.keys().hasOnly(['kitsuId', 'title', 'imageUrl', 'totalEpisodes', 'status', 'watchedEpisodes', 'score', 'favorite', 'repeatCount', 'startedAt', 'completedAt', 'genres', 'mediaType', 'showType', 'provider', 'anilistId', 'durationMinutes', 'updatedAt', 'vnPlaytimeHours'])
             && request.resource.data.kitsuId is string && request.resource.data.title is string
@@ -124,21 +148,10 @@ service cloud.firestore {
       
       // Social activity feed
       match /activity/{activityId} {
-        function signedIn() {
-          return isAuthenticated() && request.auth.token.firebase.sign_in_provider != 'anonymous';
-        }
-        function follows(profile, uid, name) {
-          return 'followingIds' in profile ? uid in profile.followingIds
-            : uid in profile.get('friends', []) || {'uid': uid, 'username': name} in profile.get('friends', []);
-        }
-        function mutual(authorId) {
-          let me = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(request.auth.uid)).data;
-          let author = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(authorId)).data;
-          return follows(me, authorId, author.username) && follows(author, request.auth.uid, me.username);
-        }
         function canRead(activity) {
           return signedIn() && (isOwner(activity.userId)
-            || (activity.sharedBy == activity.userId && mutual(activity.userId)));
+            || (activity.sharedBy == activity.userId
+              && mutual(appId, activity.userId, get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(activity.userId)).data)));
         }
         function validAudience(activity) {
           return !('sharedBy' in activity)

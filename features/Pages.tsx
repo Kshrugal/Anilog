@@ -75,6 +75,7 @@ import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, 
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
+import { getLibraryVisibility, libraryVisibilityLabels, type LibraryVisibility } from '../services/library-visibility';
 import { loadAccountExport } from '../services/account-export';
 import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
 import { HomeResume } from './HomeResume';
@@ -2103,7 +2104,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   const exportPending = useRef(false);
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountDataError, setAccountDataError] = useState('');
-  const [libraryPublic, setLibraryPublic] = useState(false);
+  const [libraryVisibility, setLibraryVisibility] = useState<LibraryVisibility>('friends');
   const [privacySaving, setPrivacySaving] = useState(false);
   
   const [profileSelection, setProfileSelection] = useState(null);
@@ -2112,7 +2113,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   useEffect(() => {
       if(!db || !userId) return;
       const unsub = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), (doc) => {
-          setLibraryPublic(doc.data()?.libraryPublic === true);
+          setLibraryVisibility(getLibraryVisibility(doc.data()));
       });
       return () => unsub();
   }, [db, userId]);
@@ -2141,7 +2142,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
     setExporting(true);
     try {
       const { library, activity, decks, profile } = await loadAccountExport(db, appId, userId);
-      exportUserData(library, username, activity, { decks, profile, preferences: { libraryPublic, theme: theme.id, viewMode, density, backdrop, showAmbient, showTrail } });
+      exportUserData(library, username, activity, { decks, profile, preferences: { libraryVisibility, libraryPublic: libraryVisibility === 'public', theme: theme.id, viewMode, density, backdrop, showAmbient, showTrail } });
       showToast('Account export prepared.');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not export your data.', 'error');
@@ -2175,14 +2176,13 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
       };
   }, [activeTab, myList, catalogue, runtimeState.loading]);
 
-  const handleLibraryPrivacyToggle = async () => {
-      if (!db || !userId || privacySaving) return;
+  const handleLibraryVisibility = async (next: LibraryVisibility) => {
+      if (!db || !userId || privacySaving || next === libraryVisibility) return;
       setPrivacySaving(true);
-      const next = !libraryPublic;
       try {
-          await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { libraryPublic: next });
-          setLibraryPublic(next);
-          showToast(next ? 'Your library is public.' : 'Your library is private.');
+          await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { libraryVisibility: next, libraryPublic: next === 'public' });
+          setLibraryVisibility(next);
+          showToast('Library visibility updated.');
       } catch {
           showToast('Privacy could not be updated. Please try again.', 'error');
       } finally { setPrivacySaving(false); }
@@ -2202,7 +2202,7 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                        <UserIcon size={14} /> Back to profile
                    </button>
                </div>
-               <p className="text-gray-400 text-xs mt-2">Account settings · {libraryPublic ? 'Public library' : 'Private library'}</p>
+               <p className="text-gray-400 text-xs mt-2">Account settings · Library: {libraryVisibilityLabels[libraryVisibility]}</p>
            </div>
            <div className="flex flex-wrap gap-1 bg-white/5 p-1 rounded-lg">
                {['settings', 'overview', 'journal'].map(tab => (
@@ -2338,7 +2338,12 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
                         Security & Privacy
                     </h3>
                     <div className="space-y-4 relative z-10">
-                        <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-5 rounded-lg border border-blue-500/15 bg-blue-500/[0.05] p-5"><div className="min-w-0"><p id="public-library-label" className="text-sm font-bold text-white">Public library</p><p id="public-library-description" className="mt-1 text-xs leading-relaxed text-gray-400">Let other people view your tracked titles, stats, and taste compatibility. Your profile stays public. Social posts are shared only with mutual follows.</p></div><button type="button" role="switch" aria-checked={libraryPublic} aria-labelledby="public-library-label" aria-describedby="public-library-description" aria-busy={privacySaving} disabled={privacySaving} onClick={handleLibraryPrivacyToggle} className={`relative block h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 ${libraryPublic ? theme.accentBg : 'bg-gray-700'}`}><span aria-hidden="true" className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${libraryPublic ? 'translate-x-5' : 'translate-x-0'}`} /></button></div>
+                        <div className="grid gap-3 rounded-lg border border-white/10 bg-white/5 p-5 sm:grid-cols-[1fr_auto] sm:items-center">
+                            <div><label htmlFor="library-visibility" className="text-sm font-bold text-white">Library visibility</label><p id="library-visibility-help" className="mt-1 text-xs text-gray-400">Who can see your tracked titles and stats. Personal notes and journal entries stay private.</p></div>
+                            <select id="library-visibility" aria-describedby="library-visibility-help" value={libraryVisibility} disabled={privacySaving} onChange={event => void handleLibraryVisibility(event.target.value as LibraryVisibility)} className="rounded-lg border border-white/15 bg-neutral-900 px-3 py-2 text-sm text-white disabled:opacity-50">
+                                {Object.entries(libraryVisibilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                            </select>
+                        </div>
                         <div className="p-5 bg-black/40 rounded-2xl border border-white/5 hover:border-emerald-500/30 transition-colors">
                             <p className="text-sm font-bold text-white mb-1 flex items-center gap-2">
                                 <LockIcon size={14} className="text-emerald-500" />
@@ -2502,24 +2507,25 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         if (!targetUid) return;
         const fetchData = async () => {
             try {
-                const friendUserSnap = await getDoc(doc(db, `artifacts/${appId}/public/data/users/${targetUid}`));
+                const friendUserSnap = await getDocFromServer(doc(db, `artifacts/${appId}/public/data/users/${targetUid}`));
                 if (!isMounted) return;
-                if(friendUserSnap.exists() && isMounted) {
-                    setLibraryPrivate(friendUserSnap.data().libraryPublic !== true && visitor);
-                    setTargetLibraryPublic(friendUserSnap.data().libraryPublic === true);
-                }
-
-                const targetIsPrivate = (!friendUserSnap.exists() || friendUserSnap.data().libraryPublic !== true) && visitor;
+                const audience = getLibraryVisibility(friendUserSnap.data());
+                setTargetLibraryPublic(audience === 'public');
+                const targetIsPrivate = visitor && (!friendUserSnap.exists() || audience === 'private'
+                    || (audience === 'friends' && (readOnly || visitorPreview || !currentUserId)));
+                setLibraryPrivate(targetIsPrivate);
                 if (!targetIsPrivate) {
-                    const friendSnap = await getDocs(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/${visitor ? 'publicLibrary' : 'animeList'}`));
+                    const friendSnap = await getDocsFromServer(collection(db, `artifacts/${appId}/public/data/users/${targetUid}/${visitor ? 'publicLibrary' : 'animeList'}`));
                     if (isMounted) {
                         const friendData = friendSnap.docs.map(d => profileEntry({...d.data(), id: d.id}));
                         setList(friendData);
                     }
                 }
             } catch (e) {
-                console.error(e);
-                if (isMounted) setLoadError('Unable to load this library. Please try again.');
+                if (isMounted) {
+                    if (visitor && (e as { code?: string }).code === 'permission-denied') setLibraryPrivate(true);
+                    else setLoadError('Unable to load this library. Please try again.');
+                }
             } finally {
                 if (isMounted) setLoading(false);
             }
@@ -2577,6 +2583,10 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                 return !isFriend;
             });
             setIsFriend(following);
+            if (!targetLibraryPublic) {
+                if (!following) { setList([]); setSelectedAnimeData(null); }
+                setRefresh(value => value + 1);
+            }
             showToast(following ? `Following ${targetUsername}.` : `Unfollowed ${targetUsername}.`, 'success');
         } catch (e) {
             console.error("Follow action failed", e);
@@ -2642,7 +2652,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     {editingIdentity && !visitor && <ProfileIdentityEditor db={db} appId={appId} uid={currentUserId} name={targetUsername} initial={identity} revision={identityState.revision} entries={list} libraryPublic={targetLibraryPublic} onClose={() => setEditingIdentity(false)} onSaved={result => { setEditingIdentity(false); showToast(result.cleanupPending ? 'Profile saved. Image cleanup will retry next time.' : 'Profile saved.'); }} />}
     <PublicProfileHeader identity={identity} name={targetUsername} entries={list} stats={stats} privateLibrary={libraryPrivate} loading={loading} tab={tab} onTab={setTab} onBack={() => setPage('social')} onRefresh={() => setRefresh(value => value + 1)} canFollow={targetUid !== currentUserId && currentUserId && !readOnly} following={isFriend} followBusy={friendBusy} onFollow={handleFriendAction} canCompare={targetUid !== currentUserId && currentUserId && !readOnly} />
     {loadError && <p role="alert" className="text-rose-300">{loadError}</p>}
-    {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library is private</p></div>}
+    {libraryPrivate && <div className="border-y border-white/10 py-12 text-center"><LockIcon className="mx-auto h-6 w-6 text-gray-600" /><p className="mt-3 font-semibold text-white">This library isn’t shared with you</p></div>}
     {tab === 'overview' && <div className="flex flex-col gap-9">
       {identity.modules.map(module => <React.Fragment key={module}>
       {module === 'bio' && identity.modules[0] !== 'bio' && identity.bio && <section className="profile-reordered-bio"><h2 className="text-lg font-semibold mb-3">About</h2><ProfileBio text={identity.bio} /></section>}

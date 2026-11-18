@@ -25,7 +25,7 @@ assert.match(pages, /existingFriends\.filter/, 'following must only update the s
 assert.doesNotMatch(pages, /batch\.update\(theirRef/, 'following must never attempt to write another user profile');
 assert.match(pages, /Stale 14d/, 'library attention filters must remain available');
 assert.match(pages, /Review .* existing/, 'AniList import conflicts must remain visible before import');
-assert.match(rules, /libraryPublic.*== true/, 'private-library reads must be enforced by Firestore');
+assert.match(rules, /allow read: if isOwner\(userId\) \|\| canViewLibrary\(appId, userId\)/, 'library visibility must be enforced by Firestore');
 assert.match(rules, /match \/interactions\//, 'social interaction ownership rules must be deployed with the feature');
 assert.match(rules, /request\.resource\.data\.type == 'deck'/, 'deck writes must be validated by Firestore');
 assert.match(vite, /firebase-firestore/, 'the large Firebase bundle must stay split for browser caching');

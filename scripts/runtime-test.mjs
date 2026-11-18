@@ -76,15 +76,15 @@ const pagesSource = await readFile(new URL('../features/Pages.tsx', import.meta.
 const pages = ts.createSourceFile('Pages.tsx', pagesSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const profilePage = pages.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'ProfilePage');
 let privacyHandler;
-function find(node) { if (ts.isVariableDeclaration(node) && node.name.getText(pages) === 'handleLibraryPrivacyToggle') privacyHandler = node.initializer; ts.forEachChild(node, find); }
+function find(node) { if (ts.isVariableDeclaration(node) && node.name.getText(pages) === 'handleLibraryVisibility') privacyHandler = node.initializer; ts.forEachChild(node, find); }
 find(profilePage);
-test('privacy switch keeps its old value when saving fails and blocks repeated pending actions', async () => {
+test('library visibility keeps its old value when saving fails and blocks repeated pending actions', async () => {
   const changes = [], writes = [];
-  const bindings = { db: {}, userId: 'owner', privacySaving: false, libraryPublic: true, appId: 'test', doc: (_db, path) => path, updateDoc: async (...args) => { writes.push(args); throw new Error('Offline'); }, setPrivacySaving: value => changes.push(['busy', value]), setLibraryPublic: value => changes.push(['public', value]), showToast: (...args) => changes.push(['toast', ...args]) };
+  const bindings = { db: {}, userId: 'owner', privacySaving: false, libraryVisibility: 'public', appId: 'test', doc: (_db, path) => path, updateDoc: async (...args) => { writes.push(args); throw new Error('Offline'); }, setPrivacySaving: value => changes.push(['busy', value]), setLibraryVisibility: value => changes.push(['visibility', value]), showToast: (...args) => changes.push(['toast', ...args]) };
   const handler = b => new Function(...Object.keys(b), `${compile(`const handler = ${privacyHandler.getText(pages)};`)};return handler;`)(...Object.values(b));
-  await handler(bindings)();
-  assert.equal(writes.length, 1); assert.equal(changes.some(c => c[0] === 'public'), false); assert.deepEqual(changes.at(-1), ['busy', false]);
-  await handler({ ...bindings, privacySaving: true })(); assert.equal(writes.length, 1);
-  assert.match(pagesSource, /role="switch" aria-checked=\{libraryPublic\}/);
-  assert.match(pagesSource, /absolute left-1 top-1 h-4 w-4/);
+  await handler(bindings)('friends');
+  assert.deepEqual(writes[0][1], { libraryVisibility: 'friends', libraryPublic: false });
+  assert.equal(writes.length, 1); assert.equal(changes.some(c => c[0] === 'visibility'), false); assert.deepEqual(changes.at(-1), ['busy', false]);
+  await handler({ ...bindings, privacySaving: true })('private'); assert.equal(writes.length, 1);
+  assert.match(pagesSource, /<select id="library-visibility"[^>]+disabled=\{privacySaving\}/);
 });
