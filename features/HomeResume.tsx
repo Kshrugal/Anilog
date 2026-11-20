@@ -8,6 +8,8 @@ import './home.css';
 export function HomeResume({ entries, selected, onSelect, onOpen, onIncrement, pending, theme }) {
   if (!selected) return null;
   const vn = profileIsVn(selected);
+  const journal = selected.vnJournal;
+  const bookmark = vn && Array.isArray(journal?.runs) ? journal.runs.find(run => run?.id === journal.activeId)?.bookmark : '';
   const total = vn ? 100 : Math.max(0, Number(selected.totalEpisodes) || 0);
   const progress = Math.max(0, Number(selected.watchedEpisodes) || 0);
   const percent = total ? Math.min(100, progress / total * 100) : 0;
@@ -18,7 +20,8 @@ export function HomeResume({ entries, selected, onSelect, onOpen, onIncrement, p
     {entries.length > 1 && <label className="home-resume-switcher"><select aria-label="Resume title" value={String(selected.id)} onChange={event => onSelect(event.target.value)}>{entries.map((entry, index) => <option value={String(entry.id)} key={entry.id}>{index + 1}/{entries.length} · {entry.title}</option>)}</select><ChevronDown size={14} /></label>}
     <div className="home-resume-content">
       <p className={`text-xs font-bold uppercase mb-2 flex items-center gap-2 ${theme.accentText}`}>{vn ? <BookOpen size={14} /> : <Tv size={14} />}{vn ? 'Continue Reading' : 'Continue Watching'}</p>
-      <h3 className="text-2xl sm:text-3xl font-black text-white mb-4 line-clamp-2 sm:line-clamp-1">{selected.title}</h3>
+      <h3 className={`text-2xl sm:text-3xl font-black text-white sm:line-clamp-1 ${bookmark ? 'mb-1 line-clamp-1' : 'mb-4 line-clamp-2'}`}>{selected.title}</h3>
+      {typeof bookmark === 'string' && bookmark && <p className="mb-3 truncate text-xs text-gray-200">Pick up at: {bookmark}</p>}
       <div className="home-resume-footer"><div className="home-resume-progress"><span>{profileProgress(selected)}</span><div className="home-resume-track" role="progressbar" aria-label={`${selected.title} progress`} aria-valuemin={0} aria-valuemax={total || undefined} aria-valuenow={total ? Math.min(total, progress) : undefined} aria-valuetext={profileProgress(selected)}><motion.div animate={{ width: `${percent}%` }} className={`h-full ${theme.progressbar}`} /></div></div>
         <button type="button" className="home-log-progress" disabled={pending} aria-label={`${progressCommand(selected)} for ${selected.title}`} onClick={() => onIncrement(selected)}>{pending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{pending ? 'Saving...' : progressCommand(selected)}</button>
       </div>

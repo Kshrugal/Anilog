@@ -48,6 +48,11 @@ try {
   await allowed(setDoc(doc(owner.firestore(), `${userPath}/publicLibrary/anilist:20`), { kitsuId: 'anilist:20', title: 'Naruto', status: 'completed' }));
   await denied(updateDoc(doc(owner.firestore(), `${userPath}/publicLibrary/anilist:20`), { notes: 'leak' }));
   await denied(updateDoc(doc(owner.firestore(), `${userPath}/publicLibrary/anilist:20`), { personalTags: ['leak'] }));
+  const journalPath = `${userPath}/animeList/v20`;
+  await allowed(setDoc(doc(owner.firestore(), journalPath), { kitsuId: 'v20', title: 'Visual novel', status: 'watching', vnJournal: { version: 1, revision: 1, runs: [{ bookmark: 'PRIVATE SPOILER' }] } }));
+  await denied(getDoc(doc(guest.firestore(), journalPath)));
+  await denied(getDoc(doc(stranger.firestore(), journalPath)));
+  await denied(setDoc(doc(owner.firestore(), `${userPath}/publicLibrary/v20`), { kitsuId: 'v20', title: 'Visual novel', status: 'watching', vnJournal: { version: 1 } }));
   await allowed(getDocs(collection(guest.firestore(), `${userPath}/publicLibrary`)));
   await allowed(updateDoc(doc(owner.firestore(), userPath), { libraryPublic: false }));
   await denied(getDoc(doc(guest.firestore(), `${userPath}/publicLibrary/anilist:20`)));

@@ -15,8 +15,7 @@ assert.match(app, /SchedulePage/, 'the weekly airing schedule must remain routed
 assert.match(app, /DecksPage/, 'community decks must remain routed');
 assert.match(pages, /Select multiple/, 'the library must retain bulk-selection controls');
 assert.match(pages, /anilog_saved_views_/, 'saved library views must be persisted');
-assert.match(pages, /vnPlaytimeHours/, 'VN playtime tracking must be retained');
-assert.match(pages, /vnEndingsCompleted/, 'VN ending tracking must be retained');
+assert.match(pages, /vnJournalFields\(vnJournal\)/, 'VN logs must save the journal and its aggregate tracking fields');
 assert.match(pages, /Contains spoilers/, 'social spoiler controls must be retained');
 assert.match(pages, /SocialActions/, 'social reactions and replies must be retained');
 assert.match(pages, /getAniListAiringSchedule/, 'the schedule must load live airing data');

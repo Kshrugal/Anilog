@@ -13,6 +13,9 @@ const compiled = ts.transpileModule(component.getText(parsed), {
   compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const compileService = text => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const loadService = async name => import(`data:text/javascript;base64,${Buffer.from(compileService(await readFile(new URL(`../services/${name}.ts`, import.meta.url), 'utf8'))).toString('base64')}`);
+const { readVnJournal, vnJournalFields, newVnRun, vnDateValid } = await loadService('vn-journal');
+const { publicLibraryEntry } = await loadService('profile-identity');
 const franchiseUrl = `data:text/javascript;base64,${Buffer.from(compileService(await readFile(new URL('../services/franchises.ts', import.meta.url), 'utf8'))).toString('base64')}`;
 const analyticsSource = compileService(await readFile(new URL('../services/analytics.ts', import.meta.url), 'utf8')).replace(/from ['"]\.\/franchises['"]/, `from '${franchiseUrl}'`);
 const { runtimeFor, exactTime } = await import(`data:text/javascript;base64,${Buffer.from(analyticsSource).toString('base64')}`);
@@ -24,7 +27,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function harness({ failSave = false, missingId = false, mediaPromise, animeOverride, account } = {}) {
+function harness({ failSave = false, missingId = false, mediaPromise, animeOverride, account, latest } = {}) {
   const pendingRead = deferred();
   const states = [];
   const dependencies = [];
@@ -41,7 +44,9 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
     motion: { div: 'div', button: 'button' },
     CloseIcon: 'CloseIcon', StarIcon: 'StarIcon', HeartIcon: 'HeartIcon', ClockIcon: 'ClockIcon', MinusIcon: 'MinusIcon', PlusIcon: 'PlusIcon', ChevronDownIcon: 'ChevronDownIcon', runtimeFor, exactTime,
     ThemeContext: {}, useContext: () => ({ theme: { progressbar: 'bg-blue-500', button: 'bg-blue-500' } }),
+    useCallback: callback => callback,
     mediaFollowingId: anime => anime.id || '', MediaFollowing: 'MediaFollowing',
+    readVnJournal, vnJournalFields, VnJournal: 'VnJournal',
     auth: { currentUser: account ? { uid: 'test-owner', isAnonymous: account === 'anonymous' } : null },
     useRef: initial => { const index = cursor++; if (!(index in states)) states[index] = { current: initial }; return states[index]; },
     fetchMediaDetails: () => mediaPromise || Promise.resolve({ attributes: {} }),
@@ -62,6 +67,10 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
     doc: (_db, path, id) => ({ path, id }),
     getDocFromServer: () => pendingRead.promise,
     setDoc: async (ref, data) => { if (failSave) throw new Error('Offline'); writes.push({ ref, data }); },
+    runTransaction: async (_db, update) => {
+      if (failSave) throw new Error('Offline');
+      return update({ get: () => latest || pendingRead.promise, set: (ref, data) => writes.push({ ref, data }) });
+    },
     logActivity: async () => {}, appId: 'test-app',
     console: { error() {} },
   };
@@ -107,6 +116,42 @@ assert.equal(editor.writes[0].data.score, 8.5, 'hovering must not change the sav
 assert.equal(editor.writes[0].data.watchedEpisodes, 35);
 assert.equal(editor.writes[0].data.notes, 'Keep this note');
 assert.equal(editor.writes[0].data.favorite, true);
+
+const legacyVn = { ...saved, vnPlaytimeHours: 12.5, vnEndingsCompleted: 3, vnRoute: 'Private route', platform: 'Switch', status: 'completed' };
+const vnEditor = harness();
+vnEditor.pendingRead.resolve({ exists: () => true, data: () => legacyVn });
+await vnEditor.flush();
+const journalCard = vnEditor.nodes().find(node => node.type === 'VnJournal');
+const journal = journalCard.props.journal;
+assert.equal(journal.runs[0].routes[0].name, legacyVn.vnRoute);
+assert.equal(journal.runs[0].platform, 'Switch');
+assert.equal(journal.runs[0].milestone, 'main', 'legacy completion does not assume 100% clear');
+assert.equal(journal.baselineMinutes, 750);
+assert.equal(journal.baselineEndings, 3);
+assert.equal(vnDateValid('2024-02-29'), true);
+assert.equal(vnDateValid('2026-02-29'), false);
+const replay = { ...newVnRun('replay-1', 'Replay'), bookmark: 'Spoiler checkpoint', milestone: 'full', endings: [{ id: 'ending-1', name: 'Secret ending', unlocked: true }],
+  sessions: [{ id: 'session-1', date: '2026-11-20', minutes: 90, routeId: '' }] };
+journalCard.props.onChange({ ...journal, activeId: replay.id, runs: [...journal.runs, replay] });
+vnEditor.render();
+await vnEditor.saveButton().props.onClick();
+const storedVn = vnEditor.writes[0].data;
+assert.equal(storedVn.vnPlaytimeHours, 14);
+assert.equal(storedVn.vnEndingsCompleted, 4);
+assert.equal(storedVn.vnJournal.revision, 1);
+assert.equal(vnJournalFields(readVnJournal(storedVn)).vnPlaytimeHours, 14, 'reopening never double-counts sessions');
+assert.equal(readVnJournal(storedVn).runs[0].milestone, 'main');
+assert.equal(readVnJournal(storedVn).runs[1].milestone, 'full');
+const projection = publicLibraryEntry(storedVn);
+assert.equal(projection.vnPlaytimeHours, 14);
+assert.ok(!('vnJournal' in projection) && !('vnRoute' in projection) && !('vnEndingsCompleted' in projection) && !('platform' in projection));
+const staleVn = harness({ latest: { exists: () => true, data: () => storedVn } });
+staleVn.pendingRead.resolve({ exists: () => true, data: () => legacyVn });
+await staleVn.flush();
+await staleVn.saveButton().props.onClick();
+staleVn.render();
+assert.equal(staleVn.writes.length, 0, 'an older tab cannot overwrite saved sessions');
+assert.ok(staleVn.nodes().some(node => node.props.role === 'alert'));
 
 const failure = harness();
 failure.pendingRead.reject(new Error('Permission denied'));

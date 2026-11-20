@@ -75,6 +75,8 @@ import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, 
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { MediaFollowing } from './MediaFollowing';
 import { mediaFollowingId } from '../services/media-following';
+import { VnJournal } from './VnJournal';
+import { readVnJournal, vnJournalFields } from '../services/vn-journal';
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
 import { setFollowing } from '../services/follows';
@@ -1039,10 +1041,9 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const [personalTags, setPersonalTags] = useState([]);
     const [tagDraft, setTagDraft] = useState("");
     const [shareNoteActivity, setShareNoteActivity] = useState(false);
-    const [vnPlaytimeHours, setVnPlaytimeHours] = useState(0);
-    const [vnEndingsCompleted, setVnEndingsCompleted] = useState(0);
-    const [vnRoute, setVnRoute] = useState("");
-    const [platform, setPlatform] = useState("");
+    const [vnJournal, setVnJournal] = useState(() => readVnJournal());
+    const [journalDirty, setJournalDirty] = useState(false);
+    const [discardJournal, setDiscardJournal] = useState(false);
     const [loading, setLoading] = useState(false);
     const [existingData, setExistingData] = useState(null);
     const [logLoaded, setLogLoaded] = useState(false);
@@ -1058,7 +1059,11 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     // Voice Actor Feature
     const [selectedCharacter, setSelectedCharacter] = useState(null);
 
-    useEffect(() => { closeRef.current = onClose; savingRef.current = loading; }, [onClose, loading]);
+    const requestClose = useCallback(() => {
+        if (journalDirty) setDiscardJournal(current => !current);
+        else onClose();
+    }, [journalDirty, onClose]);
+    useEffect(() => { closeRef.current = requestClose; savingRef.current = loading; }, [requestClose, loading]);
     const title = anime.title || anime.canonicalTitle || hydratedMedia?.attributes?.canonicalTitle || anime.attributes?.canonicalTitle;
     const poster = hydratedMedia?.attributes?.posterImage?.original || hydratedMedia?.attributes?.posterImage?.large || anime.imageUrl ||
         anime.posterImage?.original || 
@@ -1173,6 +1178,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 const docRef = doc(db, `artifacts/${appId}/public/data/users/${ownerId}/${isOwner ? 'animeList' : 'publicLibrary'}`, String(kitsuId));
                 const snap = await getDocFromServer(docRef);
                 if (!active) return;
+                if (isOwner && isVn) setVnJournal(readVnJournal(snap.exists() ? snap.data() : null));
                 if (snap.exists()) {
                     const data = snap.data();
                     setExistingData(data);
@@ -1187,10 +1193,6 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     setCompletedAt(data.completedAt || "");
                     setPersonalTags(Array.isArray(data.personalTags) ? data.personalTags : []);
                     setShareNoteActivity(data.shareNoteActivity === true);
-                    setVnPlaytimeHours(Number(data.vnPlaytimeHours || 0));
-                    setVnEndingsCompleted(Number(data.vnEndingsCompleted || 0));
-                    setVnRoute(data.vnRoute || "");
-                    setPlatform(data.platform || "");
                     if(data.genres) setFetchedGenres(data.genres); 
                 } else if (isOwner) {
                     setExistingData(null);
@@ -1206,7 +1208,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         };
         fetchUserData();
         return () => { active = false; };
-    }, [db, ownerId, kitsuId, isOwner, loadAttempt]);
+    }, [db, ownerId, kitsuId, isOwner, isVn, loadAttempt]);
 
     const handleSave = async () => {
         if (!isOwner || readOnly || !db || !kitsuId || !logLoaded || loading) return;
@@ -1237,7 +1239,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 completedAt: resolvedCompletedAt || null,
                 personalTags,
                 shareNoteActivity,
-                ...(isVn ? { vnPlaytimeHours: Number(vnPlaytimeHours), vnEndingsCompleted: Number(vnEndingsCompleted), vnRoute: vnRoute.trim(), platform: platform.trim() } : {}),
+                ...(isVn ? vnJournalFields(vnJournal) : {}),
                 genres: fetchedGenres, 
                 mediaType: isVn ? 'vn' : 'anime',
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
@@ -1248,7 +1250,22 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 updatedAt: Date.now(),
             };
             
-            await setDoc(docRef, data, { merge: true });
+            if (isVn) {
+                const saved = await runTransaction(db, async tx => {
+                    const latest = await tx.get(docRef);
+                    const current = latest.exists() ? latest.data() : null;
+                    const updated = value => value?.toMillis?.() ?? value;
+                    if (Boolean(current) !== Boolean(existingData) || (current?.vnJournal?.revision || 0) !== vnJournal.revision ||
+                        updated(current?.updatedAt) !== updated(existingData?.updatedAt)) return false;
+                    tx.set(docRef, data, { merge: true });
+                    return true;
+                });
+                if (!saved) {
+                    setLogError("This reading log changed in another tab or device. Reopen it to load the latest version.");
+                    setLoading(false);
+                    return;
+                }
+            } else await setDoc(docRef, data, { merge: true });
 
             if (!existingData) {
                 const activityContext = isVn ? `added to ${status === 'watching' ? 'reading' : status}` : `added to ${status}`;
@@ -1303,7 +1320,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 fade-in" onClick={() => { if (!loading) onClose(); }}>
+        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 fade-in" onClick={() => { if (!loading) requestClose(); }}>
             <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
             <motion.div 
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1317,9 +1334,13 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 aria-label={title || 'Media details'}
                 onClick={e => e.stopPropagation()}
             >
-                <button onClick={onClose} disabled={loading} aria-label="Close details" title="Close details" className="absolute top-4 right-4 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-md border border-white/10 transition-colors">
+                <button onClick={requestClose} disabled={loading} aria-label="Close details" title="Close details" className="absolute top-4 right-4 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white backdrop-blur-md border border-white/10 transition-colors">
                     <CloseIcon />
                 </button>
+                {discardJournal && <div role="group" aria-label="Unsaved journal changes" className="absolute inset-x-3 bottom-3 z-30 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/20 bg-[#141722] p-3 shadow-xl sm:inset-x-auto sm:right-4">
+                    <p role="status" className="text-sm text-white">Discard unsaved journal changes?</p>
+                    <div className="flex gap-2"><button type="button" onClick={() => setDiscardJournal(false)} className="rounded-md bg-white/10 px-3 py-2 text-xs font-semibold text-white">Keep editing</button><button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-white/10">Discard</button></div>
+                </div>}
 
                 <div className="absolute inset-x-0 top-0 h-64 pointer-events-none overflow-hidden" aria-hidden="true"><img src={backdrop} alt="" className="w-full h-full object-cover opacity-[0.12]" referrerPolicy="no-referrer" /><div className="absolute inset-0 bg-gradient-to-t from-[#0b0d15] to-transparent" /></div>
                 <div className="hidden md:flex relative w-56 flex-col gap-4 p-5 flex-shrink-0 border-r border-white/10 bg-white/[0.02] [@media(max-height:450px)]:hidden">
@@ -1494,6 +1515,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     </div>
                                 </div>
 
+                                {isVn && logLoaded && <VnJournal key={kitsuId} journal={vnJournal} onChange={value => { setVnJournal(value); setJournalDirty(true); }} />}
                                 <details className="rounded-2xl border border-white/10 bg-black/20 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Tracking details</summary><div className="mt-5 space-y-6">
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <button aria-pressed={favorite} onClick={() => setFavorite(current => !current)} className={`flex items-center justify-between rounded-xl border p-4 text-left transition-colors ${favorite ? 'border-pink-500/30 bg-pink-500/10 text-pink-300' : 'border-white/10 bg-black/20 text-gray-400 hover:bg-white/5'}`}>
@@ -1511,10 +1533,9 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 <div className="grid gap-4 sm:grid-cols-3">
                                     <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Started</span><input type="date" value={startedAt} onChange={event => setStartedAt(event.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
                                     <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Finished</span><input type="date" value={completedAt} onChange={event => setCompletedAt(event.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
-                                    <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Rewatches</span><input type="number" min="0" max="999" value={repeatCount} onChange={event => setRepeatCount(Math.max(0, Number(event.target.value)))} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
+                                    <label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">{isVn ? 'Previously logged rereads' : 'Rewatches'}</span><input type="number" min="0" max="999" value={repeatCount} onChange={event => setRepeatCount(Math.max(0, Number(event.target.value)))} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /></label>
                                 </div>
 
-                                {isVn && <div className="rounded-xl border border-purple-500/15 bg-purple-500/[0.04] p-4"><div className="mb-4"><p className="text-xs font-black uppercase tracking-wider text-purple-300">Visual novel progress</p><p className="mt-1 text-[10px] text-gray-500">Track the details that percentage alone cannot capture.</p></div><div className="grid gap-3 sm:grid-cols-2"><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Hours played</span><input type="number" min="0" step="0.5" value={vnPlaytimeHours} onChange={event => setVnPlaytimeHours(Math.max(0, Number(event.target.value)))} className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Endings completed</span><input type="number" min="0" value={vnEndingsCompleted} onChange={event => setVnEndingsCompleted(Math.max(0, Number(event.target.value)))} className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Current route</span><input value={vnRoute} onChange={event => setVnRoute(event.target.value)} maxLength={80} placeholder="Character or route name" className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label><label className="space-y-2"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">Platform</span><input value={platform} onChange={event => setPlatform(event.target.value)} maxLength={40} placeholder="PC, Switch, PS5…" className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white" /></label></div></div>}
 
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between"><label className="text-xs font-bold uppercase tracking-widest text-gray-500">Personal tags</label><span className="text-[10px] text-gray-600">{personalTags.length}/8</span></div>
