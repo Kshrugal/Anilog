@@ -3,6 +3,10 @@ name: Deploy Firebase Profile Rules
 on:
   workflow_dispatch:
     inputs:
+      verify_only:
+        description: Verify deployed rules without publishing or backfilling
+        type: boolean
+        default: false
       include_storage:
         description: Deploy profile image upload rules
         type: boolean
@@ -17,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,16 +30,18 @@ jobs:
           cache: npm
       - uses: google-github-actions/auth@v2
         with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+          workload_identity_provider: '${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+          service_account: '${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}'
       - run: npm ci
       - name: Deploy and verify Firebase privacy rules
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
           FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
           DEPLOY_STORAGE_RULES: ${{ inputs.include_storage }}
+          VERIFY_RULES_ONLY: ${{ inputs.verify_only }}
         run: node scripts/deploy-firebase-rules.mjs
       - name: Index existing public usernames
-        if: inputs.backfill_usernames
+        if: inputs.backfill_usernames && !inputs.verify_only
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
           FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
