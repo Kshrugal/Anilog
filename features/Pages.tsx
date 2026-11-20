@@ -76,7 +76,7 @@ import { nextProgress, planImport, importPayload, resetBackup } from "../service
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
 import { setFollowing } from '../services/follows';
-import { searchPeople, usernameSearchKey } from '../services/people-search';
+import { isUsernameTaken, searchPeople, usernameSearchKey } from '../services/people-search';
 import { getLibraryVisibility, libraryVisibilityLabels, type LibraryVisibility } from '../services/library-visibility';
 import { loadAccountExport } from '../services/account-export';
 import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
@@ -116,10 +116,7 @@ export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
       if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
       if (!username.trim()) { setError("Please enter a username."); return; }
       try {
-        const usersRef = collection(db, `artifacts/${appId}/public/data/users`);
-        const q = query(usersRef, where("usernameSearch", "==", usernameSearchKey(username)), limit(1));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) { setError("Username taken."); showToast("Username taken", "error"); return; }
+        if (await isUsernameTaken(db, appId, username)) { setError("Username taken."); showToast("Username taken", "error"); return; }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
         const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${user.uid}`);
@@ -2167,13 +2164,14 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
 
   const handleUpdate = async (e) => {
     e.preventDefault();
-    if(newUsername === username || newUsername.length < 3) return;
-    const usernameSearch = usernameSearchKey(newUsername);
-    const q = query(collection(db, `artifacts/${appId}/public/data/users`), where("usernameSearch", "==", usernameSearch), limit(2));
-    if((await getDocs(q)).docs.some(profile => profile.id !== userId)) { showToast("Username taken.", 'error'); return; }
-    await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { username: newUsername.trim(), usernameSearch });
-    setUsername(newUsername.trim());
-    showToast("Profile Updated!", 'success');
+    const name = newUsername.trim();
+    if (name === username || name.length < 3 || name.length > 80) return;
+    try {
+      if (await isUsernameTaken(db, appId, name, userId)) { showToast("Username taken.", 'error'); return; }
+      await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { username: name, usernameSearch: usernameSearchKey(name) });
+      setUsername(name);
+      showToast("Profile Updated!", 'success');
+    } catch { showToast('Could not update your username. Please try again.', 'error'); }
   };
 
   const { catalogue, state: runtimeState } = useFranchiseCatalogue(activeTab === 'overview' ? myList : []);

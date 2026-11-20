@@ -38,3 +38,25 @@ assert.ok(listeners.every(listener => listener.stopped));
 service.subscribeCommunityActivity({}, 'demo', '', [], 2, items => assert.equal(items.length, 0), assert.fail);
 assert.equal(listeners.length, 3);
 console.log('Community activity scope, merge order, empty state, and cleanup passed.');
+
+const searchSource = await readFile(new URL('../services/people-search.ts', import.meta.url), 'utf8');
+const searchCode = ts.transpile(searchSource.replace(/^import .*\n/m, '').replace(/^export /gm, ''), { target: ts.ScriptTarget.ES2022 });
+const person = (id, username, usernameSearch) => ({ id, data: () => ({ username, usernameSearch }) });
+let legacyReads = 0;
+const directory = runInNewContext(searchCode + '\n({ searchPeople, isUsernameTaken });', {
+  collection: () => 'users', limit: count => ({ count }), where: (...predicate) => ({ predicate }), query: (...args) => args,
+  getDocsFromServer: async args => {
+    if (args[1].count === 100) {
+      legacyReads++;
+      return { docs: [person('legacy', 'RaNdom'), person('self', 'RaVEn'), person('else', 'Else')] };
+    }
+    return { docs: args[1].predicate[1] === '==' ? [] : [person('indexed', 'Ramen', 'ramen')] };
+  },
+});
+const client = {};
+assert.deepEqual(Array.from(await directory.searchPeople(client, 'demo', 'self', ' RA '), item => item.uid), ['indexed', 'legacy']);
+assert.deepEqual(Array.from(await directory.searchPeople(client, 'demo', 'self', 'ra'), item => item.uid), ['indexed', 'legacy']);
+assert.equal(await directory.isUsernameTaken(client, 'demo', 'RANDOM'), true);
+assert.equal(await directory.isUsernameTaken(client, 'demo', 'RANDOM', 'legacy'), false);
+assert.equal(legacyReads, 1, 'typing and duplicate checks reuse the bounded legacy lookup');
+console.log('Case-insensitive people suggestions and legacy lookup cache passed.');
