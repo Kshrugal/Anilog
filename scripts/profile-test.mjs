@@ -178,17 +178,14 @@ test('saved selection opens synchronously with target ownership; catalogue-only 
   assert.equal(state.state.setMediaFilter, 'vn');
 });
 
-test('follow transaction preserves other concurrent follows and removes legacy string records', async () => {
-  let value = [{ uid: 'other' }, 'friend'];
+test('profile unfollow delegates to the same action as the notification inbox', async () => {
+  const actions = [];
   const state = boundary({
     isFriend: true,
-    runTransaction: async (_db, callback) => {
-      value.push({ uid: 'concurrent' });
-      return callback({ get: async () => snapshot({ friends: value }), update: (_ref, changes) => { value = changes.friends; } });
-    },
+    setFollowing: async (_db, _appId, actor, peer, following) => { actions.push([actor, peer.uid, following]); return following; },
   });
   await handler('handleFriendAction', state.bindings)();
-  assert.deepEqual(value, [{ uid: 'other' }, { uid: 'concurrent' }]);
+  assert.deepEqual(actions, [['me', 'friend', false]]);
   assert.equal(state.state.setIsFriend, false);
 });
 

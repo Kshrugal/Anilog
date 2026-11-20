@@ -21,7 +21,7 @@ assert.match(pages, /Contains spoilers/, 'social spoiler controls must be retain
 assert.match(pages, /SocialActions/, 'social reactions and replies must be retained');
 assert.match(pages, /getAniListAiringSchedule/, 'the schedule must load live airing data');
 assert.match(pages, /Publish deck/, 'shareable deck creation must be retained');
-assert.match(pages, /existingFriends\.filter/, 'following must only update the signed-in user profile');
+assert.match(pages, /setFollowing\(db, appId, currentUserId/, 'profile and inbox share the follow action');
 assert.doesNotMatch(pages, /batch\.update\(theirRef/, 'following must never attempt to write another user profile');
 assert.match(pages, /Stale 14d/, 'library attention filters must remain available');
 assert.match(pages, /Review .* existing/, 'AniList import conflicts must remain visible before import');

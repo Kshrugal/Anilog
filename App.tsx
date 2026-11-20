@@ -17,6 +17,8 @@ import { usePublicLibrary } from './features/usePublicLibrary';
 import { usePrivateAppearance } from './features/usePrivateAppearance';
 import { useProfileIdentity } from './features/useProfileIdentity';
 import { followedIds, subscribeCommunityActivity } from './services/community-activity';
+import { setFollowing, subscribeFollowNotices, type FollowNotice } from './services/follows';
+import { usernameSearchKey } from './services/people-search';
 import { CommunityAvatar, useCommunityPortraits } from './features/CommunityIdentity';
 import { IdentityImage } from './features/ProfileIdentityVisual';
 import { initializeApp } from "firebase/app";
@@ -40,6 +42,7 @@ import {
   serverTimestamp,
   addDoc,
   deleteField,
+  onSnapshot,
 } from "firebase/firestore";
 import { setLogLevel } from "firebase/firestore";
 import { 
@@ -1073,6 +1076,32 @@ function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [notices, setNotices] = useState<FollowNotice[]>([]);
+  const [noticeError, setNoticeError] = useState(false);
+  const [following, setFollowingIds] = useState<string[] | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
+
+  useEffect(() => {
+    if (!db || !userId) return;
+    const stopNotices = subscribeFollowNotices(db, appId, userId, setNotices, () => setNoticeError(true));
+    const stopProfile = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), profile => {
+      const data = profile.data();
+      setFollowingIds(followedIds(data?.followingIds || data?.friends || []));
+    }, () => setFollowingIds(null));
+    return () => { stopNotices(); stopProfile(); };
+  }, [db, userId]);
+
+  const followBack = async (notice: FollowNotice) => {
+    if (pending) return;
+    setPending(notice.userId);
+    setActionError('');
+    try {
+      await setFollowing(db, appId, userId, { uid: notice.userId, username: notice.username }, true);
+    } catch {
+      setActionError('Could not follow back. Please try again.');
+    } finally { setPending(null); }
+  };
 
   useEffect(() => {
     setItems([]);
@@ -1092,7 +1121,7 @@ function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
     return () => { disposed = true; unsubscribe(); };
   }, [db, userId]);
 
-  const portraits = useCommunityPortraits(db, appId, items.map(item => item.userId));
+  const portraits = useCommunityPortraits(db, appId, [...notices, ...items].map(item => item.userId));
   useEffect(() => {
     const previous = document.activeElement as HTMLElement;
     const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -1104,7 +1133,26 @@ function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
     <div className="fixed inset-0 z-[120] bg-black/50" onClick={onClose}>
       <motion.aside initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} className="absolute right-3 top-20 flex max-h-[calc(100vh-6rem)] w-[min(420px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-[#303640] bg-[#101318] shadow-2xl" onClick={event => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-white/5 p-4"><h2 className="text-lg font-bold text-white">Notifications</h2><button autoFocus aria-label="Close notifications" title="Close notifications" onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"><CloseIcon size={17} /></button></div>
-        <div className="overflow-y-auto p-2">{loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : error ? <p role="alert" className="p-8 text-center text-sm text-gray-400">Activity could not be loaded.</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { onClose(); openUserProfile({ uid: item.userId, username: item.username }); }} className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><CommunityAvatar name={item.username} portrait={portraits[item.userId]} /><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">You are all caught up</p><p className="mt-1 text-xs text-gray-600">New activity from people you follow appears here.</p></div>}</div>
+        <div className="overflow-y-auto p-2">
+          {(notices.length > 0 || noticeError) && <section aria-label="Follow notifications" className="border-b border-white/10 pb-2">
+            <h3 className="px-3 pt-2 text-xs font-bold text-gray-400">Follows</h3>
+            {noticeError && <p role="alert" className="px-3 py-2 text-sm text-gray-400">Follow notifications could not be loaded.</p>}
+            {actionError && <p role="alert" className="px-3 py-2 text-sm text-rose-300">{actionError}</p>}
+            {notices.map(notice => <div key={notice.id} className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 hover:bg-white/5">
+              <button type="button" onClick={() => { onClose(); openUserProfile({ uid: notice.userId, username: notice.username }); }} className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm text-gray-300">
+                <CommunityAvatar name={notice.username} portrait={portraits[notice.userId]} />
+                <span className="min-w-0 break-words">
+                  {notice.direction === 'outgoing' ? 'You followed ' : ''}<b className="text-white">{notice.username}</b>{notice.direction === 'incoming' ? ' followed you' : ''}
+                  {notice.timestamp && <span className="block text-xs text-gray-500">{new Date(notice.timestamp.seconds * 1000).toLocaleString()}</span>}
+                </span>
+              </button>
+              {notice.direction === 'incoming' && following && (following.includes(notice.userId)
+                ? <span className="text-xs text-gray-400">Following</span>
+                : <button type="button" aria-label={`Follow back ${notice.username}`} disabled={pending !== null} onClick={() => void followBack(notice)} className="rounded-lg bg-blue-500/20 px-2.5 py-1.5 text-xs font-semibold text-blue-200 hover:bg-blue-500/30 disabled:opacity-50">{pending === notice.userId ? 'Following...' : 'Follow back'}</button>)}
+            </div>)}
+          </section>}
+          {loading ? <p className="p-8 text-center text-sm text-gray-500">Loading activity…</p> : error ? <p role="alert" className="p-8 text-center text-sm text-gray-400">Activity could not be loaded.</p> : items.length ? items.map(item => <button key={item.id} onClick={() => { onClose(); openUserProfile({ uid: item.userId, username: item.username }); }} className="flex w-full items-start gap-3 rounded-lg p-3 text-left transition-colors hover:bg-white/5"><CommunityAvatar name={item.username} portrait={portraits[item.userId]} /><span className="min-w-0"><span className="block text-xs leading-relaxed text-gray-300"><b className="text-white">{item.username || 'Someone'}</b> {item.context || item.type} <b className="text-blue-300">{item.animeTitle}</b></span><span className="mt-1 block text-[10px] text-gray-600">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</span></span></button>) : <div className="p-10 text-center"><BellIcon className="mx-auto h-6 w-6 text-gray-700" /><p className="mt-3 text-sm font-bold text-gray-400">No recent activity</p><p className="mt-1 text-xs text-gray-600">New activity from people you follow appears here.</p></div>}
+        </div>
         <button onClick={() => { setPage('social'); onClose(); }} className="border-t border-white/5 p-3 text-xs font-bold text-blue-400 hover:bg-white/5">Open community</button>
       </motion.aside>
     </div>, document.body
@@ -1387,9 +1435,12 @@ export default function App() {
                 // Email belongs in Firebase Authentication, not in a publicly
                 // readable profile document. Clean up legacy profiles when
                 // their owner next signs in.
-                if (userData.email) {
-                  await updateDoc(userDocRef, { email: deleteField() });
-                }
+                const searchKey = typeof userData.username === 'string' ? usernameSearchKey(userData.username) : '';
+                const repairs = {
+                  ...(userData.email ? { email: deleteField() } : {}),
+                  ...(searchKey && searchKey !== userData.usernameSearch ? { usernameSearch: searchKey } : {}),
+                };
+                if (Object.keys(repairs).length) void updateDoc(userDocRef, repairs).catch(() => {});
                 if (!isCurrent()) return;
                 setUsername(userData.username || (user.email ? user.email.split("@")[0] : "Guest"));
               } else if (!user.isAnonymous) {
@@ -1397,6 +1448,7 @@ export default function App() {
                 await setDoc(userDocRef, {
                   uid: user.uid,
                   username: newUsername,
+                  usernameSearch: usernameSearchKey(newUsername),
                   createdAt: serverTimestamp(),
                   friends: [],
                 });
@@ -1515,7 +1567,7 @@ export default function App() {
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={guestMode ? null : userId} />
         
-        {isNotificationsOpen && !guestMode && <NotificationCenter db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} openUserProfile={openUserProfile} />}
+        {isNotificationsOpen && !guestMode && <NotificationCenter key={userId} db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} openUserProfile={openUserProfile} />}
         <div className="anilog-backdrop" data-backdrop={backdrop} style={{ '--scene-accent': theme.scrollbarThumb } as React.CSSProperties} aria-hidden="true" />
         <StarField active={showAmbient && !reducedMotion} />
         <MouseTrail themeId={themeId} active={showTrail && !reducedMotion} />

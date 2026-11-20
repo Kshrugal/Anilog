@@ -7,6 +7,10 @@ on:
         description: Deploy profile image upload rules
         type: boolean
         default: false
+      backfill_usernames:
+        description: Index existing public usernames for people search
+        type: boolean
+        default: false
 
 jobs:
   rules:
@@ -29,3 +33,10 @@ jobs:
           FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
           DEPLOY_STORAGE_RULES: ${{ inputs.include_storage }}
         run: node scripts/deploy-firebase-rules.mjs
+      - name: Index existing public usernames
+        if: inputs.backfill_usernames
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          CONFIRM_USERNAME_BACKFILL: anilog-10335
+        run: node scripts/backfill-username-search.mjs

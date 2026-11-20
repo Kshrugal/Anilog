@@ -95,6 +95,7 @@ const notifications = vm.createContext({
   subscribeCommunityActivity: () => { subscriptions++; return () => { unsubscribed++; }; },
   getDoc: () => profile.promise, doc: () => ({}), appId: 'test',
   onSnapshot: () => { subscriptions++; return () => { unsubscribed++; }; },
+  subscribeFollowNotices: () => { subscriptions++; return () => { unsubscribed++; }; },
   query: () => ({}), collection: () => ({}), orderBy: () => ({}), limit: () => ({}),
   createPortal: value => value, document: { body: {}, addEventListener() {}, removeEventListener() {} },
 });
@@ -103,12 +104,13 @@ vm.runInContext('NotificationCenter({db: {}, userId: "test"})', notifications);
 cleanup();
 profile.resolve({ data: () => ({ friends: [] }) });
 await new Promise(resolve => setImmediate(resolve));
-assert.equal(subscriptions, 0, 'closing before profile resolution never attaches a listener');
+assert.equal(subscriptions, 2, 'closing before profile resolution never attaches the activity listener');
+assert.equal(unsubscribed, 2);
 vm.runInContext('NotificationCenter({db: {}, userId: "test"})', notifications);
 await new Promise(resolve => setImmediate(resolve));
-assert.equal(subscriptions, 1);
+assert.equal(subscriptions, 5);
 cleanup();
-assert.equal(unsubscribed, 1, 'mounted listener is unsubscribed');
+assert.equal(unsubscribed, 5, 'all mounted listeners are unsubscribed');
 
 let opened = 0, incremented = 0;
 let nextFrame = 0;

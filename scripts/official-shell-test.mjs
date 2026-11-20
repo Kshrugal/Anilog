@@ -60,7 +60,7 @@ assert.match(app, /if \(!db && \['social', 'decks', 'user_profile'\].includes\(p
 for (const page of ['SearchPage', 'SchedulePage', 'DecksPage']) {
   assert.match(app, new RegExp('<' + page + '[^>]+readOnly=\\{guestMode\\}'));
 }
-assert.match(app, /isNotificationsOpen && !guestMode && <NotificationCenter/);
+assert.match(app, /isNotificationsOpen && !guestMode && <NotificationCenter key=\{userId\}/);
 for (const action of ["setPage('schedule')", "setPage('decks')"]) assert.ok(text('CommandPalette').includes(action));
 assert.match(app, /case "social": return guestMode\s*\? <DiscoveryPage[^>]+readOnly[^>]*>\s*:\s*<SocialPage/);
 assert.match(text('NotificationCenter'), /subscribeCommunityActivity\(db, appId, userId, authors/);

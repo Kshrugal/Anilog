@@ -75,6 +75,8 @@ import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, 
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
+import { setFollowing } from '../services/follows';
+import { searchPeople, usernameSearchKey } from '../services/people-search';
 import { getLibraryVisibility, libraryVisibilityLabels, type LibraryVisibility } from '../services/library-visibility';
 import { loadAccountExport } from '../services/account-export';
 import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
@@ -115,13 +117,13 @@ export function AuthPage({ db, setPage, showToast, onContinueGuest }) {
       if (!username.trim()) { setError("Please enter a username."); return; }
       try {
         const usersRef = collection(db, `artifacts/${appId}/public/data/users`);
-        const q = query(usersRef, where("username", "==", username.trim()), limit(1));
+        const q = query(usersRef, where("usernameSearch", "==", usernameSearchKey(username)), limit(1));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) { setError("Username taken."); showToast("Username taken", "error"); return; }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
         const userDocRef = doc(db, `artifacts/${appId}/public/data/users/${user.uid}`);
-        await setDoc(userDocRef, { uid: user.uid, username: username.trim(), createdAt: serverTimestamp(), friends: [] });
+        await setDoc(userDocRef, { uid: user.uid, username: username.trim(), usernameSearch: usernameSearchKey(username), createdAt: serverTimestamp(), friends: [] });
         setPage("home");
         showToast("Account created!", "success");
       } catch (err) { setError(err.message); showToast(err.message, "error"); }
@@ -832,6 +834,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     const [users, setUsers] = useState([]);
     const [friends, setFriends] = useState([]);
     const [searchQuery, setSearchQuery] = useState("");
+    const [peopleStatus, setPeopleStatus] = useState('idle');
     const [view, setView] = useState("feed");
     const [composerType, setComposerType] = useState("post");
     const [postText, setPostText] = useState("");
@@ -872,18 +875,17 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     }, [db, readOnly, userId, composerType, view, showToast]);
 
     useEffect(() => {
-        const term = searchQuery.trim();
         setUsers([]);
-        if (!db || view !== 'search' || term.length < 3) return;
+        if (!db || view !== 'search' || !searchQuery.trim()) { setPeopleStatus('idle'); return; }
+        setPeopleStatus('loading');
         let active = true;
         const timer = setTimeout(() => {
-            const lookup = query(collection(db, `artifacts/${appId}/public/data/users`), where('username', '>=', term), where('username', '<=', term + '\uf8ff'), limit(10));
-            getDocs(lookup).then(snapshot => {
-                if (active) setUsers(snapshot.docs.map(entry => ({ ...entry.data(), uid: entry.id })).filter(user => user.uid !== userId));
-            }).catch(() => { if (active) showToast('User search is unavailable.', 'error'); });
+            searchPeople(db, appId, userId, searchQuery).then(people => {
+                if (active) { setUsers(people); setPeopleStatus('ready'); }
+            }).catch(() => { if (active) setPeopleStatus('error'); });
         }, 250);
         return () => { active = false; clearTimeout(timer); };
-    }, [searchQuery, db, userId, view, showToast]);
+    }, [searchQuery, db, userId, view]);
 
     const publishPost = async () => {
         if (!db || !userId || !postText.trim() || posting) return;
@@ -966,6 +968,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
 
             {view === 'friends' && (
                 <div className="space-y-4">
+                    <button type="button" onClick={() => setView('search')} className="inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-sm font-semibold hover:bg-white/10"><SearchIcon size={16} /> Find people</button>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {people.map(person => (
                             <motion.button type="button" whileTap={{ scale: 0.98 }} key={person.uid} onClick={() => openUserProfile(person)} className="community-profile-row">
@@ -989,8 +992,10 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                             type="text"
                             className="block w-full pl-12 pr-4 py-4 border border-white/10 rounded-2xl bg-white/5 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                             placeholder="Search users..."
+                            aria-label="Search people by username"
+                            maxLength={80}
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onChange={(e) => { setUsers([]); setPeopleStatus(e.target.value.trim() ? 'loading' : 'idle'); setSearchQuery(e.target.value); }}
                             autoFocus
                         />
                     </div>
@@ -1003,7 +1008,11 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                             </motion.button>
                         ))}
                     </div>
-                    {users.length === 0 && searchQuery.length >= 3 && <p className="text-center text-gray-500 py-10">No users found.</p>}
+                    <div role="status" className="text-sm text-gray-400">
+                        {peopleStatus === 'loading' && 'Searching...'}
+                        {peopleStatus === 'error' && 'Search is unavailable. Try again.'}
+                        {peopleStatus === 'ready' && (!users.length ? 'No matching usernames.' : `${users.length} suggestion${users.length === 1 ? '' : 's'}`)}
+                    </div>
                 </div>
             )}
 
@@ -1845,7 +1854,10 @@ export function StatsPage({ db, userId, username }) {
 
 
 function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
-  const [anilistUsername, setAniListUsername] = useState("");
+  const storageKey = `anilog:anilist-import:${userId}`;
+  const [anilistUsername, setAniListUsername] = useState(() => {
+    try { return localStorage.getItem(storageKey) || ''; } catch { return ''; }
+  });
   const [preview, setPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1879,6 +1891,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
       const current = await getDocsFromServer(collection(db, `artifacts/${appId}/public/data/users/${userId}/animeList`));
       setFreshList(current.docs.map(entry => ({ ...entry.data(), id: entry.id })));
       setPreview(result);
+      try { localStorage.setItem(storageKey, cleanName); } catch { /* Import still works without browser storage. */ }
     } catch (importError) {
       console.error("AniList preview failed", importError);
       setError(importError.message || "Could not load that AniList account. Make sure the username and list are public.");
@@ -1914,7 +1927,6 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
       setLastImport({ username: preview.user.name, imported: imported.length, skipped: preview.entries.length - imported.length });
       showToast(`Imported ${imported.length} AniList ${imported.length === 1 ? 'entry' : 'entries'}!`, 'success');
       setPreview(null);
-      setAniListUsername("");
     } catch (importError) {
       console.error("AniList import failed", importError);
       setPreview(null);
@@ -1931,7 +1943,7 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-400">Move in without starting over</p>
           <h3 className="mt-2 text-2xl font-black text-white">Import from AniList</h3>
-          <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-400">Bring over progress, status, scores, notes, dates, rewatches, formats, and genres from any public AniList anime list.</p>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-400">Review changes from a public AniList anime list before importing. This won’t change your AniList account.</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-gray-400">
           Existing AniLog entries are preserved by default.
@@ -1942,7 +1954,8 @@ function AniListImportPanel({ db, userId, myList, onImported, showToast }) {
         <input
           type="text"
           value={anilistUsername}
-          onChange={event => setAniListUsername(event.target.value)}
+          disabled={loadingPreview || importing}
+          onChange={event => { setAniListUsername(event.target.value); setPreview(null); setError(''); }}
           placeholder="AniList username"
           className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/40 px-5 py-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
         />
@@ -2155,9 +2168,10 @@ export function ProfilePage({ db, userId, username, setUsername, showToast, open
   const handleUpdate = async (e) => {
     e.preventDefault();
     if(newUsername === username || newUsername.length < 3) return;
-    const q = query(collection(db, `artifacts/${appId}/public/data/users`), where("username", "==", newUsername.trim()), limit(1));
-    if(!(await getDocs(q)).empty) { showToast("Username taken.", 'error'); return; }
-    await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { username: newUsername.trim() });
+    const usernameSearch = usernameSearchKey(newUsername);
+    const q = query(collection(db, `artifacts/${appId}/public/data/users`), where("usernameSearch", "==", usernameSearch), limit(2));
+    if((await getDocs(q)).docs.some(profile => profile.id !== userId)) { showToast("Username taken.", 'error'); return; }
+    await updateDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`), { username: newUsername.trim(), usernameSearch });
     setUsername(newUsername.trim());
     showToast("Profile Updated!", 'success');
   };
@@ -2573,15 +2587,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         if (readOnly || !currentUserId || !targetUid || targetUid === currentUserId || friendBusy) return;
         setFriendBusy(true);
         try {
-            const myRef = doc(db, `artifacts/${appId}/public/data/users/${currentUserId}`);
-            const following = await runTransaction(db, async transaction => {
-                const snapshot = await transaction.get(myRef);
-                const existingFriends = snapshot.data()?.friends || [];
-                const nextFriends = existingFriends.filter(friend => (friend.uid || friend) !== targetUid);
-                if (!isFriend) nextFriends.push({ uid: targetUid, username: targetUsername });
-                transaction.update(myRef, { friends: nextFriends, followingIds: followedIds(nextFriends) });
-                return !isFriend;
-            });
+            const following = await setFollowing(db, appId, currentUserId, { uid: targetUid, username: targetUsername }, !isFriend);
             setIsFriend(following);
             if (!targetLibraryPublic) {
                 if (!following) { setList([]); setSelectedAnimeData(null); }

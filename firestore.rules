@@ -116,7 +116,7 @@ service cloud.firestore {
         // Authentication owns the email address. Public profile documents must
         // never contain it, including after partial updates to legacy records.
         allow create, update: if isOwner(userId) && profileHasNoPrivateEmail()
-          && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt', 'friends', 'followingIds', 'hallOfFame', 'libraryPublic', 'libraryVisibility', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
+          && request.resource.data.keys().hasOnly(['uid', 'username', 'usernameSearch', 'createdAt', 'friends', 'followingIds', 'hallOfFame', 'libraryPublic', 'libraryVisibility', 'lastLogin', 'bannerUrl', 'top10', 'streak'])
           && (!('followingIds' in request.resource.data) || request.resource.data.followingIds is list)
           && (resource == null || !('followingIds' in resource.data)
             || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['friends'])
@@ -124,6 +124,8 @@ service cloud.firestore {
           && (resource == null ? !request.resource.data.keys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']) : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastLogin', 'bannerUrl', 'top10', 'streak']))
           && request.resource.data.uid == userId && request.resource.data.username is string
           && request.resource.data.username.size() > 0 && request.resource.data.username.size() <= 80
+          && (!('usernameSearch' in request.resource.data)
+            || request.resource.data.usernameSearch == request.resource.data.username.trim().lower())
           && (!('libraryPublic' in request.resource.data) || request.resource.data.libraryPublic is bool)
           && (!('libraryVisibility' in request.resource.data)
             || (request.resource.data.libraryVisibility in ['public', 'friends', 'private']
@@ -146,6 +148,32 @@ service cloud.firestore {
         }
       }
       
+      match /followInboxes/{viewerId}/items/{noticeId} {
+        function profile(uid) {
+          return /databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(uid);
+        }
+        function newFollow(peerId) {
+          let actor = request.auth.uid;
+          let peer = get(profile(peerId)).data;
+          return actor != peerId && !follows(get(profile(actor)).data, peerId, peer.username)
+            && peerId in getAfter(profile(actor)).data.followingIds;
+        }
+        function validNotice() {
+          let data = request.resource.data;
+          let actor = request.auth.uid;
+          return data.keys().hasOnly(['userId', 'username', 'direction', 'timestamp'])
+            && data.userId is string && data.userId.matches('^[^/]{1,128}$')
+            && data.timestamp == request.time
+            && data.username == get(profile(data.userId)).data.username
+            && ((data.direction == 'incoming' && noticeId == 'in_' + actor
+                && data.userId == actor && newFollow(viewerId))
+              || (data.direction == 'outgoing' && viewerId == actor
+                && noticeId == 'out_' + data.userId && newFollow(data.userId)));
+        }
+        allow read, delete: if signedIn() && isOwner(viewerId);
+        allow create, update: if signedIn() && validNotice();
+      }
+
       // Social activity feed
       match /activity/{activityId} {
         function canRead(activity) {

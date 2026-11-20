@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch, deleteDoc, query, where, limit } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch, deleteDoc, query, where, limit, serverTimestamp } from 'firebase/firestore';
 
 const projectId = 'demo-anilog';
 const env = await initializeTestEnvironment({ projectId,
@@ -126,6 +126,27 @@ try {
   await denied(projected(friend));
   await denied(shared(friend));
   await denied(getDoc(doc(friend.firestore(), thread)));
+  await allowed(updateDoc(doc(owner.firestore(), userPath), { usernameSearch: 'owner' }));
+  await denied(updateDoc(doc(owner.firestore(), userPath), { usernameSearch: 'stranger' }));
+  const prefix = query(collection(guest.firestore(), `${root}/users`), where('usernameSearch', '>=', 'ow'), where('usernameSearch', '<=', 'ow\u{10ffff}'), limit(12));
+  assert.ok((await getDocs(prefix)).docs.some(item => item.id === 'owner'));
+  const inbox = uid => `${root}/followInboxes/${uid}/items`;
+  const inbound = `${inbox('friend')}/in_owner`, outbound = `${inbox('owner')}/out_friend`;
+  const notice = { direction: 'incoming', userId: 'owner', username: 'Owner', timestamp: serverTimestamp() };
+  await denied(setDoc(doc(owner.firestore(), inbound), notice));
+  const follow = writeBatch(owner.firestore());
+  follow.update(doc(owner.firestore(), userPath), { friends: [{ uid: 'friend', username: 'Friend' }], followingIds: ['friend'] });
+  follow.set(doc(owner.firestore(), inbound), notice);
+  follow.set(doc(owner.firestore(), outbound), { direction: 'outgoing', userId: 'friend', username: 'Friend', timestamp: serverTimestamp() });
+  await allowed(follow.commit());
+  await allowed(getDocs(collection(friend.firestore(), inbox('friend'))));
+  await allowed(getDoc(doc(owner.firestore(), outbound)));
+  await denied(getDoc(doc(owner.firestore(), inbound)));
+  await denied(getDocs(collection(stranger.firestore(), inbox('friend'))));
+  await denied(getDoc(doc(guest.firestore(), inbound)));
+  await denied(getDoc(doc(anonymous.firestore(), inbound)));
+  await denied(setDoc(doc(owner.firestore(), inbound), notice));
+  await denied(setDoc(doc(friend.firestore(), outbound), { ...notice, userId: 'friend', username: 'Friend' }));
   const path = 'profile-images/owner/test.webp';
   await allowed(owner.storage().ref(path).put(new Uint8Array([1, 2, 3]), { contentType: 'image/webp' }));
   await allowed(guest.storage().ref(path).getDownloadURL());
