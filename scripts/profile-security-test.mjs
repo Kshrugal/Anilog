@@ -5,9 +5,14 @@ import { doc, setDoc, getDoc, getDocs, collection, updateDoc, writeBatch, delete
 
 const projectId = 'demo-anilog';
 const env = await initializeTestEnvironment({ projectId,
-  firestore: { host: '127.0.0.1', port: 8080, rules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8') },
-  storage: { host: '127.0.0.1', port: 9199, rules: await readFile(new URL('../storage.rules', import.meta.url), 'utf8') },
+  firestore: { port: 8080, ...emulatorAddress(process.env.FIRESTORE_EMULATOR_HOST), rules: await readFile(new URL('../firestore.rules', import.meta.url), 'utf8') },
+  storage: { port: 9199, ...emulatorAddress(process.env.FIREBASE_STORAGE_EMULATOR_HOST), rules: await readFile(new URL('../storage.rules', import.meta.url), 'utf8') },
 });
+function emulatorAddress(address) {
+  if (!address) return { host: '127.0.0.1' };
+  const { hostname, port } = new URL(`http://${address}`);
+  return { host: hostname, port: Number(port) };
+}
 const root = 'artifacts/demo-anilog/public/data';
 const owner = env.authenticatedContext('owner'), stranger = env.authenticatedContext('stranger'), guest = env.unauthenticatedContext();
 const image = { url: '', path: '', x: 50, y: 50, zoom: 1 };
@@ -118,6 +123,25 @@ try {
   await denied(getDoc(doc(guest.firestore(), post)));
   await denied(shared(stranger));
   await allowed(shared(friend));
+  const titleReviews = (client, mediaId) => getDocs(query(collection(client.firestore(), activity),
+    where('userId', '==', 'owner'), where('sharedBy', '==', 'owner'), where('type', '==', 'micro_review'),
+    where('animeKitsuId', '==', mediaId), limit(12)));
+  const reviewPath = `${activity}/tile-review`;
+  await allowed(setDoc(doc(owner.firestore(), reviewPath), { ...record, type: 'micro_review', animeKitsuId: 'anilist:20', spoiler: true, noteContent: 'A review' }));
+  await allowed(setDoc(doc(owner.firestore(), `${activity}/tile-review-vn`), { ...record, type: 'micro_review', animeKitsuId: 'v20' }));
+  assert.deepEqual((await titleReviews(friend, 'anilist:20')).docs.map(item => item.id), ['tile-review']);
+  assert.deepEqual((await titleReviews(friend, 'v20')).docs.map(item => item.id), ['tile-review-vn']);
+  assert.ok((await titleReviews(friend, '20')).empty);
+  await denied(titleReviews(stranger, 'anilist:20'));
+  await denied(titleReviews(anonymous, 'anilist:20'));
+  const tileEntry = client => getDoc(doc(client.firestore(), `${userPath}/publicLibrary/anilist:20`));
+  await allowed(tileEntry(friend));
+  await denied(tileEntry(stranger));
+  await allowed(updateDoc(doc(owner.firestore(), userPath), { libraryVisibility: 'private', libraryPublic: false }));
+  await denied(tileEntry(friend));
+  await allowed(updateDoc(doc(owner.firestore(), userPath), { libraryVisibility: 'public', libraryPublic: true }));
+  await allowed(tileEntry(stranger));
+  await allowed(updateDoc(doc(owner.firestore(), userPath), { libraryVisibility: 'friends', libraryPublic: false }));
   await denied(getDocs(query(collection(friend.firestore(), activity), where('userId', '==', 'owner'))));
   await allowed(setDoc(doc(friend.firestore(), thread), { userId: 'friend', type: 'comment', text: 'Hello' }));
   await denied(getDoc(doc(guest.firestore(), thread)));

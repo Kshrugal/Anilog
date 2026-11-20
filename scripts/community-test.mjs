@@ -60,3 +60,51 @@ assert.equal(await directory.isUsernameTaken(client, 'demo', 'RANDOM'), true);
 assert.equal(await directory.isUsernameTaken(client, 'demo', 'RANDOM', 'legacy'), false);
 assert.equal(legacyReads, 1, 'typing and duplicate checks reuse the bounded legacy lookup');
 console.log('Case-insensitive people suggestions and legacy lookup cache passed.');
+
+const tsSource = async name => ts.transpile(
+  (await readFile(new URL(`../services/${name}.ts`, import.meta.url), 'utf8')).replace(/^import .*\n/gm, '').replace(/^export /gm, ''),
+  { target: ts.ScriptTarget.ES2022 },
+);
+const fetched = [];
+const mediaId = 'anilist:20';
+const pathValue = path => {
+  fetched.push(path);
+  const [, uid, subcollection] = path.split('/users/');
+  if (subcollection) assert.fail('Unexpected path');
+  if (uid === 'me') return { followingIds: ['friend', 'blocked', 'one-way'] };
+  if (uid === 'friend') return { username: 'Friend', followingIds: ['me'] };
+  if (uid === 'one-way') return { username: 'One Way', followingIds: [] };
+  if (uid === `blocked/publicLibrary/${mediaId}`) throw new Error('permission-denied');
+  if (uid === `friend/publicLibrary/${mediaId}`) return { kitsuId: mediaId, status: 'watching', watchedEpisodes: 6, totalEpisodes: 13 };
+  if (uid === `one-way/publicLibrary/${mediaId}`) return { kitsuId: mediaId, status: 'completed', score: 10 };
+  assert.fail(path);
+};
+const detail = runInNewContext(await tsSource('profile') + await tsSource('media-following') + '\n({ loadMediaFollowing, followingRow, mediaFollowingId });', {
+  followedIds: service.followedIds,
+  doc: (_db, path) => path, collection: (_db, path) => path, query: (...args) => args, where: (...args) => args, limit: count => count,
+  getDocFromServer: async path => ({ data: () => pathValue(path) }),
+  getDocsFromServer: async ([, ...constraints]) => {
+    assert.deepEqual(constraints.map(value => Array.isArray(value) ? [...value] : value), [
+      ['userId', '==', 'friend'], ['sharedBy', '==', 'friend'], ['type', '==', 'micro_review'], ['animeKitsuId', '==', mediaId], 12,
+    ]);
+    return { docs: [{ data: () => ({ animeKitsuId: mediaId, context: 'reviewed 9/10', noteContent: 'Spoiler', spoiler: true }) }] };
+  },
+});
+assert.equal(detail.mediaFollowingId({ provider: 'vndb', id: 20 }), 'v20');
+assert.equal(detail.mediaFollowingId({ provider: 'anilist', id: 20 }), mediaId);
+assert.equal(detail.mediaFollowingId({ id: 20 }), '20');
+assert.equal(detail.mediaFollowingId({ id: 'invalid/path' }), '');
+const controller = new AbortController();
+const detailRows = await detail.loadMediaFollowing({}, 'demo', 'me', mediaId, controller.signal);
+assert.deepEqual(Array.from(detailRows, row => row.uid), ['friend', 'one-way']);
+assert.equal(detailRows[0].progress, 'Episode 6 of 13');
+assert.equal(detailRows[0].review.spoiler, true);
+assert.equal(detailRows[0].score, 9);
+assert.ok(fetched.every(path => !path.includes('/animeList/') && !path.endsWith('/blocked')));
+const vn = detail.followingRow('friend', 'Friend', { kitsuId: 'v20', status: 'reading', watchedEpisodes: 85, vnRoute: 'Secret' }, null, 'v20');
+assert.equal(vn.status, 'Reading');
+assert.equal(vn.progress, '85% read');
+assert.ok(!JSON.stringify(vn).includes('Secret'));
+controller.abort();
+assert.equal((await detail.loadMediaFollowing({}, 'demo', 'me', mediaId, controller.signal)).length, 0);
+console.log('Exact-title following rows, permission failures, spoiler reviews, and VN progress passed.');

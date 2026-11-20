@@ -24,7 +24,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function harness({ failSave = false, missingId = false, mediaPromise, animeOverride } = {}) {
+function harness({ failSave = false, missingId = false, mediaPromise, animeOverride, account } = {}) {
   const pendingRead = deferred();
   const states = [];
   const dependencies = [];
@@ -34,13 +34,15 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   let tree;
   const props = {
     anime: animeOverride || { ...(missingId ? {} : { id: 'v123' }), title: 'A visual novel', mediaType: 'vn', genres: [] },
-    db: {}, userId: 'test-owner', ownerId: 'test-owner', username: 'Tester', onClose() {},
+    db: {}, userId: 'test-owner', ownerId: 'test-owner', username: 'Tester', hideFollowing: account === 'visitor-preview', onClose() {},
   };
   const sandbox = {
     React: { createElement: (type, attributes, ...children) => ({ type, props: attributes || {}, children }) },
     motion: { div: 'div', button: 'button' },
     CloseIcon: 'CloseIcon', StarIcon: 'StarIcon', HeartIcon: 'HeartIcon', ClockIcon: 'ClockIcon', MinusIcon: 'MinusIcon', PlusIcon: 'PlusIcon', ChevronDownIcon: 'ChevronDownIcon', runtimeFor, exactTime,
     ThemeContext: {}, useContext: () => ({ theme: { progressbar: 'bg-blue-500', button: 'bg-blue-500' } }),
+    mediaFollowingId: anime => anime.id || '', MediaFollowing: 'MediaFollowing',
+    auth: { currentUser: account ? { uid: 'test-owner', isAnonymous: account === 'anonymous' } : null },
     useRef: initial => { const index = cursor++; if (!(index in states)) states[index] = { current: initial }; return states[index]; },
     fetchMediaDetails: () => mediaPromise || Promise.resolve({ attributes: {} }),
     useState(initial) {
@@ -82,6 +84,11 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   const flush = async () => { await new Promise(resolve => setImmediate(resolve)); render(); };
   render();
   return { pendingRead, writes, render, nodes, saveButton, rateButton, flush };
+}
+
+assert.equal(harness({ account: 'member' }).nodes().find(node => node.type === 'MediaFollowing')?.props.mediaId, 'v123');
+for (const account of [undefined, 'anonymous', 'visitor-preview']) {
+  assert.ok(!harness({ account }).nodes().some(node => node.type === 'MediaFollowing'));
 }
 
 const saved = { status: 'watching', watchedEpisodes: 35, score: 8.5, notes: 'Keep this note', favorite: true };

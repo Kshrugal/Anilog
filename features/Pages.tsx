@@ -73,6 +73,8 @@ import {
 } from "../App";
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
+import { MediaFollowing } from './MediaFollowing';
+import { mediaFollowingId } from '../services/media-following';
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
 import { setFollowing } from '../services/follows';
@@ -886,10 +888,11 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
 
     const publishPost = async () => {
         if (!db || !userId || !postText.trim() || posting) return;
-        if (composerType === 'review' && !reviewTitle.trim()) { showToast('Add the anime title for your review.', 'error'); return; }
+        const linkedMedia = composerType === 'review' ? reviewLibrary.find(item => String(item.kitsuId || item.id) === reviewTitle) : null;
+        const linkedMediaId = linkedMedia ? mediaFollowingId(linkedMedia) : '';
+        if (composerType === 'review' && !linkedMediaId) { showToast('Choose a title from your library.', 'error'); return; }
         setPosting(true);
         try {
-            const linkedMedia = reviewLibrary.find(item => String(item.kitsuId || item.id) === reviewTitle);
             const activity = collection(db, `artifacts/${appId}/public/data/activity`);
             // The sharedBy index uses document ID as its tie-breaker (newest first).
             const newestFirst = String(9_999_999_999_999 - Date.now()).padStart(13, '0');
@@ -897,8 +900,9 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                 userId, username, sharedBy: userId, type: composerType === 'review' ? 'micro_review' : 'text_post',
                 context: composerType === 'review' ? `reviewed ${reviewScore ? `${reviewScore}/10` : ''}` : 'posted',
                 animeTitle: composerType === 'review' ? linkedMedia?.title || reviewTitle.trim() : '',
-                animeKitsuId: linkedMedia?.kitsuId || '', animeImageUrl: linkedMedia?.imageUrl || '',
-                mediaType: linkedMedia?.mediaType || 'anime', spoiler,
+                animeKitsuId: linkedMediaId, animeImageUrl: linkedMedia?.imageUrl || '',
+                ...(composerType === 'review' && reviewScore > 0 ? { reviewScore } : {}),
+                mediaType: linkedMediaId.startsWith('v') ? 'vn' : 'anime', spoiler,
                 noteContent: postText.trim(), timestamp: serverTimestamp(),
             });
             setPostText(''); setReviewTitle(''); setReviewScore(0); setSpoiler(false);
@@ -1017,7 +1021,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     )
 }
 
-function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined, readOnly = false }) {
+function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined, readOnly = false, hideFollowing = false }) {
     const { theme } = useContext(ThemeContext);
     const dialogRef = useRef(null);
     const closeRef = useRef(onClose);
@@ -1082,6 +1086,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const backdrop = details.coverImage?.original || anime.attributes?.coverImage?.original || poster;
 
     const isOwner = userId === ownerId && !readOnly;
+    const followingMediaId = mediaFollowingId(anime);
+    const showFollowing = !hideFollowing && db && userId && followingMediaId && auth?.currentUser?.uid === userId && !auth.currentUser.isAnonymous;
 
     useEffect(() => {
         const previousFocus = document.activeElement;
@@ -1336,6 +1342,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                             {synopsis && (
                                 <div className="mb-4"><p className={`text-gray-400 text-sm leading-relaxed ${synopsisExpanded ? '' : 'line-clamp-3'}`}>{synopsis}</p><button onClick={() => setSynopsisExpanded(value => !value)} aria-expanded={synopsisExpanded} className="inline-flex items-center gap-1.5 text-xs text-cyan-200/70 mt-2 hover:text-white">{synopsisExpanded ? 'Less' : 'Synopsis'}<ChevronDownIcon size={13} className={synopsisExpanded ? 'rotate-180' : ''} /></button></div>
                             )}
+                            {showFollowing && <MediaFollowing key={`${userId}:${followingMediaId}`} db={db} appId={appId} userId={userId} mediaId={followingMediaId} />}
                             <div className="flex flex-wrap gap-2 mt-3">
                                 {fetchedGenres.slice(0, 5).map(g => (
                                     <span key={g} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase text-gray-300">{g}</span>
@@ -2735,6 +2742,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     ownerId={selectedOwnerId}
                     username={currentUsername}
                     readOnly={visitor || !currentUserId}
+                    hideFollowing={visitorPreview || readOnly}
                 />
             )}
   </div>
