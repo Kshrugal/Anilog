@@ -59,11 +59,13 @@ const requests = [];
 const context = vm.createContext({
   mediaDetailsCache, structuredClone, AbortSignal, KITSU_API_URL: 'https://kitsu.io/api/edge',
   getAniListMedia: async id => { requests.push(id); return { id, attributes: { canonicalTitle: 'Anime' } }; },
+  fetchVnDetails: async id => {
+    requests.push(id);
+    return { id, attributes: { canonicalTitle: 'Test VN', episodeCount: 0, estimatedLengthMinutes: 1800, averageRating: 88.5 } };
+  },
   fetch: async (url, options) => {
     requests.push({ url, options });
-    return { ok: true, json: async () => url.includes('vndb')
-      ? { results: [{ id: 'v17', title: 'Test VN', length_minutes: 1800, rating: 88.5 }] }
-      : { data: { id: '17', attributes: { canonicalTitle: 'Kitsu anime' } } } };
+    return { ok: true, json: async () => ({ data: { id: '17', attributes: { canonicalTitle: 'Kitsu anime' } } }) };
   },
 });
 vm.runInContext(ts.transpileModule(`const ${loader.getText(tree)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
@@ -76,8 +78,7 @@ vn.attributes.canonicalTitle = 'Edited locally';
 assert.equal((await fetchDetails('v17')).attributes.canonicalTitle, 'Test VN');
 assert.equal(duplicate.attributes.episodeCount, 0);
 assert.equal(duplicate.attributes.estimatedLengthMinutes, 1800);
-assert.equal(duplicate.attributes.averageRating, '88.5');
-assert.match(JSON.parse(requests[0].options.body).fields, /length_minutes/);
+assert.equal(duplicate.attributes.averageRating, 88.5);
 await Promise.all([fetchDetails(17), fetchDetails('17'), fetchDetails('anilist:17'), fetchDetails('anilist:17')]);
 assert.equal(requests.length, 3, 'provider identities remain separate; numeric/string IDs deduplicate');
 

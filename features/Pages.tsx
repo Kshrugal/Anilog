@@ -76,6 +76,8 @@ import { nextProgress, planImport, importPayload, resetBackup } from "../service
 import { MediaFollowing } from './MediaFollowing';
 import { mediaFollowingId } from '../services/media-following';
 import { VnJournal } from './VnJournal';
+import { VnDiscovery } from './VnDiscovery';
+import { VN_LANGUAGES, VN_PLATFORMS, vnSynopsis } from '../services/vndb';
 import { readVnJournal, vnJournalFields } from '../services/vn-journal';
 import { AnalyticsDashboard } from './Analytics';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
@@ -543,17 +545,17 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
     const { theme } = useContext(ThemeContext);
 
     useEffect(() => {
+        if (searchType === 'vn') return;
         let isMounted = true;
         getAniListDiscovery(10)
             .then(data => { if (isMounted) setTrending(data.trending); })
             .catch(err => console.error('AniList trending error:', err));
         return () => { isMounted = false; };
-    }, []);
+    }, [searchType]);
 
     useEffect(() => {
+        if (searchType === 'vn') return;
         let isMounted = true;
-        const controller = new AbortController();
-        const requestTimeout = setTimeout(() => controller.abort(), 15_500);
         setLoading(isSeasonal || query.trim().length >= 3);
         setSearchError("");
         const delayDebounceFn = setTimeout(() => {
@@ -579,85 +581,21 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
             }
             setLoading(true);
 
-            if (searchType === 'vn') {
-                fetch('https://api.vndb.org/kana/vn', {
-                    method: 'POST',
-                    signal: controller.signal,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        filters: ["search", "=", query],
-                        fields: 'id, title, alttitle, image.url, rating, length_minutes, description',
-                        results: 20
-                    })
-                })
-                .then(res => {
-                    if (!res.ok) throw new Error("VNDB search failed");
-                    return res.json();
-                })
+            searchAniList(query, 20)
                 .then(data => {
                     if (isMounted) {
-                        const mapped = (data.results || []).map(vn => {
-                            const canonicalTitle = vn.title || vn.alttitle || 'Unknown';
-                            const posterUrl = vn.image?.url || '';
-                            return {
-                                id: vn.id,
-                                kitsuId: vn.id,
-                                title: canonicalTitle,
-                                imageUrl: posterUrl,
-                                totalEpisodes: 0,
-                                watchedEpisodes: 0,
-                                score: 0,
-                                notes: "",
-                                mediaType: 'vn',
-                                showType: 'Visual Novel',
-                                synopsis: vn.description || '',
-                                attributes: {
-                                    canonicalTitle,
-                                    posterImage: {
-                                        original: posterUrl,
-                                        large: posterUrl,
-                                        medium: posterUrl,
-                                        small: posterUrl
-                                    },
-                                    showType: 'Visual Novel',
-                                    episodeCount: 0,
-                                    estimatedLengthMinutes: Number(vn.length_minutes || 0),
-                                    averageRating: vn.rating ? String(vn.rating) : null,
-                                    synopsis: vn.description || ''
-                                }
-                            };
-                        });
-                        setResults(mapped);
+                        setResults(data);
                         setLoading(false);
                     }
                 })
                 .catch(err => {
-                    console.error("VNDB Search err:", err);
-                    if (isMounted) {
-                        setResults([]);
-                        setLoading(false);
-                        setSearchError("Visual novel search is unavailable. Please try again.");
-                    }
+                    console.error(err);
+                    if (isMounted) { setResults([]); setLoading(false); setSearchError(err.message || "Anime search is unavailable. Please try again."); }
                 });
-            } else {
-                searchAniList(query, 20)
-                    .then(data => {
-                        if (isMounted) {
-                            setResults(data);
-                            setLoading(false);
-                        }
-                    })
-                    .catch(err => {
-                        console.error(err);
-                        if (isMounted) { setResults([]); setLoading(false); setSearchError(err.message || "Anime search is unavailable. Please try again."); }
-                    });
-            }
         }, 500);
         return () => {
             isMounted = false;
             clearTimeout(delayDebounceFn);
-            clearTimeout(requestTimeout);
-            controller.abort();
         };
     }, [query, isSeasonal, searchType, searchAttempt]);
 
@@ -687,6 +625,8 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                 ].map(tab => (
                     <button
                         key={tab.id}
+                        type="button"
+                        aria-pressed={searchType === tab.id}
                         onClick={() => {
                             setSearchType(tab.id);
                             setQuery("");
@@ -700,6 +640,7 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                 ))}
             </div>
             
+            {searchType === 'vn' ? <VnDiscovery onSelect={setSelectedAnime} /> : <>
             {!isSeasonal && (
                 <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-blue-400 transition-colors">
@@ -756,18 +697,9 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
             )}
 
             {!loading && results.length === 0 && query.length < 3 && !isSeasonal && (
-                <div>
-                     {searchType === 'anime' ? (
-                         <AnimeCarousel title="Trending Now" animeList={trending} onAnimeClick={setSelectedAnime} isKitsuList={true} />
-                     ) : (
-                         <div className="text-center py-12 text-gray-500 bg-white/5 rounded-2xl border border-white/10">
-                             <p className="text-lg font-medium">Search for visual novels by typing in the search bar above.</p>
-                             <p className="text-xs mt-1">Queried live from VNDB database.</p>
-                         </div>
-                     )}
-                </div>
+                <AnimeCarousel title="Trending Now" animeList={trending} onAnimeClick={setSelectedAnime} isKitsuList={true} />
             )}
-
+            </>}
             {selectedAnime && (
                 <AnimeDetailsModal 
                     anime={selectedAnime} 
@@ -1078,13 +1010,14 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         `https://placehold.co/300x450?text=${encodeURIComponent(title || '?')}`;
     const totalEps = Number(hydratedMedia?.attributes?.episodeCount) > 0 ? Number(hydratedMedia.attributes.episodeCount) : anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
     const details = hydratedMedia?.attributes || anime.attributes || anime;
-    const synopsis = details.synopsis || anime.synopsis || anime.attributes?.synopsis;
     const relatedMedia = details.relations || [];
     const recommendations = details.recommendations || [];
     const anilistCharacters = details.characters || [];
     const streamingLinks = [...(details.streamingEpisodes || []), ...(details.externalLinks || []).filter(link => link.type === 'STREAMING')];
     const kitsuId = anime.kitsuId || anime.id || anime.attributes?.kitsuId || anime.attributes?.id;
     const isVn = anime.mediaType === 'vn' || anime.showType === 'Visual Novel' || anime.attributes?.showType === 'Visual Novel' || String(kitsuId).startsWith('v');
+    const synopsisText = details.synopsis || anime.synopsis || anime.attributes?.synopsis;
+    const synopsis = isVn ? vnSynopsis(synopsisText) : synopsisText;
     const isAniList = anime.provider === 'anilist' || anime.attributes?.provider === 'anilist' || String(kitsuId).startsWith('anilist:');
     const isKitsu = !isVn && !isAniList;
     const resolvedRuntime = runtimeFor({ ...anime, totalEpisodes: totalEps, durationMinutes: Number(details.episodeLength || anime.durationMinutes || 0), showType: details.showType || anime.showType });
@@ -1364,6 +1297,11 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                 <div className="mb-4"><p className={`text-gray-400 text-sm leading-relaxed ${synopsisExpanded ? '' : 'line-clamp-3'}`}>{synopsis}</p><button onClick={() => setSynopsisExpanded(value => !value)} aria-expanded={synopsisExpanded} className="inline-flex items-center gap-1.5 text-xs text-cyan-200/70 mt-2 hover:text-white">{synopsisExpanded ? 'Less' : 'Synopsis'}<ChevronDownIcon size={13} className={synopsisExpanded ? 'rotate-180' : ''} /></button></div>
                             )}
                             {showFollowing && <MediaFollowing key={`${userId}:${followingMediaId}`} db={db} appId={appId} userId={userId} mediaId={followingMediaId} />}
+                            {isVn && /^v\d+$/.test(String(kitsuId)) && <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-1.5 text-xs text-gray-400">
+                                {Array.isArray(details.languages) && details.languages.length > 0 && <span><strong className="text-gray-300">Languages</strong> {details.languages.slice(0, 4).map(code => VN_LANGUAGES[code]).filter(Boolean).join(', ')}</span>}
+                                {Array.isArray(details.platforms) && details.platforms.length > 0 && <span><strong className="text-gray-300">Platforms</strong> {details.platforms.slice(0, 4).map(code => VN_PLATFORMS[code]).filter(Boolean).join(', ')}</span>}
+                                <a href={`https://vndb.org/${kitsuId}`} target="_blank" rel="noopener noreferrer" className="text-cyan-200/80 hover:text-white">VNDB releases ↗</a>
+                            </div>}
                             <div className="flex flex-wrap gap-2 mt-3">
                                 {fetchedGenres.slice(0, 5).map(g => (
                                     <span key={g} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase text-gray-300">{g}</span>
@@ -1598,6 +1536,18 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
 
 // --- Discovery Page (Seasonal Hub) ---
 export function DiscoveryPage({ db, userId, username, readOnly = false }) {
+    const [type, setType] = useState('anime');
+    const [selected, setSelected] = useState(null);
+    return <div className="space-y-5 pb-20">
+        <div role="group" aria-label="Discover media type" className="flex w-fit gap-1 rounded-lg border border-white/10 bg-white/5 p-1">
+            {[['anime', 'Anime'], ['vn', 'Visual novels']].map(([value, label]) => <button key={value} type="button" aria-pressed={type === value} onClick={() => setType(value)} className={`min-h-9 rounded-md px-3 text-xs font-semibold transition-colors ${type === value ? 'bg-white text-black' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}>{label}</button>)}
+        </div>
+        {type === 'anime' ? <AnimeDiscoveryPage db={db} userId={userId} username={username} readOnly={readOnly} /> : <VnDiscovery onSelect={setSelected} />}
+        {selected && <AnimeDetailsModal key={selected.id} anime={selected} db={db} userId={userId} ownerId={userId} username={username} readOnly={readOnly} onClose={() => setSelected(null)} />}
+    </div>;
+}
+
+function AnimeDiscoveryPage({ db, userId, username, readOnly }) {
     const [trending, setTrending] = useState([]);
     const [topAiring, setTopAiring] = useState([]);
     const [upcoming, setUpcoming] = useState([]);

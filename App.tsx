@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getAniListMedia } from "./services/anilist";
 import { mediaDetailsCache } from "./services/media-cache";
+import { fetchVnDetails } from "./services/vndb";
 import { usePublicLibrary } from './features/usePublicLibrary';
 import { usePrivateAppearance } from './features/usePrivateAppearance';
 import { useProfileIdentity } from './features/useProfileIdentity';
@@ -172,40 +173,7 @@ export const fetchMediaDetails = async (id) => {
   if (strId.startsWith('anilist:')) {
     return getAniListMedia(strId);
   } else if (strId.startsWith('v')) {
-    const response = await fetch('https://api.vndb.org/kana/vn', {
-        method: 'POST',
-        signal: AbortSignal.timeout(15_000),
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            filters: ["id", "=", strId],
-            fields: 'id, title, alttitle, image.url, rating, length_minutes, description'
-        })
-    });
-    if (!response.ok) throw new Error("VNDB details fetch failed");
-    const resData = await response.json();
-    if (resData.results && resData.results.length > 0) {
-        const vn = resData.results[0];
-        return {
-            id: vn.id,
-            mediaType: 'vn',
-            attributes: {
-                canonicalTitle: vn.title || vn.alttitle || 'Unknown',
-                posterImage: {
-                    original: vn.image?.url || '',
-                    large: vn.image?.url || '',
-                    medium: vn.image?.url || '',
-                    small: vn.image?.url || ''
-                },
-                showType: 'Visual Novel',
-                episodeCount: 0,
-                estimatedLengthMinutes: Number(vn.length_minutes || 0),
-                averageRating: vn.rating ? String(vn.rating) : null,
-                synopsis: vn.description || ''
-            }
-        };
-    } else {
-        throw new Error("No VN found");
-    }
+    return fetchVnDetails(strId);
   } else {
     const response = await fetch(`${KITSU_API_URL}/anime/${id}`, { signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error("Failed to fetch Kitsu details");

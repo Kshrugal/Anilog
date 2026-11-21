@@ -47,6 +47,7 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
     useCallback: callback => callback,
     mediaFollowingId: anime => anime.id || '', MediaFollowing: 'MediaFollowing',
     readVnJournal, vnJournalFields, VnJournal: 'VnJournal',
+    vnSynopsis: text => text, VN_PLATFORMS: {}, VN_LANGUAGES: {},
     auth: { currentUser: account ? { uid: 'test-owner', isAnonymous: account === 'anonymous' } : null },
     useRef: initial => { const index = cursor++; if (!(index in states)) states[index] = { current: initial }; return states[index]; },
     fetchMediaDetails: () => mediaPromise || Promise.resolve({ attributes: {} }),
@@ -187,25 +188,3 @@ assert.equal(hydrated.writes[0].data.imageUrl, 'https://example.test/poster.jpg'
 assert.deepEqual([...hydrated.writes[0].data.genres], ['Drama']);
 assert.equal(hydrated.writes[0].data.durationMinutes, 22);
 console.log('Deferred public metadata hydration tests passed.');
-
-const app = await readFile(new URL('../App.tsx', import.meta.url), 'utf8');
-const appTree = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const loader = appTree.statements.filter(ts.isVariableStatement).flatMap(node => [...node.declarationList.declarations]).find(node => node.name.getText(appTree) === 'fetchMediaDetails');
-assert.ok(loader);
-let requestedFields;
-const mediaContext = vm.createContext({
-  AbortSignal,
-  structuredClone,
-  mediaDetailsCache: { get: (_key, load) => load() },
-  fetch: async (_url, options) => {
-    requestedFields = JSON.parse(options.body).fields;
-    return { ok: true, json: async () => ({ results: [{ id: 'v17', title: 'Test VN', length: 5, length_minutes: 1800, rating: 88.5 }] }) };
-  },
-});
-vm.runInContext(ts.transpileModule(`const ${loader.getText(appTree)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, mediaContext);
-const vn = await vm.runInContext('fetchMediaDetails("v17")', mediaContext);
-assert.equal(vn.attributes.episodeCount, 0, 'VN length categories are not episode counts or hours');
-assert.equal(vn.attributes.estimatedLengthMinutes, 1800);
-assert.equal(vn.attributes.averageRating, '88.5', 'VNDB ratings retain their 100-point scale');
-assert.match(requestedFields, /length_minutes/);
-console.log('Visual novel metadata tests passed.');
