@@ -69,6 +69,7 @@ import {
   FileText as DocumentTextIcon,
   Compass as CompassIcon,
   Bell as BellIcon,
+  BookOpen as BookOpenIcon,
   CalendarDays as ScheduleIcon,
   Layers3 as DecksIcon,
   Menu as MenuIcon,
@@ -590,7 +591,7 @@ export function AnimeCarouselSkeleton({ title }) {
     )
 }
 
-export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, incrementPending = false, viewMode = 'grid' }) {
+export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, incrementPending = false, viewMode = 'grid', catalogueMeta = undefined }) {
     const { theme } = useContext(ThemeContext);
     
     const mouseX = useMotionValue(0);
@@ -639,7 +640,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, in
                   anime.attributes?.posterImage?.large || 
                   anime.attributes?.posterImage?.medium || 
                   anime.attributes?.posterImage?.original || 
-                  `https://placehold.co/300x450?text=${encodeURIComponent(title)}`;
+                  (catalogueMeta ? '' : `https://placehold.co/300x450?text=${encodeURIComponent(title)}`);
     const progress = anime.watchedEpisodes ?? 0;
     const total = anime.totalEpisodes || anime.episodeCount || anime.attributes?.episodeCount || 0;
     const score = anime.score || 0;
@@ -654,6 +655,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, in
         role: 'button',
         tabIndex: 0,
         'aria-label': `Open details for ${title}`,
+        'aria-description': catalogueMeta ? [catalogueMeta.subtitle, catalogueMeta.communityScore && `Community score ${catalogueMeta.communityScore}`].filter(Boolean).join('. ') : undefined,
         onKeyDown: (event) => {
             if (event.target !== event.currentTarget || event.repeat) return;
             if (event.key === 'Enter' || event.key === ' ') {
@@ -740,7 +742,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, in
                 style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
                 className="relative aspect-[2/3] rounded-xl overflow-hidden mb-3 shadow-lg border border-white/5 bg-gray-900"
             >
-                <img src={image || "https://placehold.co/200x300?text=No+Image"} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy" alt={title} referrerPolicy="no-referrer" />
+                {image ? <img src={image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 motion-reduce:transform-none" loading="lazy" decoding="async" alt={title} referrerPolicy="no-referrer" /> : <div aria-hidden="true" className="grid h-full place-items-center bg-[#171b24] text-gray-500"><BookOpenIcon size={30} /></div>}
                 
                 <motion.div style={{ background: sheenGradient }} className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-20 mix-blend-overlay" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10"></div>
@@ -750,6 +752,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, in
                         <StarIcon /> {score}
                     </div>
                 )}
+                {!score && catalogueMeta?.communityScore && <div className="absolute top-2 right-2 z-30 flex items-center gap-1 rounded-md border border-white/10 bg-black/60 px-2 py-1 text-[10px] font-bold tabular-nums text-yellow-400 shadow-lg backdrop-blur-md" aria-hidden="true"><StarIcon size={12} />{catalogueMeta.communityScore}</div>}
 
                 {favorite && (
                     <div className="absolute left-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-full border border-pink-400/30 bg-black/60 text-pink-400 backdrop-blur-md">
@@ -786,6 +789,7 @@ export function AnimeCard({ anime, onCardClick, onQuickIncrement = undefined, in
             </motion.div>
             
             <h3 className="h-9 font-bold text-sm text-gray-200 line-clamp-2 leading-tight group-hover:text-white transition-colors">{title}</h3>
+            {catalogueMeta && <p className="mt-1 min-h-4 truncate text-xs tabular-nums text-gray-400">{catalogueMeta.subtitle}</p>}
             {isVn ? (
                 progress > 0 && <p className="text-[10px] font-bold text-gray-500 mt-1 uppercase tracking-wider">{progress}% READ</p>
             ) : (

@@ -532,6 +532,13 @@ export function HomePage({ db, userId, username, showToast }) {
   );
 }
 
+function VnCatalogue({ onSelect }) {
+    return <VnDiscovery onSelect={onSelect} renderSkeleton={() => <AnimeCardSkeleton />} renderTile={(novel, open) => <AnimeCard anime={novel} onCardClick={open} catalogueMeta={{
+        subtitle: novel.minutes > 0 ? (novel.minutes < 60 ? `~${novel.minutes} min` : `~${Number((novel.minutes / 60).toFixed(1))}h`) : novel.length,
+        communityScore: novel.rating === null ? '' : `${(novel.rating / 10).toFixed(1)}/10`,
+    }} />} />;
+}
+
 export function SearchPage({ db, userId, username, onConfetti, showToast: _showToast, readOnly = false }) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState([]);
@@ -640,7 +647,7 @@ export function SearchPage({ db, userId, username, onConfetti, showToast: _showT
                 ))}
             </div>
             
-            {searchType === 'vn' ? <VnDiscovery onSelect={setSelectedAnime} /> : <>
+            {searchType === 'vn' ? <VnCatalogue onSelect={setSelectedAnime} /> : <>
             {!isSeasonal && (
                 <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-blue-400 transition-colors">
@@ -1539,10 +1546,10 @@ export function DiscoveryPage({ db, userId, username, readOnly = false }) {
     const [type, setType] = useState('anime');
     const [selected, setSelected] = useState(null);
     return <div className="space-y-5 pb-20">
-        <div role="group" aria-label="Discover media type" className="flex w-fit gap-1 rounded-lg border border-white/10 bg-white/5 p-1">
-            {[['anime', 'Anime'], ['vn', 'Visual novels']].map(([value, label]) => <button key={value} type="button" aria-pressed={type === value} onClick={() => setType(value)} className={`min-h-9 rounded-md px-3 text-xs font-semibold transition-colors ${type === value ? 'bg-white text-black' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}>{label}</button>)}
+        <div role="group" aria-label="Discover media type" className="flex w-fit gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
+            {[['anime', 'Anime'], ['vn', 'Visual novels']].map(([value, label]) => <button key={value} type="button" aria-pressed={type === value} onClick={() => setType(value)} className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-colors ${type === value ? 'bg-white text-black shadow' : 'text-gray-400 hover:text-white'}`}>{label}</button>)}
         </div>
-        {type === 'anime' ? <AnimeDiscoveryPage db={db} userId={userId} username={username} readOnly={readOnly} /> : <VnDiscovery onSelect={setSelected} />}
+        {type === 'anime' ? <AnimeDiscoveryPage db={db} userId={userId} username={username} readOnly={readOnly} /> : <VnCatalogue onSelect={setSelected} />}
         {selected && <AnimeDetailsModal key={selected.id} anime={selected} db={db} userId={userId} ownerId={userId} username={username} readOnly={readOnly} onClose={() => setSelected(null)} />}
     </div>;
 }

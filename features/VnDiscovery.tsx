@@ -1,12 +1,21 @@
-import { useEffect, useState } from 'react';
-import { BookOpen, Clock, RotateCcw, Search, Star } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowDownWideNarrow, Clock3, Globe, Monitor, RotateCcw, Search, X } from 'lucide-react';
 import { browseVns, VN_FILTER_DEFAULTS, VN_LANGUAGES, VN_LENGTHS, VN_MOODS, VN_PLATFORMS } from '../services/vndb';
+import { CatalogueFilter } from './CatalogueFilter';
 
 type BrowseResult = Awaited<ReturnType<typeof browseVns>>;
 type Novel = BrowseResult['items'][number];
-const selectClass = 'min-h-10 min-w-0 w-full rounded-lg border border-white/15 bg-[#12141b] px-2.5 py-2 text-sm text-white';
+const grid = 'grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6';
+const optionList = (empty: string, values: Record<string, string>) => [{ value: '', label: empty }, ...Object.entries(values).map(([value, label]) => ({ value, label }))];
+const durations = optionList('Any length', VN_LENGTHS);
+const languages = optionList('Any language', VN_LANGUAGES);
+const platforms = optionList('Any platform', VN_PLATFORMS);
 
-export function VnDiscovery({ onSelect }: { onSelect: (novel: Novel) => void }) {
+export function VnDiscovery({ onSelect, renderTile, renderSkeleton }: {
+  onSelect: (novel: Novel) => void;
+  renderTile: (novel: Novel, open: () => void) => ReactNode;
+  renderSkeleton: () => ReactNode;
+}) {
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState(VN_FILTER_DEFAULTS);
   const [page, setPage] = useState(1);
@@ -42,49 +51,41 @@ export function VnDiscovery({ onSelect }: { onSelect: (novel: Novel) => void }) 
     setOptions(previous => ({ ...previous, [name]: value }));
   };
   const reset = () => { setQuery(''); setOptions(VN_FILTER_DEFAULTS); setPage(1); setError({ key: '', page: 0, message: '' }); };
-  const filter = (name: 'length' | 'language' | 'platform', title: string, choices: Record<string, string>, empty: string) => <label className="grid min-w-0 gap-1.5 text-xs font-medium text-gray-300">
-    {title}<select className={selectClass} value={options[name]} onChange={event => update(name, event.target.value)}>
-      <option value="">{empty}</option>{Object.entries(choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-    </select>
-  </label>;
-  return <section aria-label="Visual novel catalogue" className="space-y-5">
-    <div className="flex flex-wrap items-baseline justify-between gap-2">
-      <h2 className="text-xl font-bold text-white">Visual novel catalogue</h2>
-      <a href="https://vndb.org" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-400 hover:text-cyan-200">Data from VNDB</a>
-    </div>
-    <div className="space-y-4 border-y border-white/10 py-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="relative min-w-0 flex-[1_1_15rem]"><span className="sr-only">Search visual novels</span><Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="search" placeholder="Title, alternate title, or release" value={query} maxLength={100} onChange={event => { setQuery(event.target.value); setPage(1); setError({ key: '', page: 0, message: '' }); }} className="min-h-11 w-full rounded-lg border border-white/15 bg-white/5 py-2 pl-10 pr-3 text-sm text-white placeholder:text-gray-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" /></label>
-        {(search || Object.entries(options).some(([name, value]) => value !== VN_FILTER_DEFAULTS[name])) && <button type="button" onClick={reset} className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-gray-300 hover:bg-white/10 hover:text-white"><RotateCcw size={14} />Reset</button>}
+  const setSearch = (value: string) => { setQuery(value); setPage(1); setError({ key: '', page: 0, message: '' }); };
+  const filtered = Boolean(search || Object.entries(options).some(([name, value]) => value !== VN_FILTER_DEFAULTS[name]));
+  return <section aria-label="Visual novel catalogue" className="min-w-0 space-y-5">
+    <div className="relative z-40 space-y-3.5">
+      <div className="flex items-center gap-2.5">
+        <div className="group relative min-w-0 flex-1">
+          <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-gray-500 group-focus-within:text-white" />
+          <input aria-label="Search visual novels" type="search" placeholder="Search visual novels..." value={query} maxLength={100} onChange={event => setSearch(event.target.value)} className="h-11 w-full min-w-0 rounded-xl border border-white/10 bg-white/5 py-2 pl-10 pr-10 text-sm text-white backdrop-blur-sm transition-colors placeholder:text-gray-500 hover:border-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 [&::-webkit-search-cancel-button]:appearance-none" />
+          {query && <button type="button" aria-label="Clear title search" title="Clear title search" onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 z-10 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-gray-400 hover:bg-white/10 hover:text-white"><X size={15} /></button>}
+        </div>
+        <button type="button" onClick={reset} disabled={!filtered} aria-label="Reset filters" title="Reset filters" className="grid size-11 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/5 text-gray-200 transition-colors hover:bg-white/10 disabled:opacity-35"><RotateCcw size={17} /></button>
       </div>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Mood">
+      <div className="-mx-1 flex min-w-0 gap-2 overflow-x-auto p-1 no-scrollbar" role="group" aria-label="Mood">
         <button type="button" aria-pressed={!options.mood} className={moodClass(!options.mood)} onClick={() => update('mood', '')}>Any mood</button>
         {Object.entries(VN_MOODS).map(([id, label]) => <button type="button" key={id} aria-pressed={options.mood === id} className={moodClass(options.mood === id)} onClick={() => update('mood', options.mood === id ? '' : id)}>{label}</button>)}
       </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {filter('length', 'Length', VN_LENGTHS, 'Any length')}{filter('language', 'Release language', VN_LANGUAGES, 'Any language')}{filter('platform', 'Release platform', VN_PLATFORMS, 'Any platform')}
-        <label className="grid min-w-0 gap-1.5 text-xs font-medium text-gray-300">Sort by<select className={selectClass} value={options.sort} onChange={event => update('sort', event.target.value)}>
-          <option value="popular">{search ? 'Best match' : 'Most voted'}</option><option value="rated">Top rated</option><option value="newest">Recently released</option>
-        </select></label>
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
+        <CatalogueFilter icon={Clock3} label="Length" options={durations} value={options.length} onChange={value => update('length', value)} />
+        <CatalogueFilter icon={Globe} label="Language" options={languages} value={options.language} onChange={value => update('language', value)} />
+        <CatalogueFilter icon={Monitor} label="Platform" options={platforms} value={options.platform} onChange={value => update('platform', value)} />
+        <CatalogueFilter icon={ArrowDownWideNarrow} label="Sort" options={[{ value: 'popular', label: search ? 'Best match' : 'Most voted' }, { value: 'rated', label: 'Top rated' }, { value: 'newest', label: 'Recently released' }]} value={options.sort} onChange={value => update('sort', value)} />
       </div>
     </div>
+    <div className="home-results-bar">
+      <span role="status">{loading && !current ? 'Loading visual novels…' : current?.items.length ? `${current.items.length} titles` : 'Visual novels'}</span>
+      <a href="https://vndb.org" target="_blank" rel="noopener noreferrer" className="ml-auto shrink-0 text-gray-400 hover:text-white">VNDB</a>
+    </div>
     {failure && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-l-2 border-amber-300/70 bg-white/5 p-3 text-sm text-gray-200">{failure}<button type="button" className="min-h-9 rounded-lg bg-white/10 px-3 text-xs font-semibold text-white hover:bg-white/15" onClick={() => { setError({ key: '', page: 0, message: '' }); setRetry(value => value + 1); }}>Retry</button></div>}
-    {loading && !current && <div role="status" className="py-10 text-center text-sm text-gray-400">Loading visual novels…</div>}
+    {loading && !current && <div aria-hidden="true" className={grid}>{Array.from({ length: 6 }, (_, index) => <div key={index}>{renderSkeleton()}</div>)}</div>}
     {current && !current.items.length && !loading && !failure && <div className="py-12 text-center"><p className="font-semibold text-white">No matching visual novels</p><button type="button" onClick={reset} className="mt-3 rounded-lg px-3 py-2 text-sm text-cyan-200 hover:bg-white/10">Clear filters</button></div>}
-    {current && current.items.length > 0 && <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-      {current.items.map(novel => <button key={novel.id} type="button" className="group min-w-0 rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300" onClick={() => onSelect(novel)}>
-        <span className="relative mb-2 grid aspect-[2/3] w-full place-items-center overflow-hidden rounded-lg border border-white/10 bg-[#171b24] transition-colors group-hover:border-cyan-200/50">
-          {novel.imageUrl ? <img src={novel.imageUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105 motion-reduce:transform-none" /> : <BookOpen size={30} className="text-gray-500" />}
-        </span>
-        <span className="block min-h-10 line-clamp-2 break-words text-sm font-semibold leading-5 text-white group-hover:text-cyan-100">{novel.title}</span>
-        <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-gray-400">
-          {(novel.minutes > 0 || novel.length) && <span className="flex items-center gap-1"><Clock size={13} />{novel.minutes > 0 ? `~${Number((novel.minutes / 60).toFixed(1))}h` : novel.length}</span>}
-          {novel.rating !== null && <span className="flex items-center gap-1"><Star size={13} className="text-amber-300" />{(novel.rating / 10).toFixed(1)}/10</span>}
-        </span>
-      </button>)}
+    {current && current.items.length > 0 && <div className={grid}>
+      {current.items.map(novel => <div key={novel.id} className="min-w-0">{renderTile(novel, () => onSelect(novel))}</div>)}
     </div>}
     {current?.more && <div className="flex justify-center"><button type="button" disabled={loading || !!failure} className="min-h-10 rounded-lg border border-white/15 px-4 text-sm font-semibold text-gray-200 hover:bg-white/10 disabled:opacity-45" onClick={() => setPage(value => value + 1)}>{loading ? 'Loading…' : 'Load more'}</button></div>}
   </section>;
 }
 
-const moodClass = (active: boolean) => `min-h-9 rounded-lg border px-3 text-xs font-semibold transition-colors ${active ? 'border-cyan-200/40 bg-cyan-200/10 text-cyan-100' : 'border-white/10 bg-white/[0.035] text-gray-300 hover:border-white/25 hover:text-white'}`;
+const moodClass = (active: boolean) => `min-h-9 shrink-0 whitespace-nowrap rounded-full border px-3 text-xs font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300 ${active ? 'border-white bg-white text-black' : 'border-white/10 bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`;

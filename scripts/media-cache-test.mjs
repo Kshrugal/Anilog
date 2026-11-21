@@ -125,7 +125,7 @@ const cards = vm.createContext({
   window: { matchMedia: query => ({ matches: !query.includes('reduced-motion') }) },
   requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
   cancelAnimationFrame: id => frames.delete(id),
-  PlusIcon: 'plus', HeartIcon: 'heart', StarIcon: 'star',
+  PlusIcon: 'plus', HeartIcon: 'heart', StarIcon: 'star', BookOpenIcon: 'book',
   open: () => { opened++; }, increment: () => { incremented++; },
 });
 vm.runInContext(transpile(component('AnimeCard')), cards);
@@ -151,6 +151,11 @@ for (const viewMode of ['grid', 'list']) {
 }
 assert.equal(opened, 8, 'Enter/Space open cards, nested controls do not');
 assert.equal(incremented, 4);
+const catalogueCard = vm.runInContext('AnimeCard({anime: {title: "Novel", mediaType: "vn"}, onCardClick: open, catalogueMeta: {subtitle: "~8h", communityScore: "8.2/10"}})', cards);
+assert.equal(catalogueCard.props['aria-description'], '~8h. Community score 8.2/10');
+assert.equal(typeof catalogueCard.props.onMouseMove, 'function', 'catalogue tiles keep the shared tilt handler');
+assert.match(JSON.stringify(catalogueCard), /"type":"book"/, 'missing catalogue covers use an in-app fallback');
+assert.doesNotMatch(JSON.stringify(catalogueCard), /placehold\.co/, 'filtered covers do not make a third-party placeholder request');
 const tilted = vm.runInContext('AnimeCard({anime: {title: "Tilt"}, onCardClick: open})', cards);
 let measurements = 0;
 const pointer = { clientX: 10, clientY: 20, currentTarget: { getBoundingClientRect() { measurements++; return { width: 100, height: 150, left: 0, top: 0 }; } } };
