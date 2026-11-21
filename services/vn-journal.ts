@@ -61,6 +61,12 @@ export function vnTotals(journal: VnJournal) {
   };
 }
 
+export function vnJournalWithTotal(journal: VnJournal, totalMinutes: number) {
+  const sessionMinutes = vnTotals(journal).minutes - journal.baselineMinutes;
+  if (!Number.isInteger(totalMinutes) || totalMinutes < sessionMinutes || totalMinutes - sessionMinutes > 6_000_000) return null;
+  return { ...journal, baselineMinutes: totalMinutes - sessionMinutes };
+}
+
 export function vnJournalFields(journal: VnJournal) {
   const vnJournal = readVnJournal({ vnJournal: journal });
   const run = vnJournal.runs.find(item => item.id === vnJournal.activeId);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { BookOpen, Clock, Flag, GitBranch, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
-import { newVnRun, vnDateValid, vnTotals, VN_ENDING_LIMIT, VN_MILESTONES, VN_ROUTE_LIMIT, VN_ROUTE_STATES, VN_RUN_LIMIT, VN_SESSION_LIMIT, type VnJournal as Journal, type VnRun, type VnSession } from '../services/vn-journal';
+import { ChevronDown, Clock, Flag, GitBranch, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
+import { newVnRun, vnDateValid, vnJournalWithTotal, vnTotals, VN_ENDING_LIMIT, VN_MILESTONES, VN_ROUTE_LIMIT, VN_ROUTE_STATES, VN_RUN_LIMIT, VN_SESSION_LIMIT, type VnJournal as Journal, type VnRun, type VnSession } from '../services/vn-journal';
 
 const field = 'min-h-10 w-full min-w-0 rounded-lg border border-white/15 bg-[#10121a] px-3 py-2 text-sm text-white';
 const label = 'grid min-w-0 gap-1.5 text-xs font-medium text-gray-300';
@@ -12,10 +12,15 @@ const today = () => {
 };
 const time = (minutes: number) => [Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)}h` : '', minutes % 60 ? `${minutes % 60}m` : ''].filter(Boolean).join(' ') || '0m';
 
-export function VnJournal({ journal, onChange }: { journal: Journal; onChange: (journal: Journal) => void }) {
+export function VnJournal({ journal, onChange, onSave, busy = false }: { journal: Journal; onChange: (journal: Journal) => void; onSave: (journal: Journal) => Promise<boolean>; busy?: boolean }) {
   const [removeRunId, setRemoveRunId] = useState('');
+  const [mode, setMode] = useState<'session' | 'total' | null>(null);
+  const [duration, setDuration] = useState('');
+  const [invalid, setInvalid] = useState('');
   const run = journal.runs.find(item => item.id === journal.activeId) || journal.runs[0];
   const totals = vnTotals(journal);
+  const allSessions = journal.runs.reduce((sum, item) => sum + item.sessions.length, 0);
+  const canAddSession = run.sessions.length < VN_SESSION_LIMIT && allSessions < 2000;
   const changeRun = (next: VnRun) => onChange({ ...journal, runs: journal.runs.map(item => item.id === next.id ? next : item) });
   const addRun = () => {
     if (journal.runs.length >= VN_RUN_LIMIT) return;
@@ -29,23 +34,54 @@ export function VnJournal({ journal, onChange }: { journal: Journal; onChange: (
     onChange({ ...journal, runs, activeId: runs[0].id });
     setRemoveRunId('');
   };
-  return <section aria-label="Reading journal" className="space-y-4 border-y border-white/10 py-4">
-    <header className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-white"><BookOpen size={17} className="text-cyan-200" />Reading journal</h3>
-      <span className="flex items-center gap-1.5 text-xs text-gray-400"><Lock size={12} />Only you</span>
-    </header>
-    <dl className="grid grid-cols-3 gap-x-3 gap-y-2 text-sm">
-      <div><dt className="text-xs text-gray-400">Total time</dt><dd className="mt-1 font-semibold text-white tabular-nums">{time(totals.minutes)}</dd></div>
-      <div><dt className="text-xs text-gray-400">Routes finished</dt><dd className="mt-1 font-semibold text-white tabular-nums">{totals.completedRoutes}</dd></div>
-      <div><dt className="text-xs text-gray-400">Endings unlocked</dt><dd className="mt-1 font-semibold text-white tabular-nums">{totals.unlockedEndings}</dd></div>
-    </dl>
+  const changeMode = (next: typeof mode) => {
+    setMode(next === mode ? null : next);
+    setInvalid('');
+    setDuration(next === 'total' && totals.minutes > 0 ? String(Number((totals.minutes / 60).toFixed(4))) : '');
+  };
+  const saveTime = async () => {
+    if (busy || !mode || !duration.trim()) return;
+    const value = Number(duration);
+    if (!Number.isFinite(value) || value < 0) { setInvalid('Enter a valid amount of time.'); return; }
+    let next: Journal | null;
+    if (mode === 'session') {
+      if (!canAddSession || !Number.isInteger(value) || value < 1 || value > 1440) { setInvalid('Enter 1 to 1,440 minutes.'); return; }
+      const session = { id: crypto.randomUUID(), date: today(), minutes: value, routeId: '' };
+      next = { ...journal, runs: journal.runs.map(item => item.id === run.id ? { ...item, sessions: [...item.sessions, session] } : item) };
+    } else {
+      next = vnJournalWithTotal(journal, Math.round(value * 60));
+      if (!next) { setInvalid(value * 60 < totals.minutes - journal.baselineMinutes ? 'That’s less than your saved sessions. Edit those in Session history first.' : 'Enter a valid total in hours.'); return; }
+    }
+    setInvalid('');
+    if (await onSave(next)) { setMode(null); setDuration(''); }
+  };
+  return <fieldset aria-label="Reading journal" disabled={busy} className="mb-4 min-w-0 space-y-2 border-y border-white/10 py-3 disabled:opacity-60">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+      <div className="min-w-0">
+        <h3 className="flex items-center gap-1.5 text-xs font-medium text-gray-400"><Clock size={14} className="text-cyan-200" />Time spent</h3>
+        <p aria-live="polite" className="mt-1 break-words text-xl font-semibold tabular-nums text-white">{time(totals.minutes)}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" aria-expanded={mode === 'total'} className={button} onClick={() => changeMode('total')}><Pencil size={14} />Set total</button>
+        <button type="button" aria-expanded={mode === 'session'} disabled={!canAddSession} className={`${button} border border-white/15 bg-white/5 text-white`} onClick={() => changeMode('session')}><Plus size={15} />Log time</button>
+      </div>
+    </div>
+    {mode && <div className="flex flex-wrap items-end gap-2 pt-2">
+      <label className={`${label} flex-1 basis-32`}>{mode === 'total' ? 'Total hours' : 'Minutes today'}<input className={field} type="number" min={mode === 'total' ? 0 : 1} max={mode === 'total' ? undefined : 1440} step={mode === 'total' ? 'any' : 1} value={duration} onChange={event => { setDuration(event.target.value); setInvalid(''); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void saveTime(); } }} /></label>
+      <button type="button" disabled={!duration.trim() || busy} onClick={saveTime} className={`${button} bg-white/10 text-white`}>{busy ? 'Saving…' : 'Save log'}</button>
+      {invalid && <p role="alert" className="basis-full text-xs text-amber-200">{invalid}</p>}
+    </div>}
+    <details className="group/journal">
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded px-1 py-2 text-xs font-semibold text-gray-400 hover:text-white [&::-webkit-details-marker]:hidden">Session history &amp; playthroughs<ChevronDown size={13} className="group-open/journal:rotate-180" /></summary>
+      <div className="space-y-4 border-t border-white/10 pt-3">
+    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400"><span>{totals.completedRoutes} routes finished</span><span>{totals.unlockedEndings} endings unlocked</span><span className="ml-auto flex items-center gap-1.5"><Lock size={12} />Only you</span></div>
     <div className="flex flex-wrap items-end gap-2">
       <label className={`${label} basis-44 flex-1`}>Playthrough<select className={field} value={run.id} onChange={event => { onChange({ ...journal, activeId: event.target.value }); setRemoveRunId(''); }}>{journal.runs.map(item => <option key={item.id} value={item.id}>{item.name || 'Playthrough'}</option>)}</select></label>
       <button type="button" onClick={addRun} disabled={journal.runs.length >= VN_RUN_LIMIT} className={button}><Plus size={15} />New replay</button>
       {journal.runs.length > 1 && <button type="button" onClick={() => setRemoveRunId(removeRunId === run.id ? '' : run.id)} title="Remove playthrough" aria-label="Remove playthrough" aria-expanded={removeRunId === run.id} className={iconButton}><Trash2 size={15} /></button>}
     </div>
     {removeRunId === run.id && <div role="group" aria-label="Confirm playthrough removal" className="flex flex-wrap items-center gap-2 text-xs text-rose-200">Remove this playthrough and its sessions?<button type="button" onClick={removeRun} className={button}>Remove</button><button type="button" onClick={() => setRemoveRunId('')} className={button}>Cancel</button></div>}
-    <VnPlaythrough key={run.id} run={run} change={changeRun} allSessions={journal.runs.reduce((sum, item) => sum + item.sessions.length, 0)} />
+    <VnPlaythrough key={run.id} run={run} change={changeRun} allSessions={allSessions} />
     <details className="border-t border-white/10 pt-3">
       <summary className="cursor-pointer text-xs font-medium text-gray-400 hover:text-white">Previously logged time and endings</summary>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -53,7 +89,9 @@ export function VnJournal({ journal, onChange }: { journal: Journal; onChange: (
         <label className={label}>Endings before this journal<input className={field} type="number" min="0" max="9999" value={journal.baselineEndings} onChange={event => onChange({ ...journal, baselineEndings: Math.floor(Math.min(9999, Math.max(0, Number(event.target.value) || 0))) })} /></label>
       </div>
     </details>
-  </section>;
+      </div>
+    </details>
+  </fieldset>;
 }
 
 function VnPlaythrough({ run, change, allSessions }: { run: VnRun; change: (run: VnRun) => void; allSessions: number }) {

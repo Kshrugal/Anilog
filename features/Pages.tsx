@@ -1150,13 +1150,14 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         return () => { active = false; };
     }, [db, ownerId, kitsuId, isOwner, isVn, loadAttempt]);
 
-    const handleSave = async () => {
-        if (!isOwner || readOnly || !db || !kitsuId || !logLoaded || loading) return;
+    const handleSave = async (journalToSave = vnJournal, keepOpen = false) => {
+        if (!isOwner || readOnly || !db || !kitsuId || !logLoaded || savingRef.current) return false;
         if (startedAt && completedAt && completedAt < startedAt) {
             setLogError("The finish date cannot be earlier than the start date.");
-            return;
+            return false;
         }
         setLogError("");
+        savingRef.current = true;
         setLoading(true);
         try {
             const docRef = doc(db, `artifacts/${appId}/public/data/users/${userId}/animeList`, String(kitsuId));
@@ -1179,7 +1180,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 completedAt: resolvedCompletedAt || null,
                 personalTags,
                 shareNoteActivity,
-                ...(isVn ? vnJournalFields(vnJournal) : {}),
+                ...(isVn ? vnJournalFields(journalToSave) : {}),
                 genres: fetchedGenres, 
                 mediaType: isVn ? 'vn' : 'anime',
                 showType: isVn ? 'Visual Novel' : (anime.showType || anime.attributes?.showType || ''),
@@ -1195,15 +1196,14 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                     const latest = await tx.get(docRef);
                     const current = latest.exists() ? latest.data() : null;
                     const updated = value => value?.toMillis?.() ?? value;
-                    if (Boolean(current) !== Boolean(existingData) || (current?.vnJournal?.revision || 0) !== vnJournal.revision ||
+                    if (Boolean(current) !== Boolean(existingData) || (current?.vnJournal?.revision || 0) !== journalToSave.revision ||
                         updated(current?.updatedAt) !== updated(existingData?.updatedAt)) return false;
                     tx.set(docRef, data, { merge: true });
                     return true;
                 });
                 if (!saved) {
                     setLogError("This reading log changed in another tab or device. Reopen it to load the latest version.");
-                    setLoading(false);
-                    return;
+                    return false;
                 }
             } else await setDoc(docRef, data, { merge: true });
 
@@ -1236,12 +1236,21 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                 if (onComplete) onComplete();
             }
 
-            onClose();
+            if (keepOpen) {
+                setExistingData(data);
+                setVnJournal(readVnJournal(data));
+                setJournalDirty(false);
+                setDiscardJournal(false);
+            } else onClose();
+            return true;
         } catch (e) {
             console.error(e);
             setLogError("Your log could not be saved. Please try again.");
+            return false;
+        } finally {
+            savingRef.current = false;
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const statusColors = {
@@ -1258,6 +1267,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
         setPersonalTags(current => [...current, cleaned]);
         setTagDraft('');
     };
+    const noteFields = <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3"><label htmlFor="detail-log-notes" className="text-xs font-bold uppercase text-gray-500">Notes</label><label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="shrink-0 accent-blue-500" /> Log note in my private activity</label></div>
+        <textarea id="detail-log-notes" value={notes} onChange={event => setNotes(event.target.value)} placeholder="What are your thoughts?" className="h-20 w-full resize-none rounded-xl border border-white/10 bg-black/40 p-3 text-sm text-white placeholder-gray-600 focus:border-white/30 focus:outline-none" />
+    </div>;
 
     return createPortal(
         <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 fade-in" onClick={() => { if (!loading) requestClose(); }}>
@@ -1300,25 +1313,31 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                         <div>
                             <div className="flex items-start gap-4 pr-8 mb-4"><img src={poster} alt="" className="md:hidden w-20 h-28 shrink-0 object-cover rounded-lg border border-white/15 [@media(max-height:450px)]:hidden" referrerPolicy="no-referrer" /><div className="min-w-0"><p className="text-[10px] font-semibold uppercase text-cyan-200/70 mb-2">{isVn ? 'Visual novel' : String(details.showType || anime.showType || 'Anime').replaceAll('_', ' ')}</p><h2 className="text-2xl sm:text-3xl font-bold text-white leading-tight break-words">{title}</h2>{!isVn && resolvedRuntime.duration > 0 && <p className="text-xs text-gray-400 mt-3 flex items-center gap-2"><ClockIcon size={13} />{resolvedRuntime.film ? `${exactTime(resolvedRuntime.duration)} film` : `${resolvedRuntime.duration} min / episode${resolvedRuntime.total ? ` · ${resolvedRuntime.total} episodes` : ''}`}</p>}</div></div>
                             {detailsError && <p role="status" className="mb-3 text-xs text-amber-300">{detailsError}</p>}
+                            {isVn && isOwner && logLoaded && <VnJournal key={kitsuId} journal={vnJournal} busy={loading} onSave={value => handleSave(value, true)} onChange={value => { setVnJournal(value); setJournalDirty(true); }} />}
+                            {isVn && isOwner && logLoaded && logError && <p role="alert" className="mb-4 text-sm text-red-300">{logError}</p>}
                             {synopsis && (
                                 <div className="mb-4"><p className={`text-gray-400 text-sm leading-relaxed ${synopsisExpanded ? '' : 'line-clamp-3'}`}>{synopsis}</p><button onClick={() => setSynopsisExpanded(value => !value)} aria-expanded={synopsisExpanded} className="inline-flex items-center gap-1.5 text-xs text-cyan-200/70 mt-2 hover:text-white">{synopsisExpanded ? 'Less' : 'Synopsis'}<ChevronDownIcon size={13} className={synopsisExpanded ? 'rotate-180' : ''} /></button></div>
                             )}
                             {showFollowing && <MediaFollowing key={`${userId}:${followingMediaId}`} db={db} appId={appId} userId={userId} mediaId={followingMediaId} />}
-                            {isVn && /^v\d+$/.test(String(kitsuId)) && <div className="mt-4 flex flex-wrap items-baseline gap-x-4 gap-y-1.5 text-xs text-gray-400">
+                            {isVn && /^v\d+$/.test(String(kitsuId)) && <details className="group/catalogue mt-3">
+                              <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 py-1 text-xs font-semibold text-gray-400 hover:text-white [&::-webkit-details-marker]:hidden">Catalogue details<ChevronDownIcon size={13} className="group-open/catalogue:rotate-180" /></summary>
+                              <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1.5 text-xs text-gray-400">
+                                {details.estimatedLengthMinutes > 0 && <span><strong className="text-gray-300">Estimated length</strong> {(details.estimatedLengthMinutes / 60).toFixed(1)}h</span>}
+                                {details.averageRating > 0 && <span><strong className="text-gray-300">Community</strong> {(details.averageRating / 10).toFixed(1)}/10</span>}
                                 {Array.isArray(details.languages) && details.languages.length > 0 && <span><strong className="text-gray-300">Languages</strong> {details.languages.slice(0, 4).map(code => VN_LANGUAGES[code]).filter(Boolean).join(', ')}</span>}
                                 {Array.isArray(details.platforms) && details.platforms.length > 0 && <span><strong className="text-gray-300">Platforms</strong> {details.platforms.slice(0, 4).map(code => VN_PLATFORMS[code]).filter(Boolean).join(', ')}</span>}
                                 <a href={`https://vndb.org/${kitsuId}`} target="_blank" rel="noopener noreferrer" className="text-cyan-200/80 hover:text-white">VNDB releases ↗</a>
-                            </div>}
-                            <div className="flex flex-wrap gap-2 mt-3">
+                              </div>
+                            </details>}
+                            {fetchedGenres.length > 0 && <div className="flex flex-wrap gap-2 mt-3">
                                 {fetchedGenres.slice(0, 5).map(g => (
                                     <span key={g} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] font-bold uppercase text-gray-300">{g}</span>
                                 ))}
-                            </div>
-                            {(details.studios?.length > 0 || details.seasonYear || details.averageRating || details.estimatedLengthMinutes) && <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
+                            </div>}
+                            {!isVn && (details.studios?.length > 0 || details.seasonYear || details.averageRating || details.estimatedLengthMinutes) && <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-500">
                                 {details.studios?.[0] && <span><strong className="text-gray-300">Studio</strong> {details.studios[0].name}</span>}
                                 {details.seasonYear && <span><strong className="text-gray-300">Season</strong> {details.season} {details.seasonYear}</span>}
                                 {details.averageRating && <span><strong className="text-gray-300">Community</strong> {details.averageRating}%</span>}
-                                {isVn && details.estimatedLengthMinutes > 0 && <span><strong className="text-gray-300">Estimated length</strong> {(details.estimatedLengthMinutes / 60).toFixed(1)}h</span>}
                                 {details.nextAiringEpisode && <span className="text-blue-400"><strong>Episode {details.nextAiringEpisode.episode}</strong> airs in {Math.max(1, Math.ceil(details.nextAiringEpisode.timeUntilAiring / 86400))}d</span>}
                             </div>}
                         </div>
@@ -1376,7 +1395,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                             <fieldset disabled={!logLoaded || loading} className="min-w-0 space-y-6 border-t border-white/10 pt-6 disabled:opacity-60">
                                 {logError && !logLoaded && <legend className="px-2"><button onClick={() => setLoadAttempt(value => value + 1)} className="text-xs font-bold text-blue-300 hover:text-white">Retry loading log</button></legend>}
                                 {!logLoaded && !logError && <p role="status" className="text-sm text-gray-400">Loading your log...</p>}
-                                {logError && <div role="alert" className="text-sm text-red-300">{logError}</div>}
+                                {logError && (!isVn || !logLoaded) && <div role="alert" className="text-sm text-red-300">{logError}</div>}
                                 <div className="flex justify-between items-center">
                                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Status</label>
                                 </div>
@@ -1393,28 +1412,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                         ))}
                                     </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                    {isVn ? (
-                                        <div className="space-y-3">
-                                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest flex justify-between">
-                                                <span>Progress</span>
-                                                <span className="text-white">{episodes}% READ</span>
-                                            </label>
-                                            <input 
-                                                type="range" 
-                                                min="0" 
-                                                max="100" 
-                                                value={episodes}
-                                                onChange={(e) => setEpisodes(Number(e.target.value))}
-                                                className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${theme.progressbar.replace('bg-', 'bg-')}/30`}
-                                                aria-label="Reading progress"
-                                            />
-                                            <div className="flex gap-2">
-                                                <button onClick={() => setEpisodes(Math.max(0, episodes - 5))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">-5%</button>
-                                                <button onClick={() => setEpisodes(Math.min(100, episodes + 5))} className="flex-1 bg-white/5 hover:bg-white/10 rounded-lg py-1 text-white text-sm font-bold">+5%</button>
-                                            </div>
-                                        </div>
-                                    ) : (
+                                <div className={isVn ? 'max-w-sm' : 'grid grid-cols-1 sm:grid-cols-2 gap-6'}>
+                                    {!isVn && (
                                         <div className="space-y-3">
                                             <label className="text-xs font-bold text-gray-500 uppercase tracking-widest flex justify-between">
                                                 <span>Progress</span>
@@ -1460,8 +1459,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     </div>
                                 </div>
 
-                                {isVn && logLoaded && <VnJournal key={kitsuId} journal={vnJournal} onChange={value => { setVnJournal(value); setJournalDirty(true); }} />}
                                 <details className="rounded-2xl border border-white/10 bg-black/20 p-4"><summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white">Tracking details</summary><div className="mt-5 space-y-6">
+                                {isVn && <label className="flex items-center justify-between gap-3 text-sm text-gray-300">Reading progress <span className="flex items-center gap-2"><input type="number" aria-label="Reading progress" min="0" max="100" value={episodes} onChange={event => setEpisodes(Math.min(100, Math.max(0, Math.floor(Number(event.target.value) || 0))))} className="w-20 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white" />%</span></label>}
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <button aria-pressed={favorite} onClick={() => setFavorite(current => !current)} className={`flex items-center justify-between rounded-xl border p-4 text-left transition-colors ${favorite ? 'border-pink-500/30 bg-pink-500/10 text-pink-300' : 'border-white/10 bg-black/20 text-gray-400 hover:bg-white/5'}`}>
                                         <span><span className="block text-sm font-black">Favorite</span><span className="mt-1 block text-[10px] uppercase tracking-wider opacity-60">Pin to your taste profile</span></span>
@@ -1488,21 +1487,14 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                                     {personalTags.length > 0 && <div className="flex flex-wrap gap-2">{personalTags.map(tag => <button key={tag} onClick={() => setPersonalTags(current => current.filter(item => item !== tag))} className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-bold text-blue-300">#{tag} ×</button>)}</div>}
                                 </div>
 
+                                {isVn && noteFields}
                                 </div></details>
-                                <div className="space-y-3">
-                                    <div className="flex flex-wrap items-center justify-between gap-3"><label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Notes</label><label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={shareNoteActivity} onChange={event => setShareNoteActivity(event.target.checked)} className="accent-blue-500 shrink-0" /> Log note in my private activity</label></div>
-                                    <textarea 
-                                        value={notes} 
-                                        onChange={(e) => setNotes(e.target.value)}
-                                        placeholder="What are your thoughts?"
-                                        className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-white/30 resize-none h-20"
-                                    />
-                                </div>
+                                {!isVn && noteFields}
 
                                 <div className="sticky bottom-0 z-10 bg-[#0b0d15]/95 backdrop-blur-xl border-t border-white/10 pt-4 pb-1">
                                 <motion.button 
                                     whileTap={{ scale: 0.98 }}
-                                    onClick={handleSave}
+                                    onClick={() => handleSave()}
                                     disabled={loading || !logLoaded}
                                     className={`w-full py-3 rounded-lg font-bold text-white shadow-lg ${theme.button} ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >

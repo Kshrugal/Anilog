@@ -14,11 +14,11 @@ const compiled = ts.transpileModule(component.getText(parsed), {
 }).outputText;
 const compileService = text => ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const loadService = async name => import(`data:text/javascript;base64,${Buffer.from(compileService(await readFile(new URL(`../services/${name}.ts`, import.meta.url), 'utf8'))).toString('base64')}`);
-const { readVnJournal, vnJournalFields, newVnRun, vnDateValid } = await loadService('vn-journal');
+const { readVnJournal, vnJournalFields, newVnRun, vnDateValid, vnJournalWithTotal } = await loadService('vn-journal');
 const { publicLibraryEntry } = await loadService('profile-identity');
 const franchiseUrl = `data:text/javascript;base64,${Buffer.from(compileService(await readFile(new URL('../services/franchises.ts', import.meta.url), 'utf8'))).toString('base64')}`;
 const analyticsSource = compileService(await readFile(new URL('../services/analytics.ts', import.meta.url), 'utf8')).replace(/from ['"]\.\/franchises['"]/, `from '${franchiseUrl}'`);
-const { runtimeFor, exactTime } = await import(`data:text/javascript;base64,${Buffer.from(analyticsSource).toString('base64')}`);
+const { runtimeFor, exactTime, timeFor } = await import(`data:text/javascript;base64,${Buffer.from(analyticsSource).toString('base64')}`);
 
 function deferred() {
   let resolve;
@@ -33,11 +33,12 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   const dependencies = [];
   const effects = [];
   const writes = [];
+  let closes = 0;
   let cursor = 0;
   let tree;
   const props = {
     anime: animeOverride || { ...(missingId ? {} : { id: 'v123' }), title: 'A visual novel', mediaType: 'vn', genres: [] },
-    db: {}, userId: 'test-owner', ownerId: 'test-owner', username: 'Tester', hideFollowing: account === 'visitor-preview', onClose() {},
+    db: {}, userId: 'test-owner', ownerId: 'test-owner', username: 'Tester', hideFollowing: account === 'visitor-preview', onClose() { closes++; },
   };
   const sandbox = {
     React: { createElement: (type, attributes, ...children) => ({ type, props: attributes || {}, children }) },
@@ -93,7 +94,7 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   const rateButton = rating => nodes().find(node => node.props['aria-label'] === `Rate ${rating} out of 10`);
   const flush = async () => { await new Promise(resolve => setImmediate(resolve)); render(); };
   render();
-  return { pendingRead, writes, render, nodes, saveButton, rateButton, flush };
+  return { pendingRead, writes, render, nodes, saveButton, rateButton, flush, get closes() { return closes; } };
 }
 
 assert.equal(harness({ account: 'member' }).nodes().find(node => node.type === 'MediaFollowing')?.props.mediaId, 'v123');
@@ -143,6 +144,20 @@ assert.equal(storedVn.vnJournal.revision, 1);
 assert.equal(vnJournalFields(readVnJournal(storedVn)).vnPlaytimeHours, 14, 'reopening never double-counts sessions');
 assert.equal(readVnJournal(storedVn).runs[0].milestone, 'main');
 assert.equal(readVnJournal(storedVn).runs[1].milestone, 'full');
+const savedJournal = readVnJournal(storedVn);
+assert.equal(vnJournalWithTotal(savedJournal, 89), null, 'setting the total cannot erase saved sessions');
+const corrected = vnJournalWithTotal(savedJournal, 180);
+assert.equal(corrected.runs[1].sessions[0].minutes, 90);
+assert.equal(vnJournalFields(corrected).vnPlaytimeHours, 3, 'the corrected total goes into the same hours field used by Stats');
+const quickVn = harness();
+quickVn.pendingRead.resolve({ exists: () => true, data: () => storedVn });
+await quickVn.flush();
+assert.equal(await quickVn.nodes().find(node => node.type === 'VnJournal').props.onSave(corrected), true);
+quickVn.render();
+assert.equal(quickVn.closes, 0, 'saving from the time panel leaves the title open');
+assert.equal(quickVn.writes[0].data.vnPlaytimeHours, 3);
+assert.equal(timeFor(quickVn.writes[0].data).minutes, 180, 'Stats reads the new time without counting catalogue estimates or sessions twice');
+assert.equal(quickVn.nodes().find(node => node.type === 'VnJournal').props.journal.revision, 2);
 const projection = publicLibraryEntry(storedVn);
 assert.equal(projection.vnPlaytimeHours, 14);
 assert.ok(!('vnJournal' in projection) && !('vnRoute' in projection) && !('vnEndingsCompleted' in projection) && !('platform' in projection));
