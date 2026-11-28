@@ -80,7 +80,7 @@ function render(name, state, context = {}) {
   };
   bindings.HomeResume = new Function('React', 'motion', 'profileIsVn', 'profileProgress', 'progressCommand', 'BookOpen', 'Check', 'ChevronDown', 'Loader2', 'Tv', `${ts.transpileModule(resumeBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeResume;`)(React, bindings.motion, profile.profileIsVn, profile.profileProgress, home.progressCommand, 'i', 'i', 'i', 'i', 'i');
   const activityState = initial => {
-    const fixtures = { loading: 'ready', all: state.activityFilter || 'all', false: state.activityExpanded || false };
+    const fixtures = { loading: 'ready', all: state.activityFilter || 'all' };
     return [Array.isArray(initial) ? state.activityItems || [] : fixtures[String(initial)], () => {}];
   };
   bindings.HomeActivity = new Function('React', 'useState', 'useEffect', 'useCommunityPortraits', 'CommunityAvatar', 'ArrowRight', `${ts.transpileModule(activityBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeActivity;`)(React, activityState, () => {}, () => ({}), stub('Avatar'), 'i');
@@ -117,19 +117,17 @@ test('Home keeps the resume hero first and shows recent activity above the libra
   assert.match(html, /Paused<span/);
 });
 
-test('Home activity can reveal older rows and marks the selected filter', () => {
-  const activityItems = Array.from({ length: 6 }, (_, index) => ({
+test('Home activity shows dated rows, a selected filter and a link to the full feed', () => {
+  const activityItems = Array.from({ length: 4 }, (_, index) => ({
     id: String(index), username: 'Friend', context: `posted update ${index + 1}`, timestamp: { seconds: 86400 },
   }));
   const state = { myList: list, loading: false, activityItems, activityFilter: 'following' };
-  const collapsed = render('HomePage', state);
-  assert.match(collapsed, /aria-pressed="true"[^>]*>Following/);
-  assert.match(collapsed, /datetime="1970-01-02T00:00:00.000Z"/i);
-  assert.match(collapsed, /Show more/);
-  assert.doesNotMatch(collapsed, /posted update 5/);
-  const expanded = render('HomePage', { ...state, activityExpanded: true });
-  assert.match(expanded, /posted update 6/);
-  assert.match(expanded, /Show less/);
+  const html = render('HomePage', state);
+  assert.match(html, /aria-pressed="true"[^>]*>Following/);
+  assert.match(html, /datetime="1970-01-02T00:00:00.000Z"/i);
+  assert.match(html, /posted update 4/);
+  assert.match(html, /View activity/);
+  assert.doesNotMatch(html, /Show more|Show less/);
 });
 
 test('Home retains all secondary filters and Journal respects the filtered library', () => {
