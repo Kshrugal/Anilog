@@ -6,7 +6,7 @@ import ts from 'typescript';
 const source = await readFile(new URL('../services/community-activity.ts', import.meta.url), 'utf8');
 const code = ts.transpile(source.replace(/^import .*\n/m, '').replace(/^export /gm, ''), { target: ts.ScriptTarget.ES2022 });
 const listeners = [];
-const service = runInNewContext(code + '\n({ followedIds, subscribeCommunityActivity });', {
+const service = runInNewContext(code + '\n({ followedIds, groupEpisodeActivity, subscribeCommunityActivity });', {
   collection: (_db, path) => path, doc: (_db, path) => path, limit: count => ({ count }), orderBy: (...order) => ({ order }),
   where: (...filter) => ({ filter }), query: (...args) => args,
   onSnapshot: (request, ...args) => {
@@ -38,6 +38,29 @@ assert.ok(listeners.every(listener => listener.stopped));
 service.subscribeCommunityActivity({}, 'demo', '', [], 2, items => assert.equal(items.length, 0), assert.fail);
 assert.equal(listeners.length, 3);
 console.log('Community activity scope, merge order, empty state, and cleanup passed.');
+
+const progress = (id, episode, seconds, overrides = {}) => ({
+  id, userId: 'me', animeKitsuId: 'anilist:20', type: 'progress',
+  context: `watched episode ${episode} of`, timestamp: { seconds }, ...overrides,
+});
+const episodeOne = progress('one', 1, 100, { context: 'watched ep 1' });
+const otherTitle = progress('other', 2, 200, { animeKitsuId: 'anilist:21' });
+const otherUser = progress('friend', 2, 300, { userId: 'friend' });
+const vnProgress = progress('vn', 20, 400, { context: 'read 20% of' });
+const two = progress('two', 2, 86500); // Exactly 24 hours later.
+const three = progress('three', 3, 86600);
+const four = progress('four', 4, 173001); // 24 hours and one second later.
+const six = progress('six', 6, 173100);
+const repeat = progress('repeat', 1, 173200);
+const grouped = service.groupEpisodeActivity([three, four, vnProgress, repeat, otherUser, six, two, episodeOne, otherTitle]);
+assert.deepEqual(Array.from(grouped, item => item.id), ['repeat', 'six', 'four', 'one', 'vn', 'friend', 'other']);
+assert.equal(grouped[3].context, 'watched episodes 1–3 of');
+assert.equal(grouped[3].timestamp.seconds, three.timestamp.seconds);
+assert.deepEqual(Array.from(grouped[3].episodes, episode => episode.id), ['one', 'two', 'three']);
+assert.equal(episodeOne.context, 'watched ep 1');
+assert.equal(service.groupEpisodeActivity([episodeOne, { ...two, sharedBy: 'me' }]).length, 2);
+assert.equal(service.groupEpisodeActivity([episodeOne, { ...two, timestamp: null }]).length, 2);
+console.log('Episode sessions preserve order and threads across titles, audiences, and time gaps.');
 
 const searchSource = await readFile(new URL('../services/people-search.ts', import.meta.url), 'utf8');
 const searchCode = ts.transpile(searchSource.replace(/^import .*\n/m, '').replace(/^export /gm, ''), { target: ts.ScriptTarget.ES2022 });

@@ -86,7 +86,7 @@ function renderProfile(state, props = {}) {
   const bound = { React, ...profile, ...analytics, ...identity, ...ui, appId: 'test', IdentityShowcase: () => null, ProfileBio, useProfileIdentity: () => ({ identity: state.identity || identity.defaultIdentity(), revision: 0, loading: false, error: '' }), useState: initial => { const name = names[index++]; return [Object.hasOwn(values, name) ? values[name] : typeof initial === 'function' ? initial() : initial, () => {}]; }, useMemo: callback => callback(), useEffect() {}, useContext: () => ({ theme: {} }), ThemeContext: {},
     useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false } }),
     AnalyticsDashboard: props => React.createElement('div', { 'data-public-statistics': props.title, 'data-editable': String(props.editableGroups) }),
-    ActivityHeatmap: () => React.createElement('div'), LockIcon: icons.Lock, SettingsIcon: icons.Settings, LogoutIcon: icons.LogOut,
+    ActivityHeatmap: () => React.createElement('div'), groupEpisodeActivity: items => items, LockIcon: icons.Lock, SettingsIcon: icons.Settings, LogoutIcon: icons.LogOut,
   };
   const Page = new Function(...Object.keys(bound), `${compile(component.getText(ast).replace(/^export /, ''))};return UserProfilePage;`)(...Object.values(bound));
   return renderToStaticMarkup(React.createElement(Page, { db: {}, currentUserId: 'me', targetUser: { uid: 'friend', username: 'Friend' }, readOnly: false, ...props }));

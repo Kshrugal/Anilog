@@ -27,6 +27,9 @@ const home = await import(`data:text/javascript;base64,${Buffer.from(ts.transpil
 const resumeSource = await readFile(new URL('../features/HomeResume.tsx', import.meta.url), 'utf8');
 const resumeTree = parse(resumeSource);
 const resumeBody = resumeTree.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(resumeTree).replace(/^export /, '')).join('\n');
+const activitySource = await readFile(new URL('../features/HomeActivity.tsx', import.meta.url), 'utf8');
+const activityTree = parse(activitySource);
+const activityBody = activityTree.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(activityTree).replace(/^export /, '')).join('\n');
 const profile = await import(profileUrl);
 
 function initializer(name, variable, bindings) {
@@ -64,7 +67,7 @@ function render(name, state, context = {}) {
     },
     useEffect: () => {}, useMemo: callback => callback(), useCallback: callback => callback,
     useContext: () => ({ theme, viewMode: 'grid', ...context }), ThemeContext: {},
-    localStorage: { getItem: () => '[]' }, scoreSummary, AVG_EPISODE_MINUTES: 24,
+    localStorage: { getItem: () => '[]' }, scoreSummary, AVG_EPISODE_MINUTES: 24, appId: 'test',
     motion: new Proxy({}, { get: (_target, tag) => ({ children, className, title }) => React.createElement(tag, { className, title }, children) }),
     LayoutGroup: React.Fragment, AnimatePresence: ({ children }) => children,
     LibraryGrid: ({ children, className }) => React.createElement('div', { className }, children),
@@ -76,6 +79,11 @@ function render(name, state, context = {}) {
     ...Object.fromEntries(['PlayIcon', 'SearchIcon', 'CloseIcon', 'DiceIcon', 'PlusIcon', 'ViewGridIcon', 'ViewListIcon', 'CommentIcon'].map(key => [key, () => React.createElement('i')])),
   };
   bindings.HomeResume = new Function('React', 'motion', 'profileIsVn', 'profileProgress', 'progressCommand', 'BookOpen', 'Check', 'ChevronDown', 'Loader2', 'Tv', `${ts.transpileModule(resumeBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeResume;`)(React, bindings.motion, profile.profileIsVn, profile.profileProgress, home.progressCommand, 'i', 'i', 'i', 'i', 'i');
+  const activityState = initial => {
+    const fixtures = { loading: 'ready', all: state.activityFilter || 'all', false: state.activityExpanded || false };
+    return [Array.isArray(initial) ? state.activityItems || [] : fixtures[String(initial)], () => {}];
+  };
+  bindings.HomeActivity = new Function('React', 'useState', 'useEffect', 'useCommunityPortraits', 'CommunityAvatar', 'ArrowRight', `${ts.transpileModule(activityBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeActivity;`)(React, activityState, () => {}, () => ({}), stub('Avatar'), 'i');
   const js = ts.transpileModule(node.getText(ast).replace(/^export /, ''), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   const Page = new Function(...Object.keys(bindings), `${js}\nreturn ${name};`)(...Object.values(bindings));
   return renderToStaticMarkup(React.createElement(Page, { db: {}, userId: 'test', username: 'Viewer' }));
@@ -89,16 +97,39 @@ const list = [
   { id: 'e', title: 'Backlog', status: 'planned', score: 0 },
 ];
 
-test('Home preserves official greeting, hero geometry, and library grid without dashboard rows', () => {
-  const html = render('HomePage', { myList: list, loading: false, heroAnime: list[0] });
+test('Home keeps the resume hero first and shows recent activity above the library grid', () => {
+  const html = render('HomePage', { myList: list, loading: false, activityItems: [
+    { id: 'progress', username: 'Viewer', context: 'watched episodes 2–4 of', animeTitle: 'Active Anime' },
+    { id: 'review', username: 'Friend', type: 'micro_review', context: 'reviewed', animeTitle: 'Finished Anime', spoiler: true, noteContent: 'Hidden ending' },
+  ] });
   for (const className of officialHomeClasses) {
     assert.ok(html.includes(className));
   }
   assert.ok(html.indexOf('Welcome back, Viewer.') < html.indexOf('Continue Watching'));
-  assert.ok(html.indexOf('Continue Watching') < html.indexOf('data-component="AnimeCard"'));
+  assert.ok(html.indexOf('Continue Watching') < html.indexOf('Recent activity'));
+  assert.ok(html.indexOf('Recent activity') < html.indexOf('data-component="AnimeCard"'));
+  assert.match(html, /View activity/);
+  assert.match(html, /watched episodes 2–4 of/);
+  assert.match(html, /Contains spoilers/);
+  assert.doesNotMatch(html, /Hidden ending/);
   assert.ok(!html.includes('Up next'));
   assert.match(html, /<details[^>]*><summary[^>]*>Library Tools/);
   assert.match(html, /Paused<span/);
+});
+
+test('Home activity can reveal older rows and marks the selected filter', () => {
+  const activityItems = Array.from({ length: 6 }, (_, index) => ({
+    id: String(index), username: 'Friend', context: `posted update ${index + 1}`, timestamp: { seconds: 86400 },
+  }));
+  const state = { myList: list, loading: false, activityItems, activityFilter: 'following' };
+  const collapsed = render('HomePage', state);
+  assert.match(collapsed, /aria-pressed="true"[^>]*>Following/);
+  assert.match(collapsed, /datetime="1970-01-02T00:00:00.000Z"/i);
+  assert.match(collapsed, /Show more/);
+  assert.doesNotMatch(collapsed, /posted update 5/);
+  const expanded = render('HomePage', { ...state, activityExpanded: true });
+  assert.match(expanded, /posted update 6/);
+  assert.match(expanded, /Show less/);
 });
 
 test('Home retains all secondary filters and Journal respects the filtered library', () => {

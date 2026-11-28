@@ -33,6 +33,7 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   const dependencies = [];
   const effects = [];
   const writes = [];
+  const activity = [];
   let closes = 0;
   let cursor = 0;
   let tree;
@@ -73,7 +74,7 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
       if (failSave) throw new Error('Offline');
       return update({ get: () => latest || pendingRead.promise, set: (ref, data) => writes.push({ ref, data }) });
     },
-    logActivity: async () => {}, appId: 'test-app',
+    logActivity: async entry => { activity.push(entry); }, appId: 'test-app',
     console: { error() {} },
   };
   vm.createContext(sandbox);
@@ -94,7 +95,7 @@ function harness({ failSave = false, missingId = false, mediaPromise, animeOverr
   const rateButton = rating => nodes().find(node => node.props['aria-label'] === `Rate ${rating} out of 10`);
   const flush = async () => { await new Promise(resolve => setImmediate(resolve)); render(); };
   render();
-  return { pendingRead, writes, render, nodes, saveButton, rateButton, flush, get closes() { return closes; } };
+  return { pendingRead, writes, activity, render, nodes, saveButton, rateButton, flush, get closes() { return closes; } };
 }
 
 assert.equal(harness({ account: 'member' }).nodes().find(node => node.type === 'MediaFollowing')?.props.mediaId, 'v123');
@@ -203,3 +204,13 @@ assert.equal(hydrated.writes[0].data.imageUrl, 'https://example.test/poster.jpg'
 assert.deepEqual([...hydrated.writes[0].data.genres], ['Drama']);
 assert.equal(hydrated.writes[0].data.durationMinutes, 22);
 console.log('Deferred public metadata hydration tests passed.');
+
+for (const [episodes, expected] of [[6, 'watched episode 6 of'], [4, undefined]]) {
+  const editor = harness({ animeOverride: { kitsuId: 'anilist:1', title: 'Saved title', totalEpisodes: 12 } });
+  editor.pendingRead.resolve({ exists: () => true, data: () => ({ status: 'watching', watchedEpisodes: 5 }) });
+  await editor.flush();
+  editor.nodes().find(node => node.props['aria-label'] === 'Episodes watched').props.onChange({ target: { value: episodes } });
+  editor.render();
+  await editor.saveButton().props.onClick();
+  assert.equal(editor.activity.find(entry => entry.type === 'progress')?.context, expected);
+}
