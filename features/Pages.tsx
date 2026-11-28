@@ -80,7 +80,7 @@ import { VnDiscovery } from './VnDiscovery';
 import { VN_LANGUAGES, VN_PLATFORMS, vnSynopsis } from '../services/vndb';
 import { readVnJournal, vnJournalFields } from '../services/vn-journal';
 import { AnalyticsDashboard } from './Analytics';
-import { followedIds, followingPeople, groupEpisodeActivity, subscribeCommunityActivity } from '../services/community-activity';
+import { followedIds, followingPeople, FOLLOWER_ACTIVITY_AUDIENCE, groupEpisodeActivity, recentActivityId, subscribeCommunityActivity } from '../services/community-activity';
 import { setFollowing } from '../services/follows';
 import { isUsernameTaken, searchPeople, usernameSearchKey } from '../services/people-search';
 import { getLibraryVisibility, libraryVisibilityLabels, type LibraryVisibility } from '../services/library-visibility';
@@ -787,7 +787,6 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
     const [spoiler, setSpoiler] = useState(false);
     const [reviewScore, setReviewScore] = useState(0);
     const [posting, setPosting] = useState(false);
-    const postInput = useRef<HTMLTextAreaElement>(null);
     const { theme } = useContext(ThemeContext);
 
     const [feedStatus, setFeedStatus] = useState('loading');
@@ -838,10 +837,8 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
         setPosting(true);
         try {
             const activity = collection(db, `artifacts/${appId}/public/data/activity`);
-            // The sharedBy index uses document ID as its tie-breaker (newest first).
-            const newestFirst = String(9_999_999_999_999 - Date.now()).padStart(13, '0');
-            await setDoc(doc(activity, `${newestFirst}-${doc(activity).id}`), {
-                userId, username, sharedBy: userId, type: composerType === 'review' ? 'micro_review' : 'text_post',
+            await setDoc(doc(activity, recentActivityId(doc(activity).id)), {
+                userId, username, sharedBy: userId, audience: FOLLOWER_ACTIVITY_AUDIENCE, type: composerType === 'review' ? 'micro_review' : 'text_post',
                 context: composerType === 'review' ? `reviewed ${reviewScore ? `${reviewScore}/10` : ''}` : 'posted',
                 animeTitle: composerType === 'review' ? linkedMedia?.title || reviewTitle.trim() : '',
                 animeKitsuId: linkedMediaId, animeImageUrl: linkedMedia?.imageUrl || '',
@@ -853,19 +850,6 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
             showToast(composerType === 'review' ? 'Review published!' : 'Post published!', 'success');
         } catch (error) { console.error(error); showToast('Could not publish.', 'error'); }
         setPosting(false);
-    };
-
-    const draftProgressPost = item => {
-        if (postText.trim()) {
-            showToast('Finish your current draft before sharing another update.', 'error');
-        } else {
-            const progress = item.context.replace(/^watched ep /, 'watched episode ');
-            const action = progress.endsWith(' of') ? progress : `${progress} of`;
-            setComposerType('post');
-            setSpoiler(false);
-            setPostText(`I ${action} ${item.animeTitle}`.slice(0, 500));
-        }
-        postInput.current?.focus();
     };
 
     const people = (view === 'friends' ? friends : users).flatMap(person => {
@@ -884,10 +868,10 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
             {view === 'feed' && (
                 <div className="space-y-4">
                     {!readOnly && <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
-                        <p className="mb-3 text-xs text-gray-400">Posts and reviews are visible to people you follow who also follow you. Automatic tracking updates are private.</p>
+                        <p className="mb-3 text-xs text-gray-400">Followers can see new tracking updates, posts, and reviews. Personal notes are private.</p>
                         <div className="mb-4 flex gap-2">{[{ id: 'post', label: 'Post' }, { id: 'review', label: 'Micro-review' }].map(option => <button key={option.id} onClick={() => setComposerType(option.id)} className={`rounded-xl px-4 py-2 text-xs font-black ${composerType === option.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'}`}>{option.label}</button>)}</div>
                         {composerType === 'review' && <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]"><select value={reviewTitle} onChange={event => setReviewTitle(event.target.value)} className="min-w-0 rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="">Choose from your library…</option>{reviewLibrary.map(item => <option key={item.id} value={String(item.kitsuId || item.id)}>{item.mediaType === 'vn' ? 'VN · ' : ''}{item.title}</option>)}</select><select value={reviewScore} onChange={event => setReviewScore(Number(event.target.value))} className="rounded-xl border border-white/10 bg-[#0b0b0d] px-4 py-3 text-sm text-white"><option value="0">No score</option>{[10,9,8,7,6,5,4,3,2,1].map(value => <option key={value} value={value}>{value}/10</option>)}</select></div>}
-                        <textarea ref={postInput} value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
+                        <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
                         <div className="mt-3 flex items-center gap-3"><label className="flex items-center gap-2 text-[10px] font-bold text-gray-500"><input type="checkbox" checked={spoiler} onChange={event => setSpoiler(event.target.checked)} className="accent-red-500" /> Contains spoilers</label><span className="ml-auto text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting || (composerType === 'review' && !reviewTitle)} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
                     </div>}
                     {feed.map(item => (
@@ -911,8 +895,6 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                                 )}
                                 {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
                                 <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
-                                {!readOnly && item.userId === userId && item.type === 'progress' && item.context && item.animeTitle &&
-                                    <button type="button" onClick={() => draftProgressPost(item)} className={`mt-2 rounded-md py-1 text-xs font-semibold hover:underline ${theme.accentText}`}>Share progress</button>}
                                 <SocialActions db={db} activityId={item.id} userId={userId} username={username} readOnly={readOnly} />
                                 {item.episodes && <details className="mt-2 text-xs text-gray-400">
                                     <summary className="cursor-pointer hover:text-white">Individual episode activity</summary>
@@ -929,7 +911,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                     ))}
                     {feedStatus === 'loading' && <p role="status" className="py-8 text-sm text-gray-400">Loading activity…</p>}
                     {feedStatus === 'error' && <p role="alert" className="py-8 text-sm text-gray-400">Activity could not be loaded.</p>}
-                    {feedStatus === 'ready' && !feed.length && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or your mutual follows.</div>}
+                    {feedStatus === 'ready' && !feed.length && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or the people you follow.</div>}
                 </div>
             )}
 

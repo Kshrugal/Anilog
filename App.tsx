@@ -17,7 +17,7 @@ import { fetchVnDetails } from "./services/vndb";
 import { usePublicLibrary } from './features/usePublicLibrary';
 import { usePrivateAppearance } from './features/usePrivateAppearance';
 import { useProfileIdentity } from './features/useProfileIdentity';
-import { followedIds, subscribeCommunityActivity } from './services/community-activity';
+import { followedIds, FOLLOWER_ACTIVITY_AUDIENCE, recentActivityId, subscribeCommunityActivity } from './services/community-activity';
 import { setFollowing, subscribeFollowNotices, type FollowNotice } from './services/follows';
 import { usernameSearchKey } from './services/people-search';
 import { CommunityAvatar, useCommunityPortraits } from './features/CommunityIdentity';
@@ -41,7 +41,6 @@ import {
   updateDoc,
   collection,
   serverTimestamp,
-  addDoc,
   deleteField,
   onSnapshot,
 } from "firebase/firestore";
@@ -344,16 +343,19 @@ export const getGreeting = () => {
 export const logActivity = async ({ userId, username, type, animeTitle, animeKitsuId, animeImageUrl, context, noteContent = null }) => {
   if (!db) return;
   try {
-    await addDoc(collection(db, `artifacts/${appId}/public/data/activity`), {
-        userId, 
-        username, 
-        type, 
-        animeTitle, 
-        animeKitsuId, 
-        animeImageUrl, 
-        context, 
-        noteContent, 
-        timestamp: serverTimestamp() 
+    const activity = collection(db, `artifacts/${appId}/public/data/activity`);
+    const trackingUpdate = ['add', 'status_change', 'rate', 'progress'].includes(type);
+    const ref = trackingUpdate ? doc(activity, recentActivityId(doc(activity).id)) : doc(activity);
+    await setDoc(ref, {
+        userId,
+        username: username || 'AniLog member',
+        type,
+        animeTitle: animeTitle || '',
+        animeKitsuId: String(animeKitsuId ?? ''),
+        animeImageUrl: animeImageUrl || '',
+        context,
+        ...(trackingUpdate ? { sharedBy: userId, audience: FOLLOWER_ACTIVITY_AUDIENCE } : { noteContent }),
+        timestamp: serverTimestamp(),
     });
   } catch (error) {
     console.error("Error logging activity:", error);

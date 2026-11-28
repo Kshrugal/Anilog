@@ -14,6 +14,13 @@ export function followingPeople(profile: { followingIds?: unknown[]; friends?: u
   return followedIds(profile?.followingIds || friends).map(uid => ({ uid, username: names.get(uid) || 'AniLog member' }));
 }
 
+export const FOLLOWER_ACTIVITY_AUDIENCE = 'followers';
+
+export function recentActivityId(id: string) {
+  // Shared activity queries use the default document ID order.
+  return `${String(9_999_999_999_999 - Date.now()).padStart(13, '0')}-${id}`;
+}
+
 const EPISODE_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
 
 function compareActivity(a, b) {
@@ -35,7 +42,7 @@ export function groupEpisodeActivity(items: any[]) {
       grouped.push(item);
       continue;
     }
-    const key = JSON.stringify([item.userId, String(item.animeKitsuId), item.sharedBy ?? null]);
+    const key = JSON.stringify([item.userId, String(item.animeKitsuId), item.sharedBy ?? null, item.audience ?? null]);
     const previous = sessions.get(key);
     if (previous && episode === previous.episode + 1 && time - previous.time <= EPISODE_SESSION_GAP_MS) {
       const first = grouped[previous.index];
@@ -59,38 +66,45 @@ export function subscribeCommunityActivity(db: Firestore, appId: string, viewerI
   const ref = collection(db, `artifacts/${appId}/public/data/activity`);
   if (!viewerId || !authorIds.length) { onItems([]); return () => {}; }
   const results = new Map<string, any[]>();
-  const publish = () => onItems(groupEpisodeActivity([...results.values()].flat()).slice(0, count));
+  const publish = () => {
+    const unique = new Map([...results.values()].flat().map(item => [item.id, item]));
+    onItems(groupEpisodeActivity([...unique.values()]).slice(0, count));
+  };
   const stops = authorIds.map(authorId => {
     const own = authorId === viewerId;
-    const listen = () => onSnapshot(
+    const listen = (scope: 'own' | 'followers' | 'mutual') => onSnapshot(
       own ? query(ref, where('userId', '==', viewerId), orderBy('timestamp', 'desc'), limit(Math.max(count, 100)))
-        : query(ref, where('userId', '==', authorId), where('sharedBy', '==', authorId), limit(count)),
+        : query(ref, where('userId', '==', authorId), where('sharedBy', '==', authorId),
+          ...(scope === 'followers' ? [where('audience', '==', FOLLOWER_ACTIVITY_AUDIENCE)] : []),
+          limit(Math.max(count, scope === 'followers' ? 25 : count))),
       { includeMetadataChanges: true },
       snapshot => {
-        // Never serve cached friend posts before the server confirms access.
-        if (!own && snapshot.metadata.fromCache) { results.delete(authorId); publish(); return; }
-        results.set(authorId, snapshot.docs.map(entry => ({ ...entry.data(), id: entry.id })));
+        const key = `${authorId}:${scope}`;
+        // Require server authorization before showing another account's activity.
+        if (!own && snapshot.metadata.fromCache) { results.delete(key); publish(); return; }
+        results.set(key, snapshot.docs.map(entry => ({ ...entry.data(), id: entry.id })));
         publish();
       }, error => {
-        results.delete(authorId); publish();
+        results.delete(`${authorId}:${scope}`); publish();
         if (own || error.code !== 'permission-denied') onError(error);
       },
     );
-    if (own) return listen();
+    if (own) return listen('own');
+    const stopFollowers = listen('followers');
     let stopPosts: (() => void) | undefined;
     const stopProfile = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${authorId}`), profile => {
       const data = profile.data();
       const followsBack = followedIds(data?.followingIds || data?.friends || []).includes(viewerId);
-      if (followsBack && !stopPosts) stopPosts = listen();
+      if (followsBack && !stopPosts) stopPosts = listen('mutual');
       if (!followsBack) {
         stopPosts?.(); stopPosts = undefined;
-        results.delete(authorId); publish();
+        results.delete(`${authorId}:mutual`); publish();
       }
     }, error => {
       stopPosts?.(); stopPosts = undefined;
-      results.delete(authorId); publish(); onError(error);
+      results.delete(`${authorId}:mutual`); publish(); onError(error);
     });
-    return () => { stopProfile(); stopPosts?.(); };
+    return () => { stopFollowers(); stopProfile(); stopPosts?.(); };
   });
   return () => stops.forEach(stop => stop());
 }
