@@ -9,7 +9,7 @@ const source = await readFile(new URL('../features/Pages.tsx', import.meta.url),
 // Keep the official visual family while the practical-home phase tightens vertical space.
 const officialHomeClasses = [
   'flex flex-col space-y-6',
-  'relative w-full h-64 sm:h-56 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10',
+  'relative w-full h-64 sm:h-56 lg:h-auto lg:min-h-56 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10',
   'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6',
 ];
 const parse = text => ts.createSourceFile('Pages.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

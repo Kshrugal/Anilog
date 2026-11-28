@@ -13,8 +13,8 @@ export function HomeResume({ entries, selected, onSelect, onOpen, onIncrement, p
   const total = vn ? 100 : Math.max(0, Number(selected.totalEpisodes) || 0);
   const progress = Math.max(0, Number(selected.watchedEpisodes) || 0);
   const percent = total ? Math.min(100, progress / total * 100) : 0;
-  return <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} aria-label="Resume your library" className="relative w-full h-64 sm:h-56 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10">
-    <img src={selected.imageUrl} className="w-full h-full object-cover opacity-60 transition-transform duration-[2s] group-hover:scale-105" alt="" referrerPolicy="no-referrer" />
+  return <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} aria-label="Resume your library" className="relative w-full h-64 sm:h-56 lg:h-auto lg:min-h-56 rounded-3xl overflow-hidden shadow-2xl group cursor-pointer border border-white/10">
+    <img src={selected.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-60 transition-transform duration-[2s] group-hover:scale-105" alt="" referrerPolicy="no-referrer" />
     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none" />
     <button type="button" className="home-resume-open" aria-label={`Open ${selected.title}`} title={`Open ${selected.title}`} onClick={() => onOpen(selected)} />
     {entries.length > 1 && <label className="home-resume-switcher"><select aria-label="Resume title" value={String(selected.id)} onChange={event => onSelect(event.target.value)}>{entries.map((entry, index) => <option value={String(entry.id)} key={entry.id}>{index + 1}/{entries.length} · {entry.title}</option>)}</select><ChevronDown size={14} /></label>}
