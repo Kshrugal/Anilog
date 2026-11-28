@@ -47,11 +47,11 @@ const episodeOne = progress('one', 1, 100, { context: 'watched ep 1' });
 const otherTitle = progress('other', 2, 200, { animeKitsuId: 'anilist:21' });
 const otherUser = progress('friend', 2, 300, { userId: 'friend' });
 const vnProgress = progress('vn', 20, 400, { context: 'read 20% of' });
-const two = progress('two', 2, 7300);
-const three = progress('three', 3, 7400);
-const four = progress('four', 4, 14601);
-const six = progress('six', 6, 14700);
-const repeat = progress('repeat', 1, 14800);
+const two = progress('two', 2, 86500); // Exactly 24 hours later.
+const three = progress('three', 3, 86600);
+const four = progress('four', 4, 173001); // 24 hours and one second later.
+const six = progress('six', 6, 173100);
+const repeat = progress('repeat', 1, 173200);
 const grouped = service.groupEpisodeActivity([three, four, vnProgress, repeat, otherUser, six, two, episodeOne, otherTitle]);
 assert.deepEqual(Array.from(grouped, item => item.id), ['repeat', 'six', 'four', 'one', 'vn', 'friend', 'other']);
 assert.equal(grouped[3].context, 'watched episodes 1–3 of');

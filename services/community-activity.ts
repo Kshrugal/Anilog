@@ -5,7 +5,7 @@ export function followedIds(friends: unknown[]) {
     .filter((id): id is string => typeof id === 'string' && id.length > 0 && !id.includes('/')))];
 }
 
-const EPISODE_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
+const EPISODE_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
 
 function compareActivity(a, b) {
   return (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0) ||

@@ -29,7 +29,7 @@ const resumeTree = parse(resumeSource);
 const resumeBody = resumeTree.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(resumeTree).replace(/^export /, '')).join('\n');
 const activitySource = await readFile(new URL('../features/HomeActivity.tsx', import.meta.url), 'utf8');
 const activityTree = parse(activitySource);
-const activityBody = component('HomeActivity', activityTree).getText(activityTree).replace(/^export /, '');
+const activityBody = activityTree.statements.filter(node => !ts.isImportDeclaration(node)).map(node => node.getText(activityTree).replace(/^export /, '')).join('\n');
 const profile = await import(profileUrl);
 
 function initializer(name, variable, bindings) {
@@ -79,7 +79,10 @@ function render(name, state, context = {}) {
     ...Object.fromEntries(['PlayIcon', 'SearchIcon', 'CloseIcon', 'DiceIcon', 'PlusIcon', 'ViewGridIcon', 'ViewListIcon', 'CommentIcon'].map(key => [key, () => React.createElement('i')])),
   };
   bindings.HomeResume = new Function('React', 'motion', 'profileIsVn', 'profileProgress', 'progressCommand', 'BookOpen', 'Check', 'ChevronDown', 'Loader2', 'Tv', `${ts.transpileModule(resumeBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeResume;`)(React, bindings.motion, profile.profileIsVn, profile.profileProgress, home.progressCommand, 'i', 'i', 'i', 'i', 'i');
-  const activityState = initial => [Array.isArray(initial) ? state.activityItems || [] : 'ready', () => {}];
+  const activityState = initial => {
+    const fixtures = { loading: 'ready', all: state.activityFilter || 'all', false: state.activityExpanded || false };
+    return [Array.isArray(initial) ? state.activityItems || [] : fixtures[String(initial)], () => {}];
+  };
   bindings.HomeActivity = new Function('React', 'useState', 'useEffect', 'useCommunityPortraits', 'CommunityAvatar', 'ArrowRight', `${ts.transpileModule(activityBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeActivity;`)(React, activityState, () => {}, () => ({}), stub('Avatar'), 'i');
   const js = ts.transpileModule(node.getText(ast).replace(/^export /, ''), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   const Page = new Function(...Object.keys(bindings), `${js}\nreturn ${name};`)(...Object.values(bindings));
@@ -112,6 +115,21 @@ test('Home keeps the resume hero first and shows recent activity above the libra
   assert.ok(!html.includes('Up next'));
   assert.match(html, /<details[^>]*><summary[^>]*>Library Tools/);
   assert.match(html, /Paused<span/);
+});
+
+test('Home activity can reveal older rows and marks the selected filter', () => {
+  const activityItems = Array.from({ length: 6 }, (_, index) => ({
+    id: String(index), username: 'Friend', context: `posted update ${index + 1}`, timestamp: { seconds: 86400 },
+  }));
+  const state = { myList: list, loading: false, activityItems, activityFilter: 'following' };
+  const collapsed = render('HomePage', state);
+  assert.match(collapsed, /aria-pressed="true"[^>]*>Following/);
+  assert.match(collapsed, /datetime="1970-01-02T00:00:00.000Z"/i);
+  assert.match(collapsed, /Show more/);
+  assert.doesNotMatch(collapsed, /posted update 5/);
+  const expanded = render('HomePage', { ...state, activityExpanded: true });
+  assert.match(expanded, /posted update 6/);
+  assert.match(expanded, /Show less/);
 });
 
 test('Home retains all secondary filters and Journal respects the filtered library', () => {
