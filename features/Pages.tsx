@@ -80,13 +80,14 @@ import { VnDiscovery } from './VnDiscovery';
 import { VN_LANGUAGES, VN_PLATFORMS, vnSynopsis } from '../services/vndb';
 import { readVnJournal, vnJournalFields } from '../services/vn-journal';
 import { AnalyticsDashboard } from './Analytics';
-import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
+import { followedIds, groupEpisodeActivity, subscribeCommunityActivity } from '../services/community-activity';
 import { setFollowing } from '../services/follows';
 import { isUsernameTaken, searchPeople, usernameSearchKey } from '../services/people-search';
 import { getLibraryVisibility, libraryVisibilityLabels, type LibraryVisibility } from '../services/library-visibility';
 import { loadAccountExport } from '../services/account-export';
 import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
 import { HomeResume } from './HomeResume';
+import { HomeActivity } from './HomeActivity';
 import { LibraryGrid } from './LibraryGrid';
 import { resumeQueue, libraryStatusCounts, homeStatusLabel, normalizeSavedViews } from '../services/home-library';
 import { PublicProfileHeader, PublicProfileOverview, ProfileOwnerTools } from './PublicProfile';
@@ -256,16 +257,16 @@ export function HomePage({ db, userId, username, showToast }) {
           const next = nextProgress({ ...current, mediaType: profileIsVn({ ...current, kitsuId: anime.kitsuId || entryId }) ? 'vn' : 'anime' });
           if (!next) return null;
           transaction.update(docRef, next.changes);
-          return { ...next, title: current.title, imageUrl: current.imageUrl };
+          return { ...next, title: current.title, imageUrl: current.imageUrl, mediaId: current.kitsuId || entryId };
         });
         if (!result) return;
-        const { isVn, progress: newEp, completed: isNowComplete, title, imageUrl } = result;
+        const { isVn, progress: newEp, completed: isNowComplete, title, imageUrl, mediaId } = result;
         logActivity({
             userId, 
             username, 
             type: 'progress', 
             animeTitle: title,
-            animeKitsuId: entryId,
+            animeKitsuId: mediaId,
             animeImageUrl: imageUrl,
             context: isVn ? `read ${newEp}% of` : `watched episode ${newEp} of`
         });
@@ -354,7 +355,10 @@ export function HomePage({ db, userId, username, showToast }) {
         <button type="button" onClick={() => setPage('search')} className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2.5 text-xs font-semibold text-gray-200 hover:bg-white/10"><PlusIcon size={15} />Add title</button>
       </div>
 
-      {heroAnime && !loading && !error && <HomeResume entries={resumeEntries} selected={heroAnime} theme={theme} pending={pendingProgress.includes(String(heroAnime.id))} onSelect={setResumeId} onOpen={entry => setSelectedAnimeKitsuId(entry.kitsuId || entry.id)} onIncrement={handleQuickIncrement} />}
+      <div className={`grid gap-4 ${heroAnime && !loading && !error ? 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : ''}`}>
+        {heroAnime && !loading && !error && <HomeResume entries={resumeEntries} selected={heroAnime} theme={theme} pending={pendingProgress.includes(String(heroAnime.id))} onSelect={setResumeId} onOpen={entry => setSelectedAnimeKitsuId(entry.kitsuId || entry.id)} onIncrement={handleQuickIncrement} />}
+        {db && userId && <HomeActivity key={userId} db={db} appId={appId} userId={userId} accentText={theme.accentText} onOpen={() => setPage('social')} />}
+      </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -885,7 +889,7 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                             <div className="min-w-0 flex-grow break-words">
                                 <p className="text-gray-300 text-sm leading-relaxed">
                                     <button type="button" className="font-semibold text-white hover:underline" onClick={() => openUserProfile({ uid: item.userId, username: item.username })}>{item.username || 'AniLog member'}</button>{' '}
-                                    <span className="opacity-60 mx-1">{item.context}</span>
+                                    <span className="opacity-60 mr-1">{item.context}</span>{' '}
                                     <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
                                 </p>
                                 {item.noteContent && !item.spoiler && (
@@ -896,6 +900,13 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                                 {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
                                 <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
                                 <SocialActions db={db} activityId={item.id} userId={userId} username={username} readOnly={readOnly} />
+                                {item.episodes && <details className="mt-2 text-xs text-gray-400">
+                                    <summary className="cursor-pointer hover:text-white">Individual episode activity</summary>
+                                    {item.episodes.slice(1).map(episode => <div key={episode.id} className="mt-2 border-l border-white/10 pl-3">
+                                        <p>Episode {episode.number}</p>
+                                        <SocialActions db={db} activityId={episode.id} userId={userId} username={username} readOnly={readOnly} />
+                                    </div>)}
+                                </details>}
                             </div>
                             {item.animeImageUrl && (
                                 <img src={item.animeImageUrl} className="w-10 h-14 shrink-0 object-cover rounded-lg border border-white/10 group-hover:scale-105 transition-transform" loading="lazy" decoding="async" alt="" referrerPolicy="no-referrer" />
@@ -1226,8 +1237,8 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                          if (episodes % 10 === 0) {
                              await logActivity({ userId, username, type: 'progress', animeTitle: title, animeKitsuId: kitsuId, animeImageUrl: poster, context: `read ${episodes}% of` });
                          }
-                     } else if (episodes % 5 === 0) {
-                         await logActivity({ userId, username, type: 'progress', animeTitle: title, animeKitsuId: kitsuId, animeImageUrl: poster, context: `watched ep ${episodes}` });
+                     } else if (data.watchedEpisodes > (Number(existingData.watchedEpisodes) || 0)) {
+                         await logActivity({ userId, username, type: 'progress', animeTitle: title, animeKitsuId: kitsuId, animeImageUrl: poster, context: `watched episode ${data.watchedEpisodes} of` });
                      }
                 }
             }
@@ -2523,7 +2534,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
         if (!visitor) {
           const activityQ = query(collection(db, `artifacts/${appId}/public/data/activity`), where('userId', '==', targetUid), orderBy('timestamp', 'desc'), limit(20));
           getDocs(activityQ).then(snapshot => {
-            if (isMounted) setActivityData(snapshot.docs.map(d => d.data()));
+            if (isMounted) setActivityData(snapshot.docs.map(d => ({ ...d.data(), id: d.id })));
           }).catch(() => {
             if (isMounted) setActivityError('Recent activity is unavailable.');
           }).finally(() => { if (isMounted) setActivityLoading(false); });
@@ -2641,7 +2652,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
       {(['anime', 'vn', 'characters']).includes(module) && <IdentityShowcase kind={module as 'anime' | 'vn' | 'characters'} identity={identity} />}
       {!visitor && module === 'activity' && <div className="grid lg:grid-cols-2 gap-8 border-t border-white/10 pt-7">
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Recent activity</h2>
-          {activityLoading ? <p className="text-sm text-gray-500">Loading activity...</p> : activityError ? <p className="text-sm text-gray-500">{activityError}</p> : activityData.slice(0, 5).map((item, index) => <div key={index} className="flex gap-3 py-3 border-b border-white/5 min-w-0">{item.animeImageUrl && <img src={item.animeImageUrl} alt="" loading="lazy" className="w-9 h-12 rounded object-cover shrink-0" />}<div className="min-w-0"><p className="text-sm text-gray-300 break-words">{item.context} <span className="text-white font-medium">{item.animeTitle}</span></p>{item.noteContent && <details className="text-xs text-gray-400 mt-2"><summary className="cursor-pointer">{item.spoiler ? 'Spoiler note' : 'Note'}</summary><p className="mt-2 break-words">{item.noteContent}</p></details>}<p className="text-xs text-gray-500 mt-1">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</p></div></div>)}
+          {activityLoading ? <p className="text-sm text-gray-500">Loading activity...</p> : activityError ? <p className="text-sm text-gray-500">{activityError}</p> : groupEpisodeActivity(activityData).slice(0, 5).map(item => <div key={item.id} className="flex gap-3 py-3 border-b border-white/5 min-w-0">{item.animeImageUrl && <img src={item.animeImageUrl} alt="" loading="lazy" className="w-9 h-12 rounded object-cover shrink-0" />}<div className="min-w-0"><p className="text-sm text-gray-300 break-words">{item.context} <span className="text-white font-medium">{item.animeTitle}</span></p>{item.noteContent && <details className="text-xs text-gray-400 mt-2"><summary className="cursor-pointer">{item.spoiler ? 'Spoiler note' : 'Note'}</summary><p className="mt-2 break-words">{item.noteContent}</p></details>}<p className="text-xs text-gray-500 mt-1">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</p></div></div>)}
           {!activityLoading && !activityError && !activityData.length && <p className="text-sm text-gray-500">No recent activity.</p>}
         </section>
         <section className="min-w-0"><h2 className="text-lg font-semibold mb-4">Activity</h2><div className="overflow-x-auto">{!activityLoading && !activityError && <ActivityHeatmap data={activityData} theme={theme} />}</div><p className="text-xs text-gray-500 mt-3">Based on the most recent 20 activity events.</p></section>
