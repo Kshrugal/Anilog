@@ -20,7 +20,7 @@ const identity = { version: 1, revision: 1, bio: '**Hello** ||spoiler||', accent
 const identityPath = `${root}/profileIdentity/owner`;
 const userPath = `${root}/users/owner`;
 let assertions = 0;
-const allowed = async promise => { await assertSucceeds(promise); assertions++; };
+const allowed = async promise => { const value = await assertSucceeds(promise); assertions++; return value; };
 const denied = async promise => { await assertFails(promise); assertions++; };
 try {
   await env.withSecurityRulesDisabled(async context => {
@@ -94,6 +94,7 @@ try {
   const activity = `${root}/activity`;
   const post = `${activity}/privacy-shared`, oldUpdate = `${activity}/privacy-legacy`, thread = `${post}/interactions/privacy-comment`;
   const shared = client => getDocs(query(collection(client.firestore(), activity), where('userId', '==', 'owner'), where('sharedBy', '==', 'owner'), limit(20)));
+  const followerActivity = client => getDocs(query(collection(client.firestore(), activity), where('userId', '==', 'owner'), where('sharedBy', '==', 'owner'), where('audience', '==', 'followers'), limit(20)));
   const record = { userId: 'owner', type: 'text_post', sharedBy: 'owner' };
   await env.withSecurityRulesDisabled(async ctx => {
     await setDoc(doc(ctx.firestore(), userPath), { uid: 'owner', username: 'Owner', friends: [{ uid: 'friend', username: 'Friend' }] });
@@ -128,6 +129,23 @@ try {
   await denied(getDoc(doc(guest.firestore(), post)));
   await denied(shared(stranger));
   await allowed(shared(friend));
+  const newUpdate = `${activity}/follower-progress`;
+  const newPost = `${activity}/follower-post`;
+  const followerUpdate = { ...record, audience: 'followers', type: 'progress', animeTitle: 'Naruto', animeKitsuId: 'anilist:20', animeImageUrl: '', context: 'watched episode 8 of', timestamp: serverTimestamp() };
+  await allowed(setDoc(doc(owner.firestore(), newUpdate), followerUpdate));
+  await allowed(setDoc(doc(owner.firestore(), newPost), { ...record, audience: 'followers', noteContent: 'An intentionally shared post' }));
+  await denied(setDoc(doc(owner.firestore(), `${activity}/follower-note`), { ...followerUpdate, type: 'note' }));
+  await denied(setDoc(doc(owner.firestore(), `${activity}/follower-extra-fields`), { ...followerUpdate, noteContent: 'A private note' }));
+  await denied(updateDoc(doc(owner.firestore(), post), { audience: 'followers' }));
+  await denied(setDoc(doc(owner.firestore(), oldUpdate), followerUpdate));
+  assert.deepEqual((await allowed(followerActivity(stranger))).docs.map(item => item.id), ['follower-post', 'follower-progress']);
+  await denied(getDoc(doc(stranger.firestore(), oldUpdate)));
+  await denied(getDoc(doc(stranger.firestore(), post)));
+  await denied(followerActivity(guest));
+  await denied(followerActivity(anonymous));
+  await denied(followerActivity(env.authenticatedContext('legacy')));
+  const followerReply = `${newUpdate}/interactions/follower-reply`;
+  await allowed(setDoc(doc(stranger.firestore(), followerReply), { userId: 'stranger', type: 'comment', text: 'Watching too' }));
   const titleReviews = (client, mediaId) => getDocs(query(collection(client.firestore(), activity),
     where('userId', '==', 'owner'), where('sharedBy', '==', 'owner'), where('type', '==', 'micro_review'),
     where('animeKitsuId', '==', mediaId), limit(12)));
@@ -155,6 +173,10 @@ try {
   await denied(projected(friend));
   await denied(shared(friend));
   await denied(getDoc(doc(friend.firestore(), thread)));
+  await allowed(followerActivity(friend));
+  await allowed(updateDoc(doc(stranger.firestore(), `${root}/users/stranger`), { followingIds: [] }));
+  await denied(followerActivity(stranger));
+  await denied(getDoc(doc(stranger.firestore(), followerReply)));
   await allowed(updateDoc(doc(owner.firestore(), userPath), { usernameSearch: 'owner' }));
   await denied(updateDoc(doc(owner.firestore(), userPath), { usernameSearch: 'stranger' }));
   const prefix = query(collection(guest.firestore(), `${root}/users`), where('usernameSearch', '>=', 'ow'), where('usernameSearch', '<=', 'ow\u{10ffff}'), limit(12));

@@ -176,20 +176,35 @@ service cloud.firestore {
 
       // Social activity feed
       match /activity/{activityId} {
+        function viewerFollowsAuthor(authorId) {
+          let viewer = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(request.auth.uid)).data;
+          let author = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(authorId)).data;
+          return follows(viewer, authorId, author.username);
+        }
         function canRead(activity) {
           return signedIn() && (isOwner(activity.userId)
             || (activity.sharedBy == activity.userId
-              && mutual(appId, activity.userId, get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(activity.userId)).data)));
+              && ((activity.audience == 'followers' && viewerFollowsAuthor(activity.userId))
+                || mutual(appId, activity.userId, get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(activity.userId)).data))));
         }
         function validAudience(activity) {
-          return !('sharedBy' in activity)
-            || (activity.sharedBy == request.auth.uid && activity.type in ['text_post', 'micro_review']);
+          return (!('sharedBy' in activity) && !('audience' in activity))
+            || (activity.sharedBy == request.auth.uid
+              && ((!('audience' in activity) && activity.type in ['text_post', 'micro_review'])
+                || (activity.audience == 'followers'
+                  && (activity.type in ['text_post', 'micro_review']
+                    || (activity.type in ['add', 'status_change', 'rate', 'progress']
+                      && activity.keys().hasOnly(['userId', 'username', 'type', 'animeTitle', 'animeKitsuId',
+                        'animeImageUrl', 'context', 'timestamp', 'sharedBy', 'audience'])
+                      && activity.animeTitle is string && activity.animeKitsuId is string
+                      && activity.animeImageUrl is string && activity.context is string)))));
         }
         allow read: if canRead(resource.data);
         allow create: if signedIn() && request.resource.data.userId == request.auth.uid
           && validAudience(request.resource.data);
         allow update: if signedIn() && isOwner(resource.data.userId)
-          && request.resource.data.userId == resource.data.userId && validAudience(request.resource.data);
+          && request.resource.data.userId == resource.data.userId && validAudience(request.resource.data)
+          && (request.resource.data.get('audience', '') != 'followers' || resource.data.get('audience', '') == 'followers');
         allow delete: if signedIn() && isOwner(resource.data.userId);
 
         match /interactions/{interactionId} {
