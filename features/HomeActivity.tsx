@@ -88,7 +88,7 @@ export function HomeActivity({ db, appId, userId, accentText, onOpen }: {
         )}
       </li>)}
     </ul> : <p role="status" className="py-4 text-xs text-gray-400">
-      {status === 'loading' ? 'Loading activity…' : status === 'error' ? 'Activity could not be loaded.' : filter === 'following' ? 'No recent shared activity from people you follow.' : 'No recent activity.'}
+      {status === 'loading' ? 'Loading activity…' : status === 'error' ? 'Activity could not be loaded.' : filter === 'following' ? 'No recent posts from mutual follows.' : 'No recent activity.'}
     </p>}
   </section>;
 }

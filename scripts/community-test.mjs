@@ -6,7 +6,7 @@ import ts from 'typescript';
 const source = await readFile(new URL('../services/community-activity.ts', import.meta.url), 'utf8');
 const code = ts.transpile(source.replace(/^import .*\n/m, '').replace(/^export /gm, ''), { target: ts.ScriptTarget.ES2022 });
 const listeners = [];
-const service = runInNewContext(code + '\n({ followedIds, groupEpisodeActivity, subscribeCommunityActivity });', {
+const service = runInNewContext(code + '\n({ followedIds, followingPeople, groupEpisodeActivity, subscribeCommunityActivity });', {
   collection: (_db, path) => path, doc: (_db, path) => path, limit: count => ({ count }), orderBy: (...order) => ({ order }),
   where: (...filter) => ({ filter }), query: (...args) => args,
   onSnapshot: (request, ...args) => {
@@ -17,6 +17,11 @@ const service = runInNewContext(code + '\n({ followedIds, groupEpisodeActivity, 
   },
 });
 assert.deepEqual(Array.from(service.followedIds(['a', { uid: 'b' }, 'a', null, { uid: 'invalid/path' }])), ['a', 'b']);
+const legacyFriends = [{ uid: 'a', username: 'Alice' }, 'stale'];
+const following = service.followingPeople({ followingIds: ['a', 'missing-in-legacy'], friends: legacyFriends });
+assert.deepEqual(Array.from(following, person => [person.uid, person.username]), [['a', 'Alice'], ['missing-in-legacy', 'AniLog member']]);
+assert.deepEqual(Array.from(service.followingPeople({ friends: legacyFriends }), person => person.uid), ['a', 'stale']);
+assert.equal(service.followingPeople({ followingIds: [], friends: legacyFriends }).length, 0);
 const published = [];
 const stop = service.subscribeCommunityActivity({}, 'demo', 'me', ['me', 'friend'], 2, items => published.push(items), assert.fail);
 assert.equal(listeners.length, 2);

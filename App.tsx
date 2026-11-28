@@ -1084,7 +1084,8 @@ function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
     let unsubscribe = () => {};
     getDoc(doc(db, `artifacts/${appId}/public/data/users/${userId}`)).then(profile => {
       if (disposed) return;
-      const authors = followedIds(profile.data()?.friends || []).filter(id => id !== userId);
+      const data = profile.data();
+      const authors = followedIds(data?.followingIds || data?.friends || []).filter(id => id !== userId);
       unsubscribe = subscribeCommunityActivity(db, appId, userId, authors, 12, next => {
         if (disposed) return;
         setItems(next); setError(false); setLoading(false);

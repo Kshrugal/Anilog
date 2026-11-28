@@ -5,6 +5,15 @@ export function followedIds(friends: unknown[]) {
     .filter((id): id is string => typeof id === 'string' && id.length > 0 && !id.includes('/')))];
 }
 
+export function followingPeople(profile: { followingIds?: unknown[]; friends?: unknown[] } | undefined) {
+  const friends = profile?.friends || [];
+  const names = new Map(friends.flatMap(friend => {
+    const person = friend as { uid?: unknown; username?: unknown } | null;
+    return typeof person?.uid === 'string' && typeof person.username === 'string' ? [[person.uid, person.username] as const] : [];
+  }));
+  return followedIds(profile?.followingIds || friends).map(uid => ({ uid, username: names.get(uid) || 'AniLog member' }));
+}
+
 const EPISODE_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
 
 function compareActivity(a, b) {
