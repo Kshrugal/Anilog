@@ -56,8 +56,8 @@
 .pie-segments button[aria-pressed=true] svg { color:var(--editor-accent); }
 .pie-picker { min-width:0; }
 .pie-picker > .pie-segments { margin-bottom:16px; }
-.pie-picker-toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px; }
-.pie-source-tabs { display:flex; align-items:center; gap:17px; }
+.pie-picker-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:6px 10px; margin-bottom:12px; }
+.pie-source-tabs { display:flex; flex-wrap:wrap; align-items:center; gap:2px 17px; }
 .pie-source-tabs button { display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 0; color:#73737e; }
 .pie-source-tabs button[aria-pressed=true] { color:#e4e4e7; }
 .pie-source-tabs button[aria-pressed=true] svg { color:var(--editor-accent); }

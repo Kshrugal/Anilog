@@ -110,6 +110,27 @@ test('artwork choices expose selected state, duplicate prevention and safe title
   assert.match(html, /aria-pressed="true"/); assert.match(html, /disabled=""/);
   assert.doesNotMatch(html, /<script>/); assert.match(html, /&lt;script&gt;/);
 });
+test('anime cast lookup uses the selected AniList work and returns shared character identities', async () => {
+  const calls = [];
+  const fetch = async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ data: { Media: { characters: {
+      nodes: [
+        { id: 1, name: { full: 'Naruto' }, image: { large: 'https://s4.anilist.co/naruto.jpg' } },
+        { id: 2, name: { full: 'Missing art' } },
+      ], pageInfo: { hasNextPage: true },
+    } } } }) };
+  };
+  const { getAnimeCast } = await bind('../services/profile-artwork.ts', { ...identity, fetch }, 'getAnimeCast');
+  const signal = new AbortController().signal;
+  const cast = await getAnimeCast('anilist:20', 2, signal);
+  assert.deepEqual(calls[0].variables, { id: 20, page: 2 });
+  assert.match(calls[0].query, /Media\(id: \$id, type: ANIME/);
+  assert.equal(cast.hasNextPage, true);
+  assert.deepEqual(cast.items.map(item => [item.id, item.kind]), [['anilist:1', 'characters']]);
+  await assert.rejects(getAnimeCast('vndb:v20', 1, signal), /Choose an anime from AniList/);
+  assert.equal(calls.length, 1);
+});
 test('identity normalization rejects unsafe URLs, malformed favorites and private fields', () => {
   const value = identity.normalizeIdentity({ accent: '__proto__', bio: 'x'.repeat(2200), privateSettings: { email: 'secret' }, avatar: { url: 'javascript:alert(1)', zoom: 99 }, modules: ['bio', 'bio', 'journal'], showcases: { anime: [favorite, favorite, { ...favorite, source: 'vndb' }, { ...favorite, id: 'anilist:3', title: '' }] } });
   assert.equal(value.accent, 'cyan'); assert.equal(value.bio.length, 2000); assert.equal(value.avatar.url, ''); assert.equal(value.avatar.zoom, 3);
