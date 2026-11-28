@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { doc, onSnapshot, type Firestore } from 'firebase/firestore';
 import { followedIds, subscribeCommunityActivity } from '../services/community-activity';
+import { activityTitle } from '../services/media-following';
 import { CommunityAvatar, useCommunityPortraits } from './CommunityIdentity';
 
 const activityFilters = [
@@ -12,12 +13,13 @@ const activityFilters = [
 const previewCount = 4;
 const activityDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
-export function HomeActivity({ db, appId, userId, accentText, onOpen }: {
+export function HomeActivity({ db, appId, userId, accentText, onOpen, onSelectTitle }: {
   db: Firestore;
   appId: string;
   userId: string;
   accentText: string;
   onOpen: () => void;
+  onSelectTitle: (title: NonNullable<ReturnType<typeof activityTitle>>) => void;
 }) {
   const [items, setItems] = useState<any[]>([]);
   const [status, setStatus] = useState('loading');
@@ -70,23 +72,28 @@ export function HomeActivity({ db, appId, userId, accentText, onOpen }: {
         }}>{option.label}</button>)}
     </div>
     {items.length ? <ul className="mt-1 divide-y divide-white/10 [--avatar-size:30px]">
-      {items.map(item => <li key={item.id} className="flex min-w-0 items-center gap-3 py-2">
-        <CommunityAvatar name={item.username} portrait={portraits[item.userId]} />
-        <div className="min-w-0 flex-1">
-          <p className="line-clamp-2 break-words text-xs text-gray-300">
-            <span className="font-semibold text-white">{item.username || 'Anilog member'}</span>{' '}
-            {item.context}{' '}<span className={accentText}>{item.animeTitle}</span>
-          </p>
-          {(item.type === 'text_post' || item.type === 'micro_review') && item.noteContent && (
-            <p className="mt-0.5 truncate text-xs text-gray-400">{item.spoiler ? 'Contains spoilers' : item.noteContent}</p>
+      {items.map(item => {
+        const title = activityTitle(item);
+        return <li key={item.id} className="flex min-w-0 items-center gap-3 py-2">
+          <CommunityAvatar name={item.username} portrait={portraits[item.userId]} />
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-2 break-words text-xs text-gray-300">
+              <span className="font-semibold text-white">{item.username || 'Anilog member'}</span>{' '}
+              {item.context}{' '}
+              {title && item.animeTitle ? <button type="button" aria-haspopup="dialog" onClick={() => onSelectTitle(title)} className={`inline rounded-sm text-left hover:underline focus-visible:outline focus-visible:outline-2 ${accentText}`}>{item.animeTitle}</button>
+                : <span className={accentText}>{item.animeTitle}</span>}
+            </p>
+            {(item.type === 'text_post' || item.type === 'micro_review') && item.noteContent && (
+              <p className="mt-0.5 truncate text-xs text-gray-400">{item.spoiler ? 'Contains spoilers' : item.noteContent}</p>
+            )}
+          </div>
+          {typeof item.timestamp?.seconds === 'number' && (
+            <time dateTime={new Date(item.timestamp.seconds * 1000).toISOString()} className="shrink-0 text-[11px] text-gray-400">
+              {activityDate.format(item.timestamp.seconds * 1000)}
+            </time>
           )}
-        </div>
-        {typeof item.timestamp?.seconds === 'number' && (
-          <time dateTime={new Date(item.timestamp.seconds * 1000).toISOString()} className="shrink-0 text-[11px] text-gray-400">
-            {activityDate.format(item.timestamp.seconds * 1000)}
-          </time>
-        )}
-      </li>)}
+        </li>;
+      })}
     </ul> : <p role="status" className="py-4 text-xs text-gray-400">
       {status === 'loading' ? 'Loading activity…' : status === 'error' ? 'Activity could not be loaded.' : filter === 'following' ? 'No recent activity from accounts you follow.' : 'No recent activity.'}
     </p>}

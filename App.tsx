@@ -18,7 +18,8 @@ import { usePublicLibrary } from './features/usePublicLibrary';
 import { usePrivateAppearance } from './features/usePrivateAppearance';
 import { useProfileIdentity } from './features/useProfileIdentity';
 import { followedIds, FOLLOWER_ACTIVITY_AUDIENCE, recentActivityId, subscribeCommunityActivity } from './services/community-activity';
-import { setFollowing, subscribeFollowNotices, type FollowNotice } from './services/follows';
+import { setFollowing, type FollowNotice } from './services/follows';
+import { useFollowInbox } from './features/useFollowInbox';
 import { usernameSearchKey } from './services/people-search';
 import { CommunityAvatar, useCommunityPortraits } from './features/CommunityIdentity';
 import { IdentityImage } from './features/ProfileIdentityVisual';
@@ -1046,24 +1047,20 @@ function PreviewBanner() {
   );
 }
 
-function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
+function NotificationCenter({ db, userId, onClose, setPage, openUserProfile, notices = [], noticeError = false }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [notices, setNotices] = useState<FollowNotice[]>([]);
-  const [noticeError, setNoticeError] = useState(false);
   const [following, setFollowingIds] = useState<string[] | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     if (!db || !userId) return;
-    const stopNotices = subscribeFollowNotices(db, appId, userId, setNotices, () => setNoticeError(true));
-    const stopProfile = onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), profile => {
+    return onSnapshot(doc(db, `artifacts/${appId}/public/data/users/${userId}`), profile => {
       const data = profile.data();
       setFollowingIds(followedIds(data?.followingIds || data?.friends || []));
     }, () => setFollowingIds(null));
-    return () => { stopNotices(); stopProfile(); };
   }, [db, userId]);
 
   const followBack = async (notice: FollowNotice) => {
@@ -1134,15 +1131,16 @@ function NotificationCenter({ db, userId, onClose, setPage, openUserProfile }) {
   );
 }
 
-function HeaderTools({ guestMode, setPage, onCommands, onNotifications }) {
+function HeaderTools({ guestMode, setPage, onCommands, onNotifications, unreadNotifications = false }) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef(null);
   const triggerRef = useRef(null);
   const tools = [
     { label: 'Schedule', Icon: ScheduleIcon, action: () => setPage('schedule') },
     { label: 'Decks', Icon: DecksIcon, action: () => setPage('decks') },
-    ...(!guestMode ? [{ label: 'Notifications', Icon: BellIcon, action: onNotifications }] : []),
+    ...(!guestMode ? [{ label: 'Notifications', Icon: BellIcon, action: onNotifications, unread: unreadNotifications }] : []),
   ];
+  const unreadDot = <span aria-hidden="true" className="absolute right-1 top-1 h-2 w-2 rounded-full bg-rose-400 ring-2 ring-[#0b0d10]" />;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1166,12 +1164,12 @@ function HeaderTools({ guestMode, setPage, onCommands, onNotifications }) {
   return (
     <>
       <div className="hidden items-center space-x-2 sm:flex">
-        {tools.map(({ label, Icon, action }) => <motion.button key={label} whileTap={{ scale: 0.9 }} onClick={action} title={label} aria-label={label} className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/5"><Icon className="w-5 h-5" /></motion.button>)}
+        {tools.map(({ label, Icon, action, unread }) => <motion.button key={label} whileTap={{ scale: 0.9 }} onClick={action} title={label} aria-label={unread ? 'Notifications, unread' : label} className="relative p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/5"><Icon className="w-5 h-5" />{unread && unreadDot}</motion.button>)}
       </div>
       <div ref={menuRef} className="relative sm:hidden">
-        <motion.button ref={triggerRef} type="button" whileTap={{ scale: 0.9 }} onClick={() => setIsOpen(open => !open)} title="More tools" aria-label="More tools" aria-expanded={isOpen} aria-controls="header-tools-menu" className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/5"><MenuIcon className="h-5 w-5" /></motion.button>
+        <motion.button ref={triggerRef} type="button" whileTap={{ scale: 0.9 }} onClick={() => setIsOpen(open => !open)} title="More tools" aria-label={unreadNotifications ? 'More tools, unread notifications' : 'More tools'} aria-expanded={isOpen} aria-controls="header-tools-menu" className="relative flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-white/5"><MenuIcon className="h-5 w-5" />{unreadNotifications && unreadDot}</motion.button>
         {isOpen && <nav id="header-tools-menu" aria-label="More tools" className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-white/10 bg-[#0a0a0a]/95 p-2 shadow-2xl backdrop-blur-2xl">
-          {tools.map(({ label, Icon, action }) => <button key={label} type="button" onClick={() => { setIsOpen(false); triggerRef.current?.focus(); action(); }} className="flex w-full items-center gap-3 rounded-lg p-3 text-left text-sm text-gray-300 hover:bg-white/10 hover:text-white"><Icon className="h-5 w-5" />{label}</button>)}
+          {tools.map(({ label, Icon, action, unread }) => <button key={label} type="button" aria-label={unread ? 'Notifications, unread' : undefined} onClick={() => { setIsOpen(false); triggerRef.current?.focus(); action(); }} className="relative flex w-full items-center gap-3 rounded-lg p-3 text-left text-sm text-gray-300 hover:bg-white/10 hover:text-white"><Icon className="h-5 w-5" />{label}{unread && unreadDot}</button>)}
         </nav>}
       </div>
     </>
@@ -1193,6 +1191,8 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const closeNotifications = useCallback(() => setIsNotificationsOpen(false), []);
+  const followInbox = useFollowInbox(db, appId, guestMode ? null : userId, isNotificationsOpen);
   const page = getPageFromPath(location.pathname);
   const targetProfileUid = useMemo(() => {
     if (page !== 'user_profile') return null;
@@ -1542,7 +1542,7 @@ export default function App() {
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <CommandPalette isOpen={isCmdOpen} onClose={() => setIsCmdOpen(false)} setPage={setPage} theme={theme} setThemeId={setThemeId} userId={guestMode ? null : userId} />
         
-        {isNotificationsOpen && !guestMode && <NotificationCenter key={userId} db={db} userId={userId} onClose={() => setIsNotificationsOpen(false)} setPage={setPage} openUserProfile={openUserProfile} />}
+        {isNotificationsOpen && !guestMode && <NotificationCenter key={userId} db={db} userId={userId} onClose={closeNotifications} setPage={setPage} openUserProfile={openUserProfile} notices={followInbox.notices} noticeError={followInbox.error} />}
         <div className="anilog-backdrop" data-backdrop={backdrop} style={{ '--scene-accent': theme.scrollbarThumb } as React.CSSProperties} aria-hidden="true" />
         <StarField active={showAmbient && !reducedMotion} />
         <MouseTrail themeId={themeId} active={showTrail && !reducedMotion} />
@@ -1555,7 +1555,7 @@ export default function App() {
               {APP_NAME}
             </button>
             <div className="ml-auto flex shrink-0 items-center space-x-0.5 sm:space-x-2">
-              <HeaderTools guestMode={guestMode} setPage={setPage} onCommands={() => setIsCmdOpen(true)} onNotifications={() => setIsNotificationsOpen(true)} />
+              <HeaderTools guestMode={guestMode} setPage={setPage} onCommands={() => setIsCmdOpen(true)} onNotifications={() => setIsNotificationsOpen(true)} unreadNotifications={followInbox.unread} />
               {!guestMode && <motion.button whileTap={{ scale: 0.9 }} onClick={() => openUserProfile({ uid: userId, username })} title="Profile" aria-label="Profile" className={`p-2 rounded-full transition-all duration-300 ${page === "user_profile" && targetProfileUid === userId ? `bg-white/10 text-white ${theme.glow}` : "text-gray-400 hover:text-white hover:bg-white/5"}`}>
                 {ownIdentity.identity.avatar.url ? <IdentityImage image={ownIdentity.identity.avatar} className="h-6 w-6 rounded-full" /> : <ProfileIcon />}
               </motion.button>}

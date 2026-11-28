@@ -7,7 +7,7 @@ export interface FollowNotice {
   userId: string;
   username: string;
   direction: 'incoming' | 'outgoing';
-  timestamp?: { seconds: number };
+  timestamp?: { seconds: number; nanoseconds?: number };
 }
 
 export async function setFollowing(db: Firestore, appId: string, uid: string, target: FollowPerson, following: boolean) {

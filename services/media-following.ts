@@ -7,6 +7,18 @@ export function mediaFollowingId(media: unknown) {
   return /^(?:anilist:|v)?\d+$/.test(id) ? id : '';
 }
 
+export function activityTitle(item: {
+  animeKitsuId?: string | number;
+  animeTitle?: string;
+  animeImageUrl?: string;
+  mediaType?: string;
+  provider?: string;
+}) {
+  const kitsuId = mediaFollowingId({ kitsuId: item.animeKitsuId, mediaType: item.mediaType, provider: item.provider });
+  if (!kitsuId) return null;
+  return { kitsuId, title: item.animeTitle, imageUrl: item.animeImageUrl };
+}
+
 const scoreOutOfTen = (score: unknown) => typeof score === 'number' && score > 0 && score <= 10 ? score : null;
 const progressCount = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 

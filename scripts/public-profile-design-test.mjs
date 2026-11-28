@@ -87,6 +87,7 @@ function renderProfile(state, props = {}) {
     useFranchiseCatalogue: () => ({ catalogue: {}, state: { loading: false } }),
     AnalyticsDashboard: props => React.createElement('div', { 'data-public-statistics': props.title, 'data-editable': String(props.editableGroups) }),
     ActivityHeatmap: () => React.createElement('div'), groupEpisodeActivity: items => items, LockIcon: icons.Lock, SettingsIcon: icons.Settings, LogoutIcon: icons.LogOut,
+    AnimeDetailsModal: props => React.createElement('div', { 'data-log-owner': props.ownerId, 'data-log-read-only': String(props.readOnly), 'data-shared-progress': props.sharedProgress?.username }),
   };
   const Page = new Function(...Object.keys(bound), `${compile(component.getText(ast).replace(/^export /, ''))};return UserProfilePage;`)(...Object.values(bound));
   return renderToStaticMarkup(React.createElement(Page, { db: {}, currentUserId: 'me', targetUser: { uid: 'friend', username: 'Friend' }, readOnly: false, ...props }));
@@ -98,6 +99,12 @@ test('account controls appear only on the signed-in owner profile', () => {
   assert.match(renderProfile(state, props), /aria-label="Sign out"/);
   assert.doesNotMatch(renderProfile({}, { onLogout() {} }), /Manage account|aria-label="Sign out"/);
   assert.doesNotMatch(renderProfile({ loadedTarget: { ...state.loadedTarget, readOnly: true } }, { ...props, readOnly: true }), /Manage account|aria-label="Sign out"/);
+});
+test('a member can track a title from another profile in their own log', () => {
+  const state = { selectedAnimeData: entries[0], selectedOwnerId: 'friend' };
+  assert.match(renderProfile(state), /data-log-owner="me" data-log-read-only="false" data-shared-progress="Friend"/);
+  assert.match(renderProfile({ ...state, loadedTarget: { targetUid: 'friend', currentUserId: null, readOnly: true } }, { currentUserId: null, readOnly: true }), /data-log-owner="friend" data-log-read-only="true"/);
+  assert.doesNotMatch(renderProfile({ ...state, libraryPrivate: true }), /data-log-owner/);
 });
 test('default bio renders exactly once and a deliberately reordered bio keeps its position', () => {
   const value = identity.defaultIdentity(); value.bio = 'Unique introduction fixture';

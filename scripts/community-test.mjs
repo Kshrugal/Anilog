@@ -113,7 +113,7 @@ const pathValue = path => {
   if (uid === `one-way/publicLibrary/${mediaId}`) return { kitsuId: mediaId, status: 'completed', score: 10 };
   assert.fail(path);
 };
-const detail = runInNewContext(await tsSource('profile') + await tsSource('media-following') + '\n({ loadMediaFollowing, followingRow, mediaFollowingId });', {
+const detail = runInNewContext(await tsSource('profile') + await tsSource('media-following') + '\n({ loadMediaFollowing, followingRow, mediaFollowingId, activityTitle });', {
   followedIds: service.followedIds,
   doc: (_db, path) => path, collection: (_db, path) => path, query: (...args) => args, where: (...args) => args, limit: count => count,
   getDocFromServer: async path => ({ data: () => pathValue(path) }),
@@ -128,6 +128,12 @@ assert.equal(detail.mediaFollowingId({ provider: 'vndb', id: 20 }), 'v20');
 assert.equal(detail.mediaFollowingId({ provider: 'anilist', id: 20 }), mediaId);
 assert.equal(detail.mediaFollowingId({ id: 20 }), '20');
 assert.equal(detail.mediaFollowingId({ id: 'invalid/path' }), '');
+assert.equal(detail.activityTitle({ animeKitsuId: 'anilist:20', animeTitle: 'Anime' }).kitsuId, 'anilist:20');
+assert.equal(detail.activityTitle({ animeKitsuId: 'v20', animeTitle: 'Visual novel' }).kitsuId, 'v20');
+assert.equal(detail.activityTitle({ animeKitsuId: 20, mediaType: 'vn' }).kitsuId, 'v20');
+assert.equal(detail.activityTitle({ animeKitsuId: '20' }).kitsuId, '20');
+assert.equal(detail.activityTitle({ animeKitsuId: 'invalid/path', animeTitle: 'Invalid link' }), null);
+assert.equal(detail.activityTitle({ animeTitle: 'Text only' }), null);
 const controller = new AbortController();
 const detailRows = await detail.loadMediaFollowing({}, 'demo', 'me', mediaId, controller.signal);
 assert.deepEqual(Array.from(detailRows, row => row.uid), ['friend', 'one-way']);

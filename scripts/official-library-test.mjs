@@ -83,7 +83,7 @@ function render(name, state, context = {}) {
     const fixtures = { loading: 'ready', all: state.activityFilter || 'all' };
     return [Array.isArray(initial) ? state.activityItems || [] : fixtures[String(initial)], () => {}];
   };
-  bindings.HomeActivity = new Function('React', 'useState', 'useEffect', 'useCommunityPortraits', 'CommunityAvatar', 'ArrowRight', `${ts.transpileModule(activityBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeActivity;`)(React, activityState, () => {}, () => ({}), stub('Avatar'), 'i');
+  bindings.HomeActivity = new Function('React', 'useState', 'useEffect', 'useCommunityPortraits', 'CommunityAvatar', 'ArrowRight', 'activityTitle', `${ts.transpileModule(activityBody, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText};return HomeActivity;`)(React, activityState, () => {}, () => ({}), stub('Avatar'), 'i', item => item.animeKitsuId ? { kitsuId: item.animeKitsuId } : null);
   const js = ts.transpileModule(node.getText(ast).replace(/^export /, ''), { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   const Page = new Function(...Object.keys(bindings), `${js}\nreturn ${name};`)(...Object.values(bindings));
   return renderToStaticMarkup(React.createElement(Page, { db: {}, userId: 'test', username: 'Viewer' }));
@@ -99,7 +99,7 @@ const list = [
 
 test('Home keeps the resume hero first and shows recent activity above the library grid', () => {
   const html = render('HomePage', { myList: list, loading: false, activityItems: [
-    { id: 'progress', username: 'Viewer', context: 'watched episodes 2–4 of', animeTitle: 'Active Anime' },
+    { id: 'progress', username: 'Viewer', context: 'watched episodes 2–4 of', animeTitle: 'Active Anime', animeKitsuId: 'anilist:20' },
     { id: 'review', username: 'Friend', type: 'micro_review', context: 'reviewed', animeTitle: 'Finished Anime', spoiler: true, noteContent: 'Hidden ending' },
   ] });
   for (const className of officialHomeClasses) {
@@ -110,6 +110,7 @@ test('Home keeps the resume hero first and shows recent activity above the libra
   assert.ok(html.indexOf('Recent activity') < html.indexOf('data-component="AnimeCard"'));
   assert.match(html, /View activity/);
   assert.match(html, /watched episodes 2–4 of/);
+  assert.match(html, /<button[^>]*>Active Anime<\/button>/);
   assert.match(html, /Contains spoilers/);
   assert.doesNotMatch(html, /Hidden ending/);
   assert.ok(!html.includes('Up next'));

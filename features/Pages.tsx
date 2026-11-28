@@ -74,7 +74,7 @@ import {
 import { getAniListAiringSchedule, getAniListDiscovery, getAniListPersonalized, getAniListSeasonal, getAniListUserAnimeList, searchAniList } from "../services/anilist";
 import { nextProgress, planImport, importPayload, resetBackup } from "../services/tracking";
 import { MediaFollowing } from './MediaFollowing';
-import { mediaFollowingId } from '../services/media-following';
+import { activityTitle, mediaFollowingId } from '../services/media-following';
 import { VnJournal } from './VnJournal';
 import { VnDiscovery } from './VnDiscovery';
 import { VN_LANGUAGES, VN_PLATFORMS, vnSynopsis } from '../services/vndb';
@@ -342,6 +342,9 @@ export function HomePage({ db, userId, username, showToast }) {
   }, []);
   const resumeEntries = useMemo(() => resumeQueue(myList, mediaFilter), [myList, mediaFilter]);
   const heroAnime = resumeEntries.find(entry => String(entry.id) === resumeId) || resumeEntries[0];
+  const openActivityTitle = (media: NonNullable<ReturnType<typeof activityTitle>>) => {
+    setSelectedAnimeData(myList.find(entry => profileMediaId(entry) === media.kitsuId) || media);
+  };
   const statusCounts = useMemo(() => libraryStatusCounts(myList, mediaFilter), [myList, mediaFilter]);
   return (
     <div className="flex flex-col space-y-6">
@@ -357,7 +360,7 @@ export function HomePage({ db, userId, username, showToast }) {
 
       <div className={`grid gap-4 ${heroAnime && !loading && !error ? 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : ''}`}>
         {heroAnime && !loading && !error && <HomeResume entries={resumeEntries} selected={heroAnime} theme={theme} pending={pendingProgress.includes(String(heroAnime.id))} onSelect={setResumeId} onOpen={entry => setSelectedAnimeKitsuId(entry.kitsuId || entry.id)} onIncrement={handleQuickIncrement} />}
-        {db && userId && <HomeActivity key={userId} db={db} appId={appId} userId={userId} accentText={theme.accentText} onOpen={() => setPage('social')} />}
+        {db && userId && <HomeActivity key={userId} db={db} appId={appId} userId={userId} accentText={theme.accentText} onOpen={() => setPage('social')} onSelectTitle={openActivityTitle} />}
       </div>
 
       <div className="space-y-3">
@@ -731,13 +734,35 @@ function SocialActions({ db, activityId, userId, username, readOnly }) {
     const [interactions, setInteractions] = useState([]);
     const [showComments, setShowComments] = useState(false);
     const [loaded, setLoaded] = useState(false);
+    const [replyError, setReplyError] = useState(false);
     const [draft, setDraft] = useState('');
     const [sending, setSending] = useState(false);
+    const interactionsPath = `artifacts/${appId}/public/data/activity/${activityId}/interactions`;
+    useEffect(() => {
+        if (!showComments || !db || !activityId) return;
+        setInteractions([]);
+        setLoaded(false);
+        setReplyError(false);
+        const thread = query(collection(db, interactionsPath), orderBy('timestamp', 'desc'), limit(50));
+        return onSnapshot(thread, { includeMetadataChanges: true }, snapshot => {
+            if (snapshot.metadata.fromCache) {
+                setInteractions([]);
+                setLoaded(false);
+                return;
+            }
+            setInteractions(snapshot.docs.map(entry => ({ ...entry.data(), id: entry.id })).reverse());
+            setLoaded(true);
+        }, () => {
+            setInteractions([]);
+            setLoaded(false);
+            setReplyError(true);
+        });
+    }, [db, activityId, interactionsPath, showComments]);
     const loadInteractions = async () => {
         if (!db || !activityId) return [];
         try {
-            const snapshot = await getDocsFromServer(query(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), orderBy('timestamp', 'asc'), limit(50)));
-            const next = snapshot.docs.map(entry => ({ id: entry.id, ...entry.data() }));
+            const snapshot = await getDocsFromServer(query(collection(db, interactionsPath), orderBy('timestamp', 'desc'), limit(50)));
+            const next = snapshot.docs.map(entry => ({ ...entry.data(), id: entry.id })).reverse();
             setInteractions(next); setLoaded(true); return next;
         } catch (error) {
             console.error('Could not load reactions:', error); setLoaded(true); return [];
@@ -752,7 +777,7 @@ function SocialActions({ db, activityId, userId, username, readOnly }) {
             const ref = doc(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions/like_${userId}`);
             const ownLike = await getDoc(ref);
             if (ownLike.exists()) await deleteDoc(ref); else await setDoc(ref, { type: 'like', userId, username, timestamp: serverTimestamp() });
-            await loadInteractions();
+            if (!showComments) await loadInteractions();
         } catch (error) {
             console.error('Could not update reaction:', error);
         }
@@ -761,20 +786,20 @@ function SocialActions({ db, activityId, userId, username, readOnly }) {
         if (!draft.trim() || sending || readOnly) return;
         setSending(true);
         try {
-            await addDoc(collection(db, `artifacts/${appId}/public/data/activity/${activityId}/interactions`), { type: 'comment', userId, username, text: draft.trim().slice(0, 500), timestamp: serverTimestamp() });
-            setDraft(''); setShowComments(true); await loadInteractions();
+            await addDoc(collection(db, interactionsPath), { type: 'comment', userId, username, text: draft.trim().slice(0, 500), timestamp: serverTimestamp() });
+            setDraft('');
         } catch (error) {
             console.error('Could not post reply:', error);
         } finally {
             setSending(false);
         }
     };
-    const toggleComments = async () => { const opening = !showComments; setShowComments(opening); if (opening && !loaded) await loadInteractions(); };
-    return <div className="mt-3"><div className="flex gap-2"><button disabled={readOnly} onClick={toggleLike} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors ${liked ? 'bg-pink-500/15 text-pink-300' : 'bg-white/[0.03] text-gray-500 hover:text-white'} disabled:cursor-default`}><HeartIcon className={`h-3.5 w-3.5 ${liked ? 'fill-current' : ''}`} />{loaded && likes.length ? likes.length : 'Like'}</button><button onClick={toggleComments} className="flex items-center gap-1.5 rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-bold text-gray-500 hover:text-white"><CommentIcon className="h-3.5 w-3.5" />{loaded && comments.length ? comments.length : 'Reply'}</button></div>{showComments && <div className="mt-2 space-y-2 rounded-lg border border-white/5 bg-black/20 p-3">{loaded && comments.length === 0 && <p className="text-xs text-gray-600">No replies yet.</p>}{comments.map(comment => <p key={comment.id} className="text-xs text-gray-400"><b className="text-gray-200">{comment.username}</b> {comment.text}</p>)}{!readOnly && <div className="flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitComment(); }} maxLength={500} placeholder="Write a reply…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /><button disabled={!draft.trim() || sending} onClick={submitComment} className="rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40">Send</button></div>}</div>}</div>;
+    return <div className="mt-3"><div className="flex gap-2"><button disabled={readOnly} onClick={toggleLike} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors ${liked ? 'bg-pink-500/15 text-pink-300' : 'bg-white/[0.03] text-gray-500 hover:text-white'} disabled:cursor-default`}><HeartIcon className={`h-3.5 w-3.5 ${liked ? 'fill-current' : ''}`} />{loaded && likes.length ? likes.length : 'Like'}</button><button onClick={() => setShowComments(open => !open)} aria-expanded={showComments} className="flex items-center gap-1.5 rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-[10px] font-bold text-gray-500 hover:text-white"><CommentIcon className="h-3.5 w-3.5" />{loaded && comments.length ? comments.length : 'Reply'}</button></div>{showComments && <div className="mt-2 space-y-2 rounded-lg border border-white/5 bg-black/20 p-3">{replyError && <p role="alert" className="text-xs text-gray-400">Replies could not be loaded.</p>}{!replyError && !loaded && <p role="status" className="text-xs text-gray-400">Loading replies…</p>}{loaded && comments.length === 0 && <p className="text-xs text-gray-600">No replies yet.</p>}{comments.map(comment => <p key={comment.id} className="text-xs text-gray-400"><b className="text-gray-200">{comment.username}</b> {comment.text}</p>)}{!readOnly && <div className="flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitComment(); }} maxLength={500} placeholder="Write a reply…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" /><button disabled={!draft.trim() || sending} onClick={submitComment} className="rounded-lg bg-blue-600 px-3 text-xs font-bold text-white disabled:opacity-40">Send</button></div>}</div>}</div>;
 }
 
 export function SocialPage({ db, userId, username, showToast, openUserProfile, readOnly = false }) {
     const [feed, setFeed] = useState([]);
+    const [selectedTitle, setSelectedTitle] = useState<ReturnType<typeof activityTitle>>(null);
     const [users, setUsers] = useState([]);
     const [friends, setFriends] = useState([]);
     const [searchQuery, setSearchQuery] = useState("");
@@ -874,41 +899,49 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                         <textarea value={postText} onChange={event => setPostText(event.target.value)} maxLength={composerType === 'review' ? 1000 : 500} placeholder={composerType === 'review' ? 'Your spoiler-free quick take…' : 'Share what you are watching or thinking…'} className="h-24 w-full resize-none rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white placeholder-gray-600" />
                         <div className="mt-3 flex items-center gap-3"><label className="flex items-center gap-2 text-[10px] font-bold text-gray-500"><input type="checkbox" checked={spoiler} onChange={event => setSpoiler(event.target.checked)} className="accent-red-500" /> Contains spoilers</label><span className="ml-auto text-[10px] text-gray-600">{postText.length}/{composerType === 'review' ? 1000 : 500}</span><button onClick={publishPost} disabled={!postText.trim() || posting || (composerType === 'review' && !reviewTitle)} className={`rounded-xl px-5 py-2 text-xs font-black text-white disabled:opacity-40 ${theme.button}`}>{posting ? 'Publishing…' : 'Publish'}</button></div>
                     </div>}
-                    {feed.map(item => (
-                        <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            key={item.id} 
-                            className="bg-white/[0.035] border border-white/10 p-4 rounded-lg flex gap-3 items-start hover:bg-white/5 transition-colors group"
-                        >
-                            <CommunityAvatar name={item.username} portrait={portraits[item.userId]} />
-                            <div className="min-w-0 flex-grow break-words">
-                                <p className="text-gray-300 text-sm leading-relaxed">
-                                    <button type="button" className="font-semibold text-white hover:underline" onClick={() => openUserProfile({ uid: item.userId, username: item.username })}>{item.username || 'AniLog member'}</button>{' '}
-                                    <span className="opacity-60 mr-1">{item.context}</span>{' '}
-                                    <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>
-                                </p>
-                                {item.noteContent && !item.spoiler && (
-                                    <div className="mt-2 bg-black/40 border-l-2 border-white/20 p-2 rounded text-xs text-gray-400 italic">
-                                        "{item.noteContent}"
-                                    </div>
-                                )}
-                                {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
-                                <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
-                                <SocialActions db={db} activityId={item.id} userId={userId} username={username} readOnly={readOnly} />
-                                {item.episodes && <details className="mt-2 text-xs text-gray-400">
-                                    <summary className="cursor-pointer hover:text-white">Individual episode activity</summary>
-                                    {item.episodes.slice(1).map(episode => <div key={episode.id} className="mt-2 border-l border-white/10 pl-3">
-                                        <p>Episode {episode.number}</p>
-                                        <SocialActions db={db} activityId={episode.id} userId={userId} username={username} readOnly={readOnly} />
-                                    </div>)}
-                                </details>}
-                            </div>
-                            {item.animeImageUrl && (
-                                <img src={item.animeImageUrl} className="w-10 h-14 shrink-0 object-cover rounded-lg border border-white/10 group-hover:scale-105 transition-transform" loading="lazy" decoding="async" alt="" referrerPolicy="no-referrer" />
-                            )}
-                        </motion.div>
-                    ))}
+                    {feed.map(item => {
+                        const media = activityTitle(item);
+                        const openTitle = media ? () => setSelectedTitle(media) : undefined;
+                        return (
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                key={item.id}
+                                className="bg-white/[0.035] border border-white/10 p-4 rounded-lg flex gap-3 items-start hover:bg-white/5 transition-colors group"
+                            >
+                                <CommunityAvatar name={item.username} portrait={portraits[item.userId]} />
+                                <div className="min-w-0 flex-grow break-words">
+                                    <p className="text-gray-300 text-sm leading-relaxed">
+                                        <button type="button" className="font-semibold text-white hover:underline" onClick={() => openUserProfile({ uid: item.userId, username: item.username })}>{item.username || 'AniLog member'}</button>{' '}
+                                        <span className="opacity-60 mr-1">{item.context}</span>{' '}
+                                        {openTitle && item.animeTitle ? (
+                                            <button type="button" aria-haspopup="dialog" onClick={openTitle} className={`max-w-full rounded-sm break-words text-left font-bold hover:underline focus-visible:outline focus-visible:outline-2 ${theme.accentText}`}>{item.animeTitle}</button>
+                                        ) : <span className={`font-bold ${theme.accentText}`}>{item.animeTitle}</span>}
+                                    </p>
+                                    {item.noteContent && !item.spoiler && (
+                                        <div className="mt-2 bg-black/40 border-l-2 border-white/20 p-2 rounded text-xs text-gray-400 italic">
+                                            "{item.noteContent}"
+                                        </div>
+                                    )}
+                                    {item.noteContent && item.spoiler && <details className="mt-2 rounded-lg border border-red-500/15 bg-red-500/[0.04] p-2 text-xs text-gray-400"><summary className="cursor-pointer font-bold text-red-300">Spoiler — click to reveal</summary><p className="mt-2 italic">“{item.noteContent}”</p></details>}
+                                    <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-wider">{item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString() : 'Just now'}</p>
+                                    <SocialActions db={db} activityId={item.id} userId={userId} username={username} readOnly={readOnly} />
+                                    {item.episodes && <details className="mt-2 text-xs text-gray-400">
+                                        <summary className="cursor-pointer hover:text-white">Individual episode activity</summary>
+                                        {item.episodes.slice(1).map(episode => <div key={episode.id} className="mt-2 border-l border-white/10 pl-3">
+                                            <p>Episode {episode.number}</p>
+                                            <SocialActions db={db} activityId={episode.id} userId={userId} username={username} readOnly={readOnly} />
+                                        </div>)}
+                                    </details>}
+                                </div>
+                                {item.animeImageUrl && (openTitle ? (
+                                    <button type="button" onClick={openTitle} aria-haspopup="dialog" aria-label={`Open details for ${item.animeTitle || 'this title'}`} className="shrink-0 rounded-lg">
+                                        <img src={item.animeImageUrl} className="h-14 w-10 rounded-lg border border-white/10 object-cover transition-transform hover:scale-105" loading="lazy" decoding="async" alt="" referrerPolicy="no-referrer" />
+                                    </button>
+                                ) : <img src={item.animeImageUrl} className="h-14 w-10 shrink-0 rounded-lg border border-white/10 object-cover" loading="lazy" decoding="async" alt="" referrerPolicy="no-referrer" />)}
+                            </motion.div>
+                        );
+                    })}
                     {feedStatus === 'loading' && <p role="status" className="py-8 text-sm text-gray-400">Loading activity…</p>}
                     {feedStatus === 'error' && <p role="alert" className="py-8 text-sm text-gray-400">Activity could not be loaded.</p>}
                     {feedStatus === 'ready' && !feed.length && <div className="text-center py-20 text-gray-500 font-medium">No recent activity from you or the people you follow.</div>}
@@ -965,11 +998,12 @@ export function SocialPage({ db, userId, username, showToast, openUserProfile, r
                 </div>
             )}
 
+            {selectedTitle && <AnimeDetailsModal key={selectedTitle.kitsuId} anime={selectedTitle} db={db} userId={userId} ownerId={userId} username={username} readOnly={readOnly} onClose={() => setSelectedTitle(null)} />}
         </div>
     )
 }
 
-function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined, readOnly = false, hideFollowing = false }) {
+function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onComplete = undefined, readOnly = false, hideFollowing = false, sharedProgress = undefined }) {
     const { theme } = useContext(ThemeContext);
     const dialogRef = useRef(null);
     const closeRef = useRef(onClose);
@@ -1037,7 +1071,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
     const resolvedRuntime = runtimeFor({ ...anime, totalEpisodes: totalEps, durationMinutes: Number(details.episodeLength || anime.durationMinutes || 0), showType: details.showType || anime.showType });
     const backdrop = details.coverImage?.original || anime.attributes?.coverImage?.original || poster;
 
-    const isOwner = userId === ownerId && !readOnly;
+    const isOwner = Boolean(userId) && userId === ownerId && !readOnly;
     const followingMediaId = mediaFollowingId(anime);
     const showFollowing = !hideFollowing && db && userId && followingMediaId && auth?.currentUser?.uid === userId && !auth.currentUser.isAnonymous;
 
@@ -1393,6 +1427,10 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                         )}
                         </div></details>}
 
+                        {sharedProgress && <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <h3 className="break-words text-sm font-semibold text-white">{sharedProgress.username}’s library</h3>
+                            <p className="text-xs text-gray-400"><span className="capitalize">{sharedProgress.status}</span>{' · '}{sharedProgress.progress}{sharedProgress.score > 0 && ` · ${sharedProgress.score}/10`}</p>
+                        </div>}
                         {readOnly && !ownerId ? (
                             <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-6 text-center">
                                 <p className="font-bold text-white">Want to add this to your list?</p>
@@ -1401,6 +1439,7 @@ function AnimeDetailsModal({ anime, onClose, db, userId, ownerId, username, onCo
                         ) : isOwner ? (
                             <fieldset disabled={!logLoaded || loading} className="min-w-0 space-y-6 border-t border-white/10 pt-6 disabled:opacity-60">
                                 {logError && !logLoaded && <legend className="px-2"><button onClick={() => setLoadAttempt(value => value + 1)} className="text-xs font-bold text-blue-300 hover:text-white">Retry loading log</button></legend>}
+                                {sharedProgress && <h3 className="text-sm font-semibold text-white">Your log</h3>}
                                 {!logLoaded && !logError && <p role="status" className="text-sm text-gray-400">Loading your log...</p>}
                                 {logError && (!isVn || !logLoaded) && <div role="alert" className="text-sm text-red-300">{logError}</div>}
                                 <div className="flex justify-between items-center">
@@ -2454,6 +2493,7 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
     const identityState = useProfileIdentity(db, appId, targetUid);
     const identity = identityState.identity;
     const visitor = readOnly || visitorPreview || targetUid !== currentUserId;
+    const canEditOwnLog = Boolean(currentUserId) && !readOnly && !visitorPreview;
     const [loadedTarget, setLoadedTarget] = useState(null);
     const [list, setList] = useState([]);
     const [myList, setMyList] = useState([]);
@@ -2716,10 +2756,16 @@ export function UserProfilePage({ db, currentUserId, currentUsername, targetUser
                     onClose={() => { setSelectedAnimeData(null); setSelectedOwnerId(null); }}
                     db={db} 
                     userId={currentUserId} 
-                    ownerId={selectedOwnerId}
+                    ownerId={canEditOwnLog ? currentUserId : selectedOwnerId}
                     username={currentUsername}
-                    readOnly={visitor || !currentUserId}
+                    readOnly={!canEditOwnLog}
                     hideFollowing={visitorPreview || readOnly}
+                    sharedProgress={visitor && canEditOwnLog ? {
+                        username: targetUsername,
+                        status: profileIsVn(selectedAnimeData) && selectedAnimeData.status === 'watching' ? 'reading' : selectedAnimeData.status,
+                        progress: profileProgress(selectedAnimeData),
+                        score: Number(selectedAnimeData.score),
+                    } : undefined}
                 />
             )}
   </div>
